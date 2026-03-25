@@ -1,0 +1,9 @@
+# requirements.txt - BunkerM Extended Utilities
+
+# Core dependencies for scripts
+psycopg2-binary>=2.9.9    # PostgreSQL adapter
+requests>=2.31.0           # HTTP library
+
+# Optional for advanced features
+paho-mqtt>=1.6.1          # MQTT client (for testing)
+python-dotenv>=1.0.0      # Environment variables

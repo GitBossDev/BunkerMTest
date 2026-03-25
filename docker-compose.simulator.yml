@@ -1,0 +1,51 @@
+# ============================================================================
+# Docker Compose - Simulador de Planta de Tratamiento de Agua
+# ============================================================================
+# 
+# PREREQUISITO: BunkerM debe estar corriendo (.\deploy.ps1 start-bunkerm)
+# El simulador publica datos al broker MQTT de BunkerM
+#
+# Ejecutar con: docker-compose -f docker-compose.simulator.yml --env-file .env.dev up
+# O usar: .\simulator.ps1 start
+# ============================================================================
+
+services:
+  water-plant-simulator:
+    build:
+      context: ./water-plant-simulator
+      dockerfile: Dockerfile
+    container_name: water-plant-simulator
+    restart: unless-stopped
+    
+    environment:
+      # MQTT Broker de BunkerM (puerto interno 1900, externo 1901)
+      - MQTT_BROKER=bunkerm-platform
+      - MQTT_PORT=1900
+      - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
+      - LOG_LEVEL=INFO
+      - PYTHONUNBUFFERED=1
+    
+    env_file:
+      - .env.dev
+    
+    volumes:
+      - ./water-plant-simulator/config:/app/config:ro
+      - ./water-plant-simulator/logs:/app/logs
+    
+    networks:
+      - bunkerm-network
+    
+    # Nota: No hay depends_on porque BunkerM debe iniciarse por separado
+    # Esto permite reiniciar el simulador independientemente
+    
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  bunkerm-network:
+    external: true

@@ -1,0 +1,70 @@
+{
+  "clients": [
+    {
+      "username": "admin",
+      "password": "$7$101$CHANGEME$CHANGEME",
+      "clientid": "",
+      "textname": "Administrator",
+      "textdescription": "Full access admin user",
+      "roles": [
+        {
+          "rolename": "admin",
+          "priority": -1
+        }
+      ],
+      "groups": []
+    }
+  ],
+  "groups": [],
+  "roles": [
+    {
+      "rolename": "admin",
+      "textname": "Administrator Role",
+      "textdescription": "Full access to all topics",
+      "acls": [
+        {
+          "acltype": "publishClientSend",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        },
+        {
+          "acltype": "publishClientReceive",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        },
+        {
+          "acltype": "subscribeLiteral",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        },
+        {
+          "acltype": "subscribePattern",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        },
+        {
+          "acltype": "unsubscribeLiteral",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        },
+        {
+          "acltype": "unsubscribePattern",
+          "topic": "#",
+          "priority": -1,
+          "allow": true
+        }
+      ]
+    }
+  ],
+  "defaultACLAccess": {
+    "publishClientSend": false,
+    "publishClientReceive": false,
+    "subscribe": false,
+    "unsubscribe": true
+  }
+}

@@ -1,0 +1,243 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: bunkerm-postgres
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - bunkerm-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Eclipse Mosquitto MQTT Broker
+  # ==========================================
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: bunkerm-mosquitto
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    ports:
+      - "${MQTT_PORT:-1900}:1883"
+      - "${MQTT_WS_PORT:-9001}:9001"
+    volumes:
+      - ./data/mosquitto/data:/mosquitto/data
+      - ./data/mosquitto/log:/mosquitto/log
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./config/mosquitto/dynamic-security.json:/mosquitto/dynamic-security.json
+    networks:
+      - bunkerm-network
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -W 3 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ==========================================
+  # BunkerM Backend Services (Build from source)
+  # ==========================================
+  # Note: This assumes BunkerM source code is in the current directory
+  # You may need to adjust the build context and Dockerfile path
+  
+  # Placeholder for BunkerM backend
+  # Uncomment and configure once BunkerM source is properly set up
+  # bunkerm-backend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.backend
+  #   container_name: bunkerm-backend
+  #   restart: unless-stopped
+  #   environment:
+  #     - DATABASE_URL=${DATABASE_URL}
+  #     - MQTT_BROKER=${MQTT_BROKER}
+  #     - MQTT_PORT=${MQTT_PORT}
+  #     - MQTT_USERNAME=${MQTT_USERNAME}
+  #     - MQTT_PASSWORD=${MQTT_PASSWORD}
+  #     - API_KEY=${API_KEY}
+  #     - JWT_SECRET=${JWT_SECRET}
+  #     - AUTH_SECRET=${AUTH_SECRET}
+  #     - TIER=${TIER}
+  #     - DYNSEC_PATH=${DYNSEC_PATH}
+  #   ports:
+  #     - "${DYNSEC_PORT:-1000}:1000"
+  #     - "${MONITOR_PORT:-1001}:1001"
+  #     - "${CLIENTLOGS_PORT:-1002}:1002"
+  #     - "${AWS_BRIDGE_PORT:-1003}:1003"
+  #     - "${AZURE_BRIDGE_PORT:-1004}:1004"
+  #     - "${CONFIG_PORT:-1005}:1005"
+  #     - "${SMART_ANOMALY_PORT:-8100}:8100"
+  #   volumes:
+  #     - ./data/logs/api:/var/log/api
+  #     - ./data/mosquitto:/var/lib/mosquitto
+  #   networks:
+  #     - bunkerm-network
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     mosquitto:
+  #       condition: service_healthy
+
+  # ==========================================
+  # BunkerM Frontend (Next.js)
+  # ==========================================
+  # bunkerm-frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: bunkerm-frontend
+  #   restart: unless-stopped
+  #   environment:
+  #     - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+  #     - NEXTAUTH_URL=${NEXTAUTH_URL}
+  #     - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - bunkerm-network
+  #   depends_on:
+  #     - bunkerm-backend
+
+  # ==========================================
+  # BunkerM - Plataforma IoT Completa
+  # ==========================================
+  bunkerm:
+    build:
+      context: ./bunkerm-source
+      dockerfile: Dockerfile.next
+    container_name: bunkerm-platform
+    restart: unless-stopped
+    env_file:
+      - ./bunkerm-source/.env
+    environment:
+      # Database PostgreSQL (usar el externo)
+      - DATABASE_URL=postgresql://postgres:postgres@bunkerm-postgres:5432/bunkerm
+      - POSTGRES_HOST=bunkerm-postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=bunkerm
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      
+      # MQTT (BunkerM usa su propio mosquitto interno)
+      - MQTT_BROKER=localhost
+      - MQTT_PORT=1900
+      - MQTT_USERNAME=bunker
+      - MQTT_PASSWORD=bunker
+      
+      # Seguridad
+      - JWT_SECRET=${JWT_SECRET}
+      - API_KEY=${API_KEY}
+      - AUTH_SECRET=${AUTH_SECRET}
+      
+      # URLs
+      - HOST_ADDRESS=localhost
+      - FRONTEND_URL=http://localhost:3000
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:2000,*
+      - ALLOWED_HOSTS=localhost,127.0.0.1,*
+    ports:
+      # Web UI (puerto 3000 en lugar de 2000 para evitar conflicto)
+      - "3000:2000"
+      # MQTT interno (puerto 1901 en lugar de 1900 para evitar conflicto)
+      - "1901:1900"
+      # APIs Backend
+      - "1000:1000"  # Dynsec API
+      - "1001:1001"  # Monitor API
+      - "1002:1002"  # Client Logs
+      - "1003:1003"  # AWS Bridge
+      - "1004:1004"  # Azure Bridge
+      - "1005:1005"  # Config API
+      - "8100:8100"  # Smart Anomaly
+    volumes:
+      # Datos persistentes de BunkerM
+      - ./data/bunkerm/nextjs:/nextjs/data
+      - ./data/bunkerm/mosquitto:/var/lib/mosquitto
+      - ./data/bunkerm/logs/api:/var/log/api
+      - ./data/bunkerm/logs/mosquitto:/var/log/mosquitto
+      - ./data/bunkerm/logs/nginx:/var/log/nginx
+    networks:
+      - bunkerm-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:2000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ==========================================
+  # Nginx Reverse Proxy
+  # ==========================================
+  nginx:
+    image: nginx:alpine
+    container_name: bunkerm-nginx
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    ports:
+      - "${NGINX_PORT:-2000}:80"
+    volumes:
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - bunkerm-network
+    depends_on:
+      - postgres
+      - mosquitto
+
+  # ==========================================
+  # pgAdmin (Optional - for database management)
+  # ==========================================
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: bunkerm-pgadmin
+    restart: unless-stopped
+    env_file:
+      - .env.dev
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - ./data/pgadmin:/var/lib/pgadmin
+    networks:
+      - bunkerm-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - tools  # Only start with: docker-compose --profile tools up
+
+networks:
+  bunkerm-network:
+    name: bunkerm-network
+    driver: bridge
+
+volumes:
+  postgres-data:
+  mosquitto-data:
+  mosquitto-log:
+  pgadmin-data:

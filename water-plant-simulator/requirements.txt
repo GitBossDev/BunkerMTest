@@ -1,0 +1,20 @@
+# requirements.txt - Water Plant Simulator
+# Simulador de planta de tratamiento de aguas
+
+# MQTT Client
+paho-mqtt>=1.6.1
+
+# Configuration
+PyYAML>=6.0.1
+
+# Data manipulation
+numpy>=1.26.0
+
+# Logging
+colorlog>=6.8.0
+
+# Time utilities
+python-dateutil>=2.8.2
+
+# Type checking (optional, for development)
+mypy>=1.8.0

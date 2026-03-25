@@ -1,0 +1,163 @@
+# ==========================================
+# Water Plant Simulator - Configuration
+# ==========================================
+
+# Conexión MQTT
+mqtt:
+  broker: "localhost"
+  port: 1900
+  username: "admin"
+  password: ""  # Se carga de .env.dev
+  client_id_prefix: "simulator"
+  keepalive: 60
+  qos: 1
+
+# Configuración de sensores
+sensors:
+  publish_interval: 5  # segundos
+  
+  tank1_level:
+    topic: "sensors/tank1/level"
+    unit: "%"
+    min_value: 0
+    max_value: 100
+    initial_value: 50
+    noise_stddev: 2.0
+    
+  tank1_ph:
+    topic: "sensors/tank1/ph"
+    unit: "pH"
+    min_value: 6.0
+    max_value: 8.5
+    initial_value: 7.2
+    noise_stddev: 0.1
+    
+  tank1_turbidity:
+    topic: "sensors/tank1/turbidity"
+    unit: "NTU"
+    min_value: 0
+    max_value: 10
+    initial_value: 2.0
+    noise_stddev: 0.3
+    
+  flow_inlet:
+    topic: "sensors/flow/inlet"
+    unit: "L/min"
+    min_value: 0
+    max_value: 500
+    initial_value: 100
+    noise_stddev: 5.0
+    
+  flow_outlet:
+    topic: "sensors/flow/outlet"
+    unit: "L/min"
+    min_value: 0
+    max_value: 500
+    initial_value: 100
+    noise_stddev: 5.0
+    
+  pump1_pressure:
+    topic: "sensors/pump1/pressure"
+    unit: "bar"
+    min_value: 0
+    max_value: 5
+    initial_value: 2.5
+    noise_stddev: 0.2
+    
+  pump2_pressure:
+    topic: "sensors/pump2/pressure"
+    unit: "bar"
+    min_value: 0
+    max_value: 5
+    initial_value: 2.5
+    noise_stddev: 0.2
+    
+  ambient_temperature:
+    topic: "sensors/ambient/temperature"
+    unit: "°C"
+    min_value: 15
+    max_value: 35
+    initial_value: 22
+    noise_stddev: 1.0
+
+# Configuración de actuadores
+actuators:
+  status_publish_interval: 10  # segundos
+  
+  pump1:
+    command_topic: "actuators/pump1/command"
+    status_topic: "actuators/pump1/status"
+    max_speed: 100  # %
+    power_consumption_per_speed: 0.03  # kW per %
+    
+  pump2:
+    command_topic: "actuators/pump2/command"
+    status_topic: "actuators/pump2/status"
+    max_speed: 100  # %
+    power_consumption_per_speed: 0.03  # kW per %
+    
+  valve1:
+    command_topic: "actuators/valve1/command"
+    status_topic: "actuators/valve1/status"
+    max_position: 100  # %
+    
+  valve2:
+    command_topic: "actuators/valve2/command"
+    status_topic: "actuators/valve2/status"
+    max_position: 100  # %
+
+# Controlador automático
+controller:
+  enabled: true
+  check_interval: 10  # segundos
+  
+  # Reglas de control
+  rules:
+    low_level_threshold: 20  # %
+    high_level_threshold: 90  # %
+    ph_min: 6.5
+    ph_max: 8.0
+    turbidity_max: 5.0  # NTU
+    pressure_min: 1.0  # bar
+    pressure_max: 4.5  # bar
+
+# Simulación física
+physics:
+  enabled: true
+  update_interval: 1  # segundos
+  
+  # Tanque 1
+  tank1_capacity: 10000  # litros
+  tank1_drain_rate: 50  # L/min cuando válvula abierta
+  pump1_fill_rate: 100  # L/min por cada 10% de velocidad
+
+# Generador de anomalías
+anomalies:
+  enabled: false
+  
+  freeze:
+    probability: 0.01  # 1% por check
+    duration_range: [300, 600]  # segundos
+    
+  spike:
+    probability: 0.005
+    multiplier_range: [3, 5]
+    
+  drift:
+    probability: 0.01
+    rate_range: [0.1, 0.5]  # unidades por minuto
+    
+  disconnect:
+    probability: 0.002
+    duration_range: [60, 300]  # segundos
+
+# Logging
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+# Topics de control
+control:
+  plant_status_topic: "control/plant/status"
+  alerts_topic: "control/alerts"
+  commands_topic: "control/commands"
