@@ -71,6 +71,9 @@ secrets/
 *.crt
 dynamic-security.json.backup
 
+# BunkerM source (external repository cloned for customization)
+bunkerm-source/
+
 # Testing
 .pytest_cache/
 coverage/
