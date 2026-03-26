@@ -5,7 +5,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'start-bunkerm', 'stop-bunkerm')]
+    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm')]
     [string]$Action = 'setup',
     
     [Parameter(Mandatory=$false)]
@@ -292,21 +292,27 @@ function Invoke-Status {
     Write-Host "Health Checks:" -ForegroundColor Yellow
     Write-Host ""
 
-    # PostgreSQL
+    # PostgreSQL (solo si esta corriendo)
     Write-Host -NoNewline "  PostgreSQL (bunkerm-postgres)... "
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     & $script:CE exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>&1 | Out-Null
     $pgExit = $LASTEXITCODE
     $ErrorActionPreference = $savedPref
-    if ($pgExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Red }
+    if ($pgExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Yellow }
 
-    # Mosquitto
-    Write-Host -NoNewline "  Mosquitto (bunkerm-mosquitto)... "
+    # BunkerM broker MQTT interno (puerto 1901)
+    Write-Host -NoNewline "  BunkerM MQTT (localhost:1901)... "
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
-    & $script:CE exec bunkerm-mosquitto mosquitto_sub -t '$SYS/#' -C 1 -W 3 2>&1 | Out-Null
-    $mqttExit = $LASTEXITCODE
-    $ErrorActionPreference = $savedPref
-    if ($mqttExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Red }
+    $tcpClient = New-Object System.Net.Sockets.TcpClient
+    try {
+        $tcpClient.Connect('localhost', 1901)
+        Write-Success "[OK] puerto 1901 accesible"
+        $tcpClient.Close()
+    } catch {
+        Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+    } finally {
+        $ErrorActionPreference = $savedPref
+    }
 
     # Nginx / Web UI → ahora es BunkerM directamente en puerto 2000
     Write-Host -NoNewline "  BunkerM Web UI (http://localhost:2000)... "
@@ -386,6 +392,51 @@ function Invoke-Clean {
     }
 }
 
+function Invoke-Build {
+    Write-Info "Construyendo imagen de BunkerM..."
+    Write-Host ""
+
+    if (-not (Test-Path "bunkerm-source")) {
+        Write-Host "[ERROR] bunkerm-source/ no encontrado." -ForegroundColor Red
+        Write-Host "  git clone https://github.com/bunkeriot/BunkerM bunkerm-source" -ForegroundColor Yellow
+        exit 1
+    }
+
+    # Convertir CRLF a LF en scripts .sh antes de construir
+    Write-Info "Normalizando line endings en scripts shell..."
+    Get-ChildItem bunkerm-source -Recurse -Filter "*.sh" | ForEach-Object {
+        $content = [System.IO.File]::ReadAllText($_.FullName)
+        if ($content -match "`r`n") {
+            $fixed = $content -replace "`r`n", "`n"
+            [System.IO.File]::WriteAllText($_.FullName, $fixed, [System.Text.UTF8Encoding]::new($false))
+            Write-Info "  Normalizado: $($_.Name)"
+        }
+    }
+
+    # Leer API_KEY del .env.dev para el build arg
+    $apiKey = (Get-Content .env.dev | Select-String "^API_KEY=" | Select-Object -First 1) -replace "^API_KEY=", ""
+    if (-not $apiKey) { $apiKey = "default_api_key_replace_in_production" }
+
+    Write-Info "Construyendo imagen (puede tardar 5-15 minutos la primera vez)..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:CE build `
+        --build-arg "NEXT_PUBLIC_API_KEY=$apiKey" `
+        -t bunkermtest-bunkerm:latest `
+        -f bunkerm-source/Dockerfile.next `
+        bunkerm-source
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($buildExit -eq 0) {
+        Write-Success "[OK] Imagen construida correctamente: bunkermtest-bunkerm:latest"
+        Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
+    } else {
+        Write-Host "[ERROR] Fallo en el build. Revisa los logs de arriba." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
 function Invoke-StartBunkerM {
     Write-Info "Starting BunkerM platform..."
     Write-Host ""
@@ -416,7 +467,7 @@ function Invoke-StartBunkerM {
     
     Write-Host ""
     Write-Info "URLs de acceso:"
-    Write-Host "  - Web UI:    http://localhost:3000" -ForegroundColor Cyan
+    Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1901" -ForegroundColor Cyan
     Write-Host "  - Dynsec API: http://localhost:1000" -ForegroundColor Cyan
     Write-Host "  - Monitor API: http://localhost:1001" -ForegroundColor Cyan
@@ -450,11 +501,12 @@ switch ($Action) {
     'status' { Invoke-Status }
     'logs' { Invoke-Logs }
     'clean' { Invoke-Clean }
+    'build' { Invoke-Build }
     'start-bunkerm' { Invoke-StartBunkerM }
     'stop-bunkerm' { Invoke-StopBunkerM }
-    default { 
+    default {
         Write-Error "Unknown action: $Action"
-        Write-Info "Available actions: setup, start, stop, restart, status, logs, clean, start-bunkerm, stop-bunkerm"
+        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, start-bunkerm, stop-bunkerm"
     }
 }
 

@@ -1,8 +1,21 @@
 # version obsoleta eliminada (Compose v2 no la requiere)
+#
+# ARQUITECTURA: Monolito modificado
+#   - bunkerm: app principal (Next.js + FastAPI + Mosquitto + SQLite),
+#               todo en un contenedor, accesible en http://localhost:2000
+#   - postgres: reservado para Fase 3-4 (nuevos microservicios propios)
+#   - mosquitto standalone: DESACTIVADO, BunkerM ya incluye su propio broker
+#
+# Para desarrollar nuevas funcionalidades:
+#   - Backend: editar bunkerm-source/backend/app/
+#   - Frontend: editar bunkerm-source/frontend/
+#   - Rebuild: .\deploy.ps1 -Action build
 
 services:
   # ==========================================
-  # PostgreSQL Database
+  # PostgreSQL - Reservado para Fase 3-4
+  # BunkerM usa SQLite internamente. Este postgres es para los
+  # nuevos microservicios propios que se desarrollen en Fase 3-4.
   # ==========================================
   postgres:
     image: postgres:16-alpine
@@ -29,96 +42,17 @@ services:
       retries: 5
 
   # ==========================================
-  # Eclipse Mosquitto MQTT Broker
+  # Mosquitto standalone - DESACTIVADO
+  # BunkerM ya incluye su propio broker MQTT interno (puerto 1901 externo).
+  # Este servicio se activara solo si se necesita un broker externo dedicado.
   # ==========================================
-  mosquitto:
-    image: eclipse-mosquitto:latest
-    container_name: bunkerm-mosquitto
-    restart: unless-stopped
-    env_file:
-      - .env.dev
-    ports:
-      - "${MQTT_PORT:-1900}:1883"
-      - "${MQTT_WS_PORT:-9001}:9001"
-    volumes:
-      # Named volumes para datos (evita problemas de permisos en Podman rootless)
-      - mosquitto-data:/mosquitto/data
-      - mosquitto-log:/mosquitto/log
-      # Config y dynamic-security como bind mount read-only
-      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./config/mosquitto/dynamic-security.json:/mosquitto/dynamic-security.json
-    networks:
-      - bunkerm-network
-    healthcheck:
-      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -W 3 || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    # Mosquitto no depende de postgres
+  # mosquitto:
+  #   image: eclipse-mosquitto:latest
+  #   container_name: bunkerm-mosquitto
+  #   ...
 
-  # ==========================================
-  # BunkerM Backend Services (Build from source)
-  # ==========================================
-  # Note: This assumes BunkerM source code is in the current directory
-  # You may need to adjust the build context and Dockerfile path
-  
-  # Placeholder for BunkerM backend
-  # Uncomment and configure once BunkerM source is properly set up
-  # bunkerm-backend:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.backend
-  #   container_name: bunkerm-backend
-  #   restart: unless-stopped
-  #   environment:
-  #     - DATABASE_URL=${DATABASE_URL}
-  #     - MQTT_BROKER=${MQTT_BROKER}
-  #     - MQTT_PORT=${MQTT_PORT}
-  #     - MQTT_USERNAME=${MQTT_USERNAME}
-  #     - MQTT_PASSWORD=${MQTT_PASSWORD}
-  #     - API_KEY=${API_KEY}
-  #     - JWT_SECRET=${JWT_SECRET}
-  #     - AUTH_SECRET=${AUTH_SECRET}
-  #     - TIER=${TIER}
-  #     - DYNSEC_PATH=${DYNSEC_PATH}
-  #   ports:
-  #     - "${DYNSEC_PORT:-1000}:1000"
-  #     - "${MONITOR_PORT:-1001}:1001"
-  #     - "${CLIENTLOGS_PORT:-1002}:1002"
-  #     - "${AWS_BRIDGE_PORT:-1003}:1003"
-  #     - "${AZURE_BRIDGE_PORT:-1004}:1004"
-  #     - "${CONFIG_PORT:-1005}:1005"
-  #     - "${SMART_ANOMALY_PORT:-8100}:8100"
-  #   volumes:
-  #     - ./data/logs/api:/var/log/api
-  #     - ./data/mosquitto:/var/lib/mosquitto
-  #   networks:
-  #     - bunkerm-network
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     mosquitto:
-  #       condition: service_healthy
-
-  # ==========================================
-  # BunkerM Frontend (Next.js)
-  # ==========================================
-  # bunkerm-frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   container_name: bunkerm-frontend
-  #   restart: unless-stopped
-  #   environment:
-  #     - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
-  #     - NEXTAUTH_URL=${NEXTAUTH_URL}
-  #     - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
-  #   ports:
-  #     - "3000:3000"
-  #   networks:
-  #     - bunkerm-network
-  #   depends_on:
-  #     - bunkerm-backend
+  # (Servicios bunkerm-backend y bunkerm-frontend eliminados:
+  #  BunkerM es monolitico, todo esta en el servicio 'bunkerm')
 
   # ==========================================
   # BunkerM - Plataforma IoT Completa
@@ -228,10 +162,8 @@ networks:
     driver: bridge
 
 volumes:
-  # Datos de servicios base
+  # Datos de postgres (Fase 3-4)
   postgres-data:
-  mosquitto-data:
-  mosquitto-log:
   pgadmin-data:
   # Datos de BunkerM platform
   bunkerm-nextjs:
