@@ -27,7 +27,7 @@ param(
 )
 
 # Configuración
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $ComposeFile = 'docker-compose.simulator.yml'
 $EnvFile = '.env.dev'
 $ServiceName = 'water-plant-simulator'
@@ -139,11 +139,13 @@ function Test-Prerequisites {
 function Invoke-Start {
     Write-ColorOutput "Iniciando simulador de planta de tratamiento..." -Type INFO
     
-    # Verificar que Mosquitto este corriendo
-    $mosquittoRunning = & $script:CE ps --filter "name=mosquitto" --filter "status=running" -q
-    if (-not $mosquittoRunning) {
-        Write-ColorOutput "Mosquitto no está corriendo. Inicia los servicios base primero:" -Type ERROR
-        Write-Host "  .\deploy.ps1 start" -ForegroundColor Yellow
+    # Verificar que bunkerm-platform (que incluye el broker MQTT interno) esté corriendo
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    $platformRunning = & $script:CE ps --filter "name=bunkerm-platform" --filter "status=running" -q 2>$null
+    $ErrorActionPreference = $savedPref
+    if (-not $platformRunning) {
+        Write-ColorOutput "BunkerM (bunkerm-platform) no está corriendo. Inícialo primero:" -Type ERROR
+        Write-Host "  .\deploy.ps1 -Action start" -ForegroundColor Yellow
         Write-Host ""
         exit 1
     }

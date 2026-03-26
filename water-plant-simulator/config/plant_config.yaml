@@ -6,8 +6,8 @@
 mqtt:
   broker: "localhost"
   port: 1900
-  username: "admin"
-  password: ""  # Se carga de .env.dev
+  username: "bunker"   # Default: usuario dynsec del broker. Sobreescrito por MQTT_USERNAME
+  password: "bunker"  # Default: sobreescrito por MQTT_PASSWORD (env var o .env.dev)
   client_id_prefix: "simulator"
   keepalive: 60
   qos: 1

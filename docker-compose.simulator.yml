@@ -17,17 +17,17 @@ services:
     container_name: water-plant-simulator
     restart: unless-stopped
     
+    env_file:
+      - .env.dev
     environment:
-      # MQTT Broker de BunkerM (puerto interno 1900, externo 1901)
+      # MQTT: apunta al broker interno de bunkerm-platform por nombre de contenedor (misma red)
+      # Puerto 1900 es el interno del contenedor; desde el host usarías 1901
       - MQTT_BROKER=bunkerm-platform
       - MQTT_PORT=1900
       - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
-    
-    env_file:
-      - .env.dev
     
     volumes:
       - ./water-plant-simulator/config:/app/config:ro
