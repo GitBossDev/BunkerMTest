@@ -35,11 +35,16 @@ function Get-RuntimeEngines {
     if ($podmanFound) {
         $script:CE = "podman"
         Write-Info "Motor de contenedores: Podman"
-        # Intentar podman compose nativo (Podman 4+)
+        # Intentar podman compose (nativo Podman 4+ o proveedor externo)
+        # Usar ErrorActionPreference local para que mensajes informativos de stderr no paren la ejecucion
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         podman compose version 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $podmanComposeExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+        if ($podmanComposeExitCode -eq 0) {
             $script:CCE = "podman compose"
-            Write-Info "Motor de compose: podman compose (nativo Podman 4+)"
+            Write-Info "Motor de compose: podman compose (disponible)"
         } else {
             # Intentar podman-compose como paquete pip
             $podmanComposePkg = Get-Command podman-compose -ErrorAction SilentlyContinue
@@ -57,8 +62,12 @@ function Get-RuntimeEngines {
         $script:CE = "docker"
         Write-Info "Motor de contenedores: Docker"
         # Intentar docker compose v2 nativo
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         docker compose version 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $dockerComposeExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+        if ($dockerComposeExitCode -eq 0) {
             $script:CCE = "docker compose"
             Write-Info "Motor de compose: docker compose (v2 nativo)"
         } else {
