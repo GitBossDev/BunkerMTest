@@ -308,8 +308,8 @@ function Invoke-Status {
     $ErrorActionPreference = $savedPref
     if ($mqttExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Red }
 
-    # Nginx / Web UI
-    Write-Host -NoNewline "  Nginx Web UI (http://localhost:2000)... "
+    # Nginx / Web UI → ahora es BunkerM directamente en puerto 2000
+    Write-Host -NoNewline "  BunkerM Web UI (http://localhost:2000)... "
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         Write-Success "[OK] HTTP $($resp.StatusCode)"
@@ -317,13 +317,17 @@ function Invoke-Status {
         Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
     }
 
-    # BunkerM platform
-    Write-Host -NoNewline "  BunkerM platform (http://localhost:3000)... "
+    # BunkerM Auth API (confirma que el backend esta respondiendo)
+    Write-Host -NoNewline "  BunkerM API (/api/auth/me)... "
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri "http://localhost:2000/api/auth/me" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         Write-Success "[OK] HTTP $($resp.StatusCode)"
     } catch {
-        Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+        if ($_.Exception.Response.StatusCode.value__ -in @(401, 403)) {
+            Write-Success "[OK] HTTP $($_.Exception.Response.StatusCode.value__) (no autenticado, backend activo)"
+        } else {
+            Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+        }
     }
 
     Write-Host ""
