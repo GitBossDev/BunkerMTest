@@ -1,0 +1,30 @@
+# Forzar LF en scripts shell para evitar problemas CRLF en Linux/WSL
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Windows scripts con CRLF
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Archivos de texto normalizados automaticamente
+*.md    text
+*.yml   text
+*.yaml  text
+*.json  text
+*.conf  text
+*.env   text
+*.txt   text
+*.py    text
+*.js    text
+*.ts    text
+*.sql   text
+
+# Archivos binarios sin conversion
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
