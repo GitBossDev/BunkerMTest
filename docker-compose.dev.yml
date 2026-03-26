@@ -17,8 +17,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Named volume para datos (evita problemas de permisos en Podman rootless)
+      - postgres-data:/var/lib/postgresql/data
+      - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - bunkerm-network
     healthcheck:
@@ -40,9 +41,11 @@ services:
       - "${MQTT_PORT:-1900}:1883"
       - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
-      - ./data/mosquitto/data:/mosquitto/data
-      - ./data/mosquitto/log:/mosquitto/log
-      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      # Named volumes para datos (evita problemas de permisos en Podman rootless)
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+      # Config y dynamic-security como bind mount read-only
+      - ./config/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - ./config/mosquitto/dynamic-security.json:/mosquitto/dynamic-security.json
     networks:
       - bunkerm-network
@@ -168,12 +171,12 @@ services:
       - "1005:1005"  # Config API
       - "8100:8100"  # Smart Anomaly
     volumes:
-      # Datos persistentes de BunkerM
-      - ./data/bunkerm/nextjs:/nextjs/data
-      - ./data/bunkerm/mosquitto:/var/lib/mosquitto
-      - ./data/bunkerm/logs/api:/var/log/api
-      - ./data/bunkerm/logs/mosquitto:/var/log/mosquitto
-      - ./data/bunkerm/logs/nginx:/var/log/nginx
+      # Named volumes para datos de BunkerM (evita problemas de permisos en Podman rootless)
+      - bunkerm-nextjs:/nextjs/data
+      - bunkerm-mosquitto:/var/lib/mosquitto
+      - bunkerm-logs-api:/var/log/api
+      - bunkerm-logs-mosquitto:/var/log/mosquitto
+      - bunkerm-logs-nginx:/var/log/nginx
     networks:
       - bunkerm-network
     depends_on:
@@ -189,6 +192,7 @@ services:
   # ==========================================
   # Nginx Reverse Proxy
   # ==========================================
+# Dependencia de nginx en postgres es innecesaria (nginx solo hace proxy a frontend/backend)
   nginx:
     image: nginx:alpine
     container_name: bunkerm-nginx
@@ -202,7 +206,6 @@ services:
     networks:
       - bunkerm-network
     depends_on:
-      - postgres
       - mosquitto
 
   # ==========================================
@@ -221,7 +224,8 @@ services:
     ports:
       - "${PGADMIN_PORT:-5050}:80"
     volumes:
-      - ./data/pgadmin:/var/lib/pgadmin
+      # Named volume para pgAdmin (evita problemas de permisos en Podman rootless)
+      - pgadmin-data:/var/lib/pgadmin
     networks:
       - bunkerm-network
     depends_on:
@@ -236,7 +240,14 @@ networks:
     driver: bridge
 
 volumes:
+  # Datos de servicios base
   postgres-data:
   mosquitto-data:
   mosquitto-log:
   pgadmin-data:
+  # Datos de BunkerM platform
+  bunkerm-nextjs:
+  bunkerm-mosquitto:
+  bunkerm-logs-api:
+  bunkerm-logs-mosquitto:
+  bunkerm-logs-nginx:
