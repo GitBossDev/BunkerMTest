@@ -1,4 +1,4 @@
-version: '3.8'
+# version obsoleta eliminada (Compose v2 no la requiere)
 
 services:
   # ==========================================
@@ -128,8 +128,7 @@ services:
       dockerfile: Dockerfile.next
     container_name: bunkerm-platform
     restart: unless-stopped
-    env_file:
-      - ./bunkerm-source/.env
+    # env_file cargado solo cuando bunkerm-source existe (gestionado por deploy.ps1)
     environment:
       # Database PostgreSQL (usar el externo)
       - DATABASE_URL=postgresql://postgres:postgres@bunkerm-postgres:5432/bunkerm

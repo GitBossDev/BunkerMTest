@@ -55,8 +55,8 @@ check_container() {
     
     echo -n "Checking container $container_name... "
     
-    if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
-        local status=$(docker inspect -f '{{.State.Status}}' "$container_name")
+    if ${CE:-docker} ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        local status=$(${CE:-docker} inspect -f '{{.State.Status}}' "$container_name")
         if [ "$status" = "running" ]; then
             echo -e "${GREEN}[OK] Running${NC}"
             return 0
@@ -74,7 +74,7 @@ check_container() {
 check_postgres() {
     echo -n "Checking PostgreSQL connection... "
     
-    if docker exec bunkerm-postgres pg_isready -U ${POSTGRES_USER:-bunkerm} -d ${POSTGRES_DB:-bunkerm_db} > /dev/null 2>&1; then
+    if ${CE:-docker} exec bunkerm-postgres pg_isready -U ${POSTGRES_USER:-bunkerm} -d ${POSTGRES_DB:-bunkerm_db} > /dev/null 2>&1; then
         echo -e "${GREEN}[OK] Connected${NC}"
         return 0
     else
@@ -87,7 +87,7 @@ check_postgres() {
 check_mosquitto() {
     echo -n "Checking Mosquitto MQTT broker... "
     
-    if docker exec bunkerm-mosquitto mosquitto_sub -t '$SYS/#' -C 1 -W 3 > /dev/null 2>&1; then
+    if ${CE:-docker} exec bunkerm-mosquitto mosquitto_sub -t '$SYS/#' -C 1 -W 3 > /dev/null 2>&1; then
         echo -e "${GREEN}[OK] Responding${NC}"
         return 0
     else

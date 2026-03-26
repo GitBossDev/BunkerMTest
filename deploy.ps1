@@ -195,12 +195,25 @@ function Invoke-Setup {
 function Invoke-Start {
     Write-Info "Starting services..."
     Write-Host ""
-    
+
     if (-not (Test-Path ".env.dev")) {
         Write-Error ".env.dev not found. Run setup first: .\deploy.ps1 -Action setup"
         exit 1
     }
-    
+
+    # Si bunkerm-source existe pero no tiene .env, crear uno vacio para que compose no falle
+    if (Test-Path "bunkerm-source") {
+        if (-not (Test-Path "bunkerm-source\.env")) {
+            Write-Warning "bunkerm-source/.env no encontrado. Creando archivo vacio para evitar error de compose..."
+            New-Item -ItemType File -Path "bunkerm-source\.env" -Force | Out-Null
+            Write-Info "Si BunkerM requiere variables propias, edita bunkerm-source/.env"
+        }
+    } else {
+        Write-Warning "bunkerm-source/ no existe. El servicio 'bunkerm' no se construira."
+        Write-Warning "Para incluirlo ejecuta: git clone https://github.com/bunkeriot/BunkerM bunkerm-source"
+        Write-Host ""
+    }
+
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
 
     if ($WithTools) {
@@ -262,48 +275,57 @@ function Invoke-Restart {
 function Invoke-Status {
     Write-Info "Checking service status..."
     Write-Host ""
-    
-    # Check containers
-    Write-Host "Docker Containers:" -ForegroundColor Yellow
-    Invoke-Expression "$script:CE ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'" | Select-String "bunkerm"
-    
-    Write-Host ""
-    
-    # Try to run health check script
-    if (Test-Path "scripts/check-health.sh") {
-        Write-Info "Running health check..."
-        if (Get-Command bash -ErrorAction SilentlyContinue) {
-            bash scripts/check-health.sh
-        } else {
-            Write-Warning "bash not found. Manual health check:"
-            Write-Host ""
-            
-            # Manual checks
-            Write-Info "Nginx Health Check..."
-            try {
-                $response = Invoke-WebRequest -Uri "http://localhost:2000/health" -UseBasicParsing -TimeoutSec 5
-                if ($response.StatusCode -eq 200) {
-                    Write-Success "[OK] Nginx is responding"
-                }
-            } catch {
-                Write-Error "[ERROR] Nginx is not responding"
-            }
-            
-            Write-Host ""
-            Write-Info "PostgreSQL Health Check..."
-            try {
-                & $script:CE exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>$null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Success "[OK] PostgreSQL is ready"
-                } else {
-                    Write-Error "[ERROR] PostgreSQL is not ready"
-                }
-            } catch {
-                Write-Error "[ERROR] PostgreSQL container not found"
-            }
-        }
+
+    # Contenedores activos
+    Write-Host "Contenedores:" -ForegroundColor Yellow
+    $containers = & $script:CE ps --format json 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if ($containers) {
+        # Podman devuelve array de objetos; filtrar los de bunkerm
+        $containers | Where-Object { $_.Names -match 'bunkerm|water-plant' } |
+            Format-Table @{L='Nombre';E={$_.Names}}, @{L='Estado';E={$_.State}}, @{L='Puertos';E={$_.Ports}} -AutoSize
+    } else {
+        # Fallback: salida de texto plana
+        Invoke-Expression "$script:CE ps" | Select-String 'bunkerm|water-plant|NAME'
     }
-    
+
+    Write-Host ""
+    Write-Host "Health Checks:" -ForegroundColor Yellow
+    Write-Host ""
+
+    # PostgreSQL
+    Write-Host -NoNewline "  PostgreSQL (bunkerm-postgres)... "
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:CE exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>&1 | Out-Null
+    $pgExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($pgExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Red }
+
+    # Mosquitto
+    Write-Host -NoNewline "  Mosquitto (bunkerm-mosquitto)... "
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:CE exec bunkerm-mosquitto mosquitto_sub -t '$SYS/#' -C 1 -W 3 2>&1 | Out-Null
+    $mqttExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($mqttExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Red }
+
+    # Nginx / Web UI
+    Write-Host -NoNewline "  Nginx Web UI (http://localhost:2000)... "
+    try {
+        $resp = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        Write-Success "[OK] HTTP $($resp.StatusCode)"
+    } catch {
+        Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+    }
+
+    # BunkerM platform
+    Write-Host -NoNewline "  BunkerM platform (http://localhost:3000)... "
+    try {
+        $resp = Invoke-WebRequest -Uri "http://localhost:3000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        Write-Success "[OK] HTTP $($resp.StatusCode)"
+    } catch {
+        Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+    }
+
     Write-Host ""
 }
 
