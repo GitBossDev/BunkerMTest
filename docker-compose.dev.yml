@@ -72,6 +72,11 @@ services:
       - MQTT_PORT=1900
       - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
+      # Variables que usan los backends Python para conectarse al broker interno
+      - MOSQUITTO_ADMIN_USERNAME=${MQTT_USERNAME:-bunker}
+      - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-bunker}
+      - MOSQUITTO_IP=127.0.0.1
+      - MOSQUITTO_PORT=1900
       # Seguridad (secrets generados por generate-secrets.py)
       - JWT_SECRET=${JWT_SECRET}
       - API_KEY=${API_KEY}
