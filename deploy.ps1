@@ -17,11 +17,69 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Motores de contenedor (se asignan en Get-RuntimeEngines al inicio)
+$script:CE = "docker"    # Container Engine: docker o podman
+$script:CCE = "docker-compose"  # Compose Engine: docker-compose, docker compose, o podman compose
+
 # Colors for output
 function Write-Success { Write-Host $args -ForegroundColor Green }
 function Write-Info { Write-Host $args -ForegroundColor Cyan }
 function Write-Warning { Write-Host $args -ForegroundColor Yellow }
 function Write-Error { Write-Host $args -ForegroundColor Red }
+
+# Detecta el motor de contenedores disponible: Podman (prioritario) o Docker
+function Get-RuntimeEngines {
+    $podmanFound = Get-Command podman -ErrorAction SilentlyContinue
+    $dockerFound = Get-Command docker -ErrorAction SilentlyContinue
+
+    if ($podmanFound) {
+        $script:CE = "podman"
+        Write-Info "Motor de contenedores: Podman"
+        # Intentar podman compose nativo (Podman 4+)
+        podman compose version 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $script:CCE = "podman compose"
+            Write-Info "Motor de compose: podman compose (nativo Podman 4+)"
+        } else {
+            # Intentar podman-compose como paquete pip
+            $podmanComposePkg = Get-Command podman-compose -ErrorAction SilentlyContinue
+            if ($podmanComposePkg) {
+                $script:CCE = "podman-compose"
+                Write-Info "Motor de compose: podman-compose (paquete externo)"
+            } else {
+                Write-Warning "[WARNING] No se encontro compose para Podman."
+                Write-Warning "Instala con: pip install podman-compose"
+                Write-Warning "O actualiza Podman a 4+ para compose nativo."
+                exit 1
+            }
+        }
+    } elseif ($dockerFound) {
+        $script:CE = "docker"
+        Write-Info "Motor de contenedores: Docker"
+        # Intentar docker compose v2 nativo
+        docker compose version 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $script:CCE = "docker compose"
+            Write-Info "Motor de compose: docker compose (v2 nativo)"
+        } else {
+            $dcV1 = Get-Command docker-compose -ErrorAction SilentlyContinue
+            if ($dcV1) {
+                $script:CCE = "docker-compose"
+                Write-Info "Motor de compose: docker-compose (v1 standalone)"
+            } else {
+                Write-Warning "[WARNING] Docker Compose no encontrado."
+                Write-Warning "Instala Docker Compose v2 o ejecuta: pip install docker-compose"
+                exit 1
+            }
+        }
+    } else {
+        Write-Host "[ERROR] No se encontro Docker ni Podman." -ForegroundColor Red
+        Write-Host "Instala Podman (https://podman.io) o Docker Desktop." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host ""
+}
 
 function Show-Banner {
     Write-Host ""
@@ -32,34 +90,19 @@ function Show-Banner {
 }
 
 function Test-Prerequisites {
-    Write-Info "Checking prerequisites..."
-    
-    # Check Docker
-    try {
-        $dockerVersion = docker --version
-        Write-Success "[OK] Docker found: $dockerVersion"
-    } catch {
-        Write-Error "[ERROR] Docker not found. Please install Docker Desktop."
-        exit 1
-    }
-    
-    # Check Docker Compose
-    try {
-        $composeVersion = docker-compose --version
-        Write-Success "[OK] Docker Compose found: $composeVersion"
-    } catch {
-        Write-Error "[ERROR] Docker Compose not found. Please install Docker Compose."
-        exit 1
-    }
-    
+    Write-Info "Verificando prerequisitos..."
+
+    # Detectar motor de contenedores (Podman o Docker)
+    Get-RuntimeEngines
+
     # Check Python
     try {
         $pythonVersion = python --version
-        Write-Success "[OK] Python found: $pythonVersion"
+        Write-Success "[OK] Python: $pythonVersion"
     } catch {
-        Write-Warning "[WARNING] Python not found. Scripts may not work."
+        Write-Warning "[WARNING] Python no encontrado. Algunos scripts pueden no funcionar."
     }
-    
+
     Write-Host ""
 }
 
@@ -108,12 +151,35 @@ function Invoke-Setup {
         }
     }
     
+    # Verificar codigo fuente de BunkerM
     Write-Host ""
-    Write-Success "Setup completed successfully!"
+    if (-not (Test-Path "bunkerm-source")) {
+        Write-Warning "El directorio 'bunkerm-source' no existe."
+        Write-Info "Es necesario para construir la imagen de BunkerM."
+        $cloneNow = Read-Host "Clonar repositorio BunkerM ahora? (y/N)"
+        if ($cloneNow -eq 'y' -or $cloneNow -eq 'Y') {
+            Write-Info "Clonando BunkerM desde GitHub..."
+            git clone https://github.com/bunkeriot/BunkerM bunkerm-source
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "[OK] BunkerM clonado en bunkerm-source/"
+            } else {
+                Write-Warning "Error al clonar. Hazlo manualmente:"
+                Write-Host "  git clone https://github.com/bunkeriot/BunkerM bunkerm-source" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Warning "Recuerda clonar BunkerM antes de hacer build:"
+            Write-Host "  git clone https://github.com/bunkeriot/BunkerM bunkerm-source" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Success "[OK] bunkerm-source/ encontrado"
+    }
+
     Write-Host ""
-    Write-Info "Next steps:"
-    Write-Host "  1. Review .env.dev and update SMTP/Twilio settings if needed"
-    Write-Host "  2. Run: .\deploy.ps1 -Action start"
+    Write-Success "Setup completado correctamente!"
+    Write-Host ""
+    Write-Info "Proximos pasos:"
+    Write-Host "  1. Revisa .env.dev y actualiza configuracion SMTP/Twilio si es necesario"
+    Write-Host "  2. Ejecuta: .\deploy.ps1 -Action start"
     Write-Host ""
 }
 
@@ -126,8 +192,8 @@ function Invoke-Start {
         exit 1
     }
     
-    $composeCmd = "docker-compose --env-file .env.dev -f docker-compose.dev.yml"
-    
+    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
+
     if ($WithTools) {
         Write-Info "Starting with tools profile (includes pgAdmin)..."
         $composeCmd += " --profile tools"
@@ -162,12 +228,12 @@ function Invoke-Stop {
     Write-Info "Stopping services..."
     Write-Host ""
     
-    $composeCmd = "docker-compose --env-file .env.dev -f docker-compose.dev.yml"
-    
+    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
+
     if ($WithTools) {
         $composeCmd += " --profile tools"
     }
-    
+
     $composeCmd += " down"
     
     Invoke-Expression $composeCmd
@@ -190,7 +256,7 @@ function Invoke-Status {
     
     # Check containers
     Write-Host "Docker Containers:" -ForegroundColor Yellow
-    docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" | Select-String "bunkerm"
+    Invoke-Expression "$script:CE ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'" | Select-String "bunkerm"
     
     Write-Host ""
     
@@ -217,7 +283,7 @@ function Invoke-Status {
             Write-Host ""
             Write-Info "PostgreSQL Health Check..."
             try {
-                docker exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>$null
+                & $script:CE exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>$null
                 if ($LASTEXITCODE -eq 0) {
                     Write-Success "[OK] PostgreSQL is ready"
                 } else {
@@ -236,7 +302,7 @@ function Invoke-Logs {
     Write-Info "Showing logs..."
     Write-Host ""
     
-    $composeCmd = "docker-compose --env-file .env.dev -f docker-compose.dev.yml logs"
+    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml logs"
     
     if ($Follow) {
         $composeCmd += " -f"
@@ -257,7 +323,7 @@ function Invoke-Clean {
         Write-Host ""
         
         # Stop services
-        docker-compose --env-file .env.dev -f docker-compose.dev.yml --profile tools down -v
+        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml --profile tools down -v"
         
         # Remove data directories
         Write-Info "Removing data directories..."
@@ -296,16 +362,16 @@ function Invoke-StartBunkerM {
     
     # Verificar que la red exista
     Write-Info "Verificando red Docker..."
-    $networkExists = docker network ls | Select-String "bunkerm-network"
+    $networkExists = Invoke-Expression "$script:CE network ls" | Select-String "bunkerm-network"
     if (-not $networkExists) {
         Write-Info "Creando red bunkerm-network..."
-        docker network create bunkerm-network
+        & $script:CE network create bunkerm-network
         Write-Success "[OK] Red creada"
     }
-    
+
     # Iniciar solo el servicio bunkerm y sus dependencias
     Write-Info "Iniciando PostgreSQL y BunkerM..."
-    docker-compose --env-file .env.dev -f docker-compose.dev.yml up -d postgres bunkerm
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres bunkerm"
     
     Write-Host ""
     Write-Success "[OK] BunkerM iniciado!"
@@ -322,7 +388,7 @@ function Invoke-StartBunkerM {
     Write-Host "  - Config API: http://localhost:1005" -ForegroundColor Cyan
     Write-Host ""
     Write-Info "Verificar estado: .\deploy.ps1 -Action status"
-    Write-Info "Ver logs: docker logs bunkerm-platform -f"
+    Write-Info "Ver logs: $script:CE logs bunkerm-platform -f"
     Write-Host ""
 }
 
@@ -330,8 +396,8 @@ function Invoke-StopBunkerM {
     Write-Info "Deteniendo BunkerM platform..."
     Write-Host ""
     
-    docker-compose --env-file .env.dev -f docker-compose.dev.yml stop bunkerm
-    
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop bunkerm"
+
     Write-Host ""
     Write-Success "[OK] BunkerM detenido!"
     Write-Host ""

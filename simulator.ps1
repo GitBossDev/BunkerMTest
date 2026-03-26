@@ -32,6 +32,10 @@ $ComposeFile = 'docker-compose.simulator.yml'
 $EnvFile = '.env.dev'
 $ServiceName = 'water-plant-simulator'
 
+# Motores de contenedor (se asignan en Get-RuntimeEngines al inicio)
+$script:CE = "docker"    # Container Engine: docker o podman
+$script:CCE = "docker-compose"  # Compose Engine: docker-compose, docker compose, o podman compose
+
 # Colores para output
 function Write-ColorOutput {
     param(
@@ -52,6 +56,60 @@ function Write-ColorOutput {
     Write-Host $Message
 }
 
+# Detecta el motor de contenedores disponible: Podman (prioritario) o Docker
+function Get-RuntimeEngines {
+    $podmanFound = Get-Command podman -ErrorAction SilentlyContinue
+    $dockerFound = Get-Command docker -ErrorAction SilentlyContinue
+
+    if ($podmanFound) {
+        $script:CE = "podman"
+        Write-ColorOutput "Motor de contenedores: Podman" -Type INFO
+        # Intentar podman compose nativo (Podman 4+)
+        podman compose version 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $script:CCE = "podman compose"
+            Write-ColorOutput "Motor de compose: podman compose (nativo Podman 4+)" -Type INFO
+        } else {
+            # Intentar podman-compose como paquete pip
+            $podmanComposePkg = Get-Command podman-compose -ErrorAction SilentlyContinue
+            if ($podmanComposePkg) {
+                $script:CCE = "podman-compose"
+                Write-ColorOutput "Motor de compose: podman-compose (paquete externo)" -Type INFO
+            } else {
+                Write-ColorOutput "No se encontro compose para Podman." -Type WARNING
+                Write-ColorOutput "Instala con: pip install podman-compose" -Type WARNING
+                Write-ColorOutput "O actualiza Podman a 4+ para compose nativo." -Type WARNING
+                exit 1
+            }
+        }
+    } elseif ($dockerFound) {
+        $script:CE = "docker"
+        Write-ColorOutput "Motor de contenedores: Docker" -Type INFO
+        # Intentar docker compose v2 nativo
+        docker compose version 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $script:CCE = "docker compose"
+            Write-ColorOutput "Motor de compose: docker compose (v2 nativo)" -Type INFO
+        } else {
+            $dcV1 = Get-Command docker-compose -ErrorAction SilentlyContinue
+            if ($dcV1) {
+                $script:CCE = "docker-compose"
+                Write-ColorOutput "Motor de compose: docker-compose (v1 standalone)" -Type INFO
+            } else {
+                Write-ColorOutput "Docker Compose no encontrado." -Type WARNING
+                Write-ColorOutput "Instala Docker Compose v2 o: pip install docker-compose" -Type WARNING
+                exit 1
+            }
+        }
+    } else {
+        Write-ColorOutput "No se encontro Docker ni Podman." -Type ERROR
+        Write-ColorOutput "Instala Podman (https://podman.io) o Docker Desktop." -Type ERROR
+        exit 1
+    }
+
+    Write-Host ""
+}
+
 # Verificar archivos necesarios
 function Test-Prerequisites {
     if (-not (Test-Path $ComposeFile)) {
@@ -63,14 +121,17 @@ function Test-Prerequisites {
         Write-ColorOutput "No se encuentra $EnvFile. Ejecuta: .\scripts\generate-secrets.py" -Type ERROR
         exit 1
     }
+
+    # Detectar motor de contenedores
+    Get-RuntimeEngines
 }
 
 # Iniciar simulador
 function Invoke-Start {
     Write-ColorOutput "Iniciando simulador de planta de tratamiento..." -Type INFO
     
-    # Verificar que Mosquitto esté corriendo
-    $mosquittoRunning = docker ps --filter "name=mosquitto" --filter "status=running" -q
+    # Verificar que Mosquitto este corriendo
+    $mosquittoRunning = & $script:CE ps --filter "name=mosquitto" --filter "status=running" -q
     if (-not $mosquittoRunning) {
         Write-ColorOutput "Mosquitto no está corriendo. Inicia los servicios base primero:" -Type ERROR
         Write-Host "  .\deploy.ps1 start" -ForegroundColor Yellow
@@ -79,15 +140,15 @@ function Invoke-Start {
     }
     
     # Build si no existe la imagen
-    $imageExists = docker images -q water-plant-simulator
+    $imageExists = & $script:CE images -q water-plant-simulator
     if (-not $imageExists) {
         Write-ColorOutput "Construyendo imagen del simulador..." -Type INFO
         Invoke-Build
     }
     
     # Iniciar servicio
-    docker-compose -f $ComposeFile --env-file $EnvFile up -d
-    
+    Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile up -d"
+
     if ($LASTEXITCODE -eq 0) {
         Write-ColorOutput "Simulador iniciado correctamente" -Type OK
         Start-Sleep -Seconds 3
@@ -102,8 +163,8 @@ function Invoke-Start {
 function Invoke-Stop {
     Write-ColorOutput "Deteniendo simulador..." -Type INFO
     
-    docker-compose -f $ComposeFile --env-file $EnvFile down
-    
+    Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile down"
+
     if ($LASTEXITCODE -eq 0) {
         Write-ColorOutput "Simulador detenido" -Type OK
     } else {
@@ -125,20 +186,20 @@ function Invoke-Status {
     Write-ColorOutput "Estado del simulador:" -Type INFO
     Write-Host ""
     
-    docker-compose -f $ComposeFile --env-file $EnvFile ps
-    
+    Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile ps"
+
     Write-Host ""
-    
-    # Verificar si está corriendo
-    $running = docker ps --filter "name=$ServiceName" --filter "status=running" -q
+
+    # Verificar si esta corriendo
+    $running = & $script:CE ps --filter "name=$ServiceName" --filter "status=running" -q
     
     if ($running) {
         Write-ColorOutput "Simulador en ejecución" -Type OK
         
-        # Mostrar estadísticas
+        # Mostrar estadisticas
         Write-Host ""
-        Write-ColorOutput "Estadísticas del contenedor:" -Type INFO
-        docker stats --no-stream $ServiceName
+        Write-ColorOutput "Estadisticas del contenedor:" -Type INFO
+        & $script:CE stats --no-stream $ServiceName
     } else {
         Write-ColorOutput "Simulador detenido" -Type WARNING
     }
@@ -148,10 +209,10 @@ function Invoke-Status {
 function Invoke-Logs {
     if ($Follow) {
         Write-ColorOutput "Mostrando logs en tiempo real (Ctrl+C para salir)..." -Type INFO
-        docker-compose -f $ComposeFile --env-file $EnvFile logs -f $ServiceName
+        Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile logs -f $ServiceName"
     } else {
-        Write-ColorOutput "Últimos logs del simulador:" -Type INFO
-        docker-compose -f $ComposeFile --env-file $EnvFile logs --tail=50 $ServiceName
+        Write-ColorOutput "Ultimos logs del simulador:" -Type INFO
+        Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile logs --tail=50 $ServiceName"
     }
 }
 
@@ -199,8 +260,8 @@ function Invoke-Anomalies {
 # Construir imagen
 function Invoke-Build {
     Write-ColorOutput "Construyendo imagen del simulador..." -Type INFO
-    
-    docker build -t water-plant-simulator ./water-plant-simulator
+
+    & $script:CE build -t water-plant-simulator ./water-plant-simulator
     
     if ($LASTEXITCODE -eq 0) {
         Write-ColorOutput "Imagen construida correctamente" -Type OK
@@ -219,10 +280,10 @@ function Invoke-Clean {
     
     if ($confirm -eq 'y' -or $confirm -eq 'Y') {
         # Detener y eliminar contenedor
-        docker-compose -f $ComposeFile --env-file $EnvFile down -v
-        
+        Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile down -v"
+
         # Eliminar imagen
-        docker rmi water-plant-simulator -f 2>$null
+        & $script:CE rmi water-plant-simulator -f 2>$null
         
         # Limpiar logs
         if (Test-Path ".\water-plant-simulator\logs") {
@@ -253,7 +314,7 @@ function Show-Menu {
     Write-Host "  status     - Ver estado actual"
     Write-Host "  logs       - Ver logs (usa -Follow para tiempo real)"
     Write-Host "  anomalies  - Gestionar anomalías (enable|disable|trigger)"
-    Write-Host "  build      - Construir imagen Docker"
+    Write-Host "  build      - Construir imagen de contenedor"
     Write-Host "  clean      - Eliminar recursos"
     Write-Host ""
     Write-Host "Ejemplos:"
