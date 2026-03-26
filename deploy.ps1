@@ -234,7 +234,7 @@ function Invoke-Start {
     Write-Host ""
     Write-Info "Service URLs:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
-    Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
+    Write-Host "  - MQTT:      localhost:1901" -ForegroundColor Cyan
     Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
     
     if ($WithTools) {
@@ -314,13 +314,18 @@ function Invoke-Status {
         $ErrorActionPreference = $savedPref
     }
 
-    # Nginx / Web UI → ahora es BunkerM directamente en puerto 2000
+    # Nginx / Web UI → BunkerM en puerto 2000 (redirige a /login, acepta 200 y 3xx)
     Write-Host -NoNewline "  BunkerM Web UI (http://localhost:2000)... "
     try {
-        $resp = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        $resp = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
         Write-Success "[OK] HTTP $($resp.StatusCode)"
     } catch {
-        Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -ge 300 -and $code -lt 400) {
+            Write-Success "[OK] HTTP $code (redirect al login)"
+        } else {
+            Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
+        }
     }
 
     # BunkerM Auth API (confirma que el backend esta respondiendo)
