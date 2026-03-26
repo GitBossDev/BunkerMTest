@@ -129,6 +129,35 @@ class MQTTClientManager:
         except Exception as e:
             self.logger.error(f"[ERROR] Excepción al publicar en {topic}: {e}")
             return False
+
+    def publish_raw(self, topic: str, payload: str, qos: Optional[int] = None) -> bool:
+        """
+        Publicar un string literal (no JSON) en un topic.
+
+        Args:
+            topic: Topic MQTT
+            payload: String a publicar directamente (CSV, plain value, etc.)
+            qos: Quality of Service (0, 1, 2). Si es None, usa config.
+
+        Returns:
+            True si se publicó correctamente, False en caso contrario
+        """
+        if not self.connected:
+            self.logger.warning(f"[WARNING] No conectado. No se pudo publicar en {topic}")
+            return False
+
+        try:
+            qos_level = qos if qos is not None else self.config.get('qos', 1)
+            result = self.client.publish(topic, payload, qos=qos_level)
+
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                return True
+            else:
+                self.logger.error(f"[ERROR] Fallo al publicar en {topic}. Código: {result.rc}")
+                return False
+        except Exception as e:
+            self.logger.error(f"[ERROR] Excepción al publicar en {topic}: {e}")
+            return False
     
     def subscribe(self, topic: str, callback: Callable[[str, Dict], None], qos: Optional[int] = None):
         """

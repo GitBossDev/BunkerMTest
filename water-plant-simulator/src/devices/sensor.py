@@ -37,6 +37,7 @@ class SensorDevice(BaseDevice):
         self.min_value = config['min_value']
         self.max_value = config['max_value']
         self.noise_stddev = config.get('noise_stddev', 0.1)
+        self.format = config.get('format', 'json')  # 'json', 'csv', 'plain'
         
         # Estado actual
         self.current_value = config.get('initial_value', (self.min_value + self.max_value) / 2)
@@ -101,20 +102,30 @@ class SensorDevice(BaseDevice):
     
     def _publish_measurement(self):
         """Publicar medición en el topic MQTT."""
-        timestamp = datetime.now(timezone.utc).isoformat()
-        
-        payload = {
-            "timestamp": timestamp,
-            "device_id": f"sensor_{self.name}",
-            "value": round(self.current_value, 2),
-            "unit": self.unit,
-            "quality": self.quality
-        }
-        
-        success = self.mqtt_client.publish(self.topic, payload)
-        
+        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        value = round(self.current_value, 2)
+
+        if self.format == 'csv':
+            # CSV: "<ISO8601>,<device_id>,<value>,<unit>"
+            raw_payload = f"{timestamp},sensor_{self.name},{value},{self.unit}"
+            success = self.mqtt_client.publish_raw(self.topic, raw_payload)
+        elif self.format == 'plain':
+            # Plain numeric string: "<value>"
+            raw_payload = str(value)
+            success = self.mqtt_client.publish_raw(self.topic, raw_payload)
+        else:
+            # Default JSON format
+            payload = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "device_id": f"sensor_{self.name}",
+                "value": value,
+                "unit": self.unit,
+                "quality": self.quality
+            }
+            success = self.mqtt_client.publish(self.topic, payload)
+
         if success:
-            self.logger.debug(f"{self.name}: {payload['value']} {self.unit}")
+            self.logger.debug(f"{self.name}: {value} {self.unit}")
     
     def get_state(self) -> Dict[str, Any]:
         """Obtener estado actual del sensor."""
