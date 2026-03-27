@@ -5,7 +5,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm')]
+    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend')]
     [string]$Action = 'setup',
     
     [Parameter(Mandatory=$false)]
@@ -494,6 +494,70 @@ function Invoke-StopBunkerM {
     Write-Host ""
 }
 
+function Invoke-PatchFrontend {
+    Write-Info "Hot-patch del frontend Next.js..."
+    Write-Host ""
+
+    $frontendPath = Join-Path $PSScriptRoot "bunkerm-source\frontend"
+    if (-not (Test-Path $frontendPath)) {
+        Write-Host "[ERROR] bunkerm-source/frontend no encontrado." -ForegroundColor Red
+        exit 1
+    }
+
+    # Verificar si el contenedor esta corriendo
+    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
+    if (-not $containerRunning) {
+        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Info "Compilando frontend con Node.js..."
+    # Nota: se monta el directorio frontend en el contenedor node para el build
+    & $script:CE run --rm `
+        -v "${frontendPath}:/frontend" `
+        -w /frontend `
+        -e AUTH_SECRET=build-placeholder `
+        -e NEXT_TELEMETRY_DISABLED=1 `
+        node:20-alpine `
+        sh -c "npm run build 2>&1 | tail -15"
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Fallo el build del frontend." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Info "Desplegando al contenedor..."
+
+    # Copiar standalone (servidor Next.js)
+    # Se usa la ruta con '\.' para copiar el CONTENIDO del directorio, no el directorio mismo
+    $standalonePath = Join-Path $frontendPath ".next\standalone"
+    & $script:CE cp "${standalonePath}/." "bunkerm-platform:/nextjs/"
+
+    # Copiar estaticos: IMPORTANTE usar '\.' al final para copiar el CONTENIDO
+    # sin esto, podman crea un directorio anidado static/static/ en vez de sobreescribir
+    $staticPath = Join-Path $frontendPath ".next\static"
+    & $script:CE cp "${staticPath}/." "bunkerm-platform:/nextjs/.next/static/"
+
+    # Limpiar cualquier directorio 'static' anidado si quedó de deploys anteriores
+    $nestedStatic = & $script:CE exec bunkerm-platform sh -c "test -d /nextjs/.next/static/static && echo exists || echo none" 2>&1
+    if ($nestedStatic -match "exists") {
+        Write-Info "Limpiando directorio static anidado de deploys anteriores..."
+        & $script:CE exec bunkerm-platform sh -c "cp -rf /nextjs/.next/static/static/. /nextjs/.next/static/ && rm -rf /nextjs/.next/static/static"
+    }
+
+    # Reiniciar el servidor Next.js (supervisord lo relanzara automaticamente)
+    Write-Info "Reiniciando servidor Next.js..."
+    $nextPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep next-server | grep -v grep | sed 's/^ *//' | cut -d' ' -f1" 2>&1 | Select-Object -First 1
+    if ($nextPid) {
+        & $script:CE exec bunkerm-platform sh -c "kill $nextPid"
+        Start-Sleep -Seconds 3
+    }
+
+    Write-Success "[OK] Frontend actualizado correctamente!"
+    Write-Host "  Recarga la pagina del navegador (Ctrl+Shift+R) para ver los cambios." -ForegroundColor Cyan
+    Write-Host ""
+}
+
 # Main execution
 Show-Banner
 Test-Prerequisites
@@ -508,6 +572,8 @@ switch ($Action) {
     'clean' { Invoke-Clean }
     'build' { Invoke-Build }
     'start-bunkerm' { Invoke-StartBunkerM }
+    'stop-bunkerm'  { Invoke-StopBunkerM }
+    'patch-frontend'{ Invoke-PatchFrontend }
     'stop-bunkerm' { Invoke-StopBunkerM }
     default {
         Write-Error "Unknown action: $Action"
