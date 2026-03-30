@@ -86,6 +86,8 @@ services:
       - ALLOWED_ORIGINS=*
       - ALLOWED_HOSTS=*
       - RATE_LIMIT_PER_MINUTE=100
+      # Timezone (change this single variable to update all service timestamps)
+      - TZ=${TZ:-Europe/Madrid}
       # Logging
       - LOG_LEVEL=INFO
       - API_LOG_FILE=/var/log/api/api_activity.log

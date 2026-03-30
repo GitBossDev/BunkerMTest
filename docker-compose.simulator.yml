@@ -24,8 +24,8 @@ services:
       # Puerto 1900 es el interno del contenedor; desde el host usarías 1901
       - MQTT_BROKER=bunkerm-platform
       - MQTT_PORT=1900
-      - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
+      - MQTT_USERNAME=plant_simulator
+      - MQTT_PASSWORD=SimPlant2024_xK9mR
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
       - TZ=${TZ:-Europe/Madrid}
