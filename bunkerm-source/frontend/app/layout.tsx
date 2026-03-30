@@ -7,8 +7,8 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'BunkerM - MQTT Broker Manager',
-  description: 'Secure MQTT broker management dashboard',
+  title: 'BrokerPanel - Para CIC',
+  description: 'Panel de control para administrar broker MQTT',
 }
 
 export default function RootLayout({
