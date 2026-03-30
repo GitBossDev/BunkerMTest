@@ -1,0 +1,133 @@
+# Copyright (c) 2025 BunkerM
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# You may not use this file except in compliance with the License.
+# http://www.apache.org/licenses/LICENSE-2.0
+# Distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
+#
+# backend/app/config/main.py
+import logging
+import os
+import ssl
+from fastapi import FastAPI, HTTPException, Security, Depends, Request, status
+from fastapi.security.api_key import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from dotenv import load_dotenv
+from datetime import datetime
+import uvicorn
+
+# Import the mosquitto_config router
+from mosquitto_config import router as mosquitto_config_router
+from dynsec_config import router as dynsec_config_router
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+handler = logging.handlers.RotatingFileHandler(
+    "config_api_activity.log", maxBytes=10000000, backupCount=5  # 10MB
+)
+logger.addHandler(handler)
+
+# Environment variables
+API_KEY = os.getenv("API_KEY")
+
+_api_key_cache: dict = {"key": "", "ts": 0.0}
+
+def _get_current_api_key() -> str:
+    """Return the active API key, refreshing from file every 5 s."""
+    import time as _t
+    now = _t.time()
+    if _api_key_cache["key"] and now - _api_key_cache["ts"] < 5.0:
+        return _api_key_cache["key"]
+    key = os.getenv("API_KEY", "")
+    if not key or key == "default_api_key_replace_in_production":
+        try:
+            with open("/nextjs/data/.api_key") as _fh:
+                file_key = _fh.read().strip()
+                if file_key:
+                    key = file_key
+        except Exception:
+            pass
+    if not key:
+        key = "default_api_key_replace_in_production"
+    _api_key_cache["key"] = key
+    _api_key_cache["ts"] = now
+    return key
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+
+# Initialize FastAPI app with versioning
+app = FastAPI(
+    title="Mosquitto Management API",
+    version="1.0.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Trusted Host middleware
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
+
+# API Key security
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+# Include the mosquitto_config router
+app.include_router(mosquitto_config_router, prefix="/api/v1")
+app.include_router(dynsec_config_router, prefix="/api/v1")
+
+async def get_api_key(api_key_header: str = Security(api_key_header)):
+    if api_key_header != _get_current_api_key():
+        logger.warning(f"Invalid API key attempt")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
+        )
+    return api_key_header
+
+async def log_request(request: Request):
+    """Log API request details"""
+    logger.info(
+        f"Request: {request.method} {request.url} "
+        f"Client: {request.client.host} "
+        f"User-Agent: {request.headers.get('user-agent')} "
+        f"Time: {datetime.now().isoformat()}"
+    )
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+# Add a health check endpoint
+@app.get("/api/v1/health")
+async def health_check(request: Request):
+    """Health check endpoint"""
+    await log_request(request)
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "service": "mosquitto-config-api"
+    }
+
+if __name__ == "__main__":
+    # Use port 1005 since 1000-1004 are already in use
+    PORT = int(os.getenv("CONFIG_API_PORT", "1005"))
+    
+    # Run the application
+    logger.info(f"Starting Config API on port {PORT}")
+    uvicorn.run(app, host="0.0.0.0", port=PORT)

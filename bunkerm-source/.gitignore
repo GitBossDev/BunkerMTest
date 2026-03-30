@@ -1,0 +1,37 @@
+# Environment & Secrets
+.env
+.env.local
+!.env.example
+!.env.local.example
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Logs
+*.log
+
+# SSL / Certificates
+ssl_certificates/*.pem
+ssl_certificates/*.key
+ssl_certificates/*.crt
+*.pem
+*.key
+
+# Application data
+backend/logs/
+backend/app/*/logs/
+dynamic-security.json
+*.json.backup
+
+# Internal documentation (not for public distribution)
+ARCHITECTURE.md
+API_DOCUMENTATION.md
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.vercel
