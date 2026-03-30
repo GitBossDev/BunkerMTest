@@ -91,7 +91,7 @@ class ActuatorDevice(BaseDevice):
     
     def _publish_status(self):
         """Publicar estado actual del actuador."""
-        timestamp = datetime.now(timezone.utc).isoformat()
+        timestamp = datetime.now().astimezone().isoformat()
         
         payload = {
             "timestamp": timestamp,

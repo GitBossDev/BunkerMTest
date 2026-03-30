@@ -28,6 +28,7 @@ services:
       - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
       - LOG_LEVEL=INFO
       - PYTHONUNBUFFERED=1
+      - TZ=${TZ:-Europe/Madrid}
     
     volumes:
       - ./water-plant-simulator/config:/app/config:ro

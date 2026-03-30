@@ -5,7 +5,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend')]
+    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend')]
     [string]$Action = 'setup',
     
     [Parameter(Mandatory=$false)]
@@ -212,6 +212,20 @@ function Invoke-Start {
         Write-Warning "bunkerm-source/ no existe. El servicio 'bunkerm' no se construira."
         Write-Warning "Para incluirlo ejecuta: git clone https://github.com/bunkeriot/BunkerM bunkerm-source"
         Write-Host ""
+    }
+
+    # Limpiar contenedores huerfanos con el mismo nombre (ej. iniciados manualmente)
+    $orphanContainers = @('bunkerm-platform', 'bunkerm-postgres')
+    foreach ($cname in $orphanContainers) {
+        $exists = & $script:CE ps -a --format "{{.Names}}" 2>&1 | Select-String "^${cname}$"
+        if ($exists) {
+            Write-Warning "Contenedor huerfano encontrado: $cname. Eliminando antes de compose..."
+            $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+            & $script:CE stop $cname 2>&1 | Out-Null
+            & $script:CE rm $cname 2>&1 | Out-Null
+            $ErrorActionPreference = $savedPref
+            Write-Success "[OK] $cname eliminado"
+        }
     }
 
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
@@ -558,6 +572,48 @@ function Invoke-PatchFrontend {
     Write-Host ""
 }
 
+function Invoke-PatchBackend {
+    Write-Info "Hot-patch de servicios Python del backend..."
+    Write-Host ""
+
+    $backendPath = Join-Path $PSScriptRoot "bunkerm-source\backend\app"
+    if (-not (Test-Path $backendPath)) {
+        Write-Host "[ERROR] bunkerm-source/backend/app no encontrado." -ForegroundColor Red
+        exit 1
+    }
+
+    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
+    if (-not $containerRunning) {
+        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo." -ForegroundColor Red
+        exit 1
+    }
+
+    # Map: local subfolder -> container path + process pattern to kill/reload
+    $services = @(
+        @{ Name = 'dynsec';     Src = "$backendPath\dynsec";     Dst = '/app/dynsec';     Pattern = 'uvicorn main:app.*1000' },
+        @{ Name = 'monitor';    Src = "$backendPath\monitor";    Dst = '/app/monitor';    Pattern = 'uvicorn main:app.*1001' },
+        @{ Name = 'clientlogs'; Src = "$backendPath\clientlogs"; Dst = '/app/clientlogs'; Pattern = '/app/clientlogs/main.py' },
+        @{ Name = 'config';     Src = "$backendPath\config";     Dst = '/app/config';     Pattern = 'uvicorn main:app.*1005' }
+    )
+
+    foreach ($svc in $services) {
+        if (Test-Path $svc.Src) {
+            Write-Info "  Copiando $($svc.Name)..."
+            & $script:CE cp "$($svc.Src)/." "bunkerm-platform:$($svc.Dst)/"
+            # Find PID and kill so supervisord restarts with new code
+            $pid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep '$($svc.Pattern)' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
+            if ($pid -match '\d+') {
+                & $script:CE exec bunkerm-platform sh -c "kill -HUP $pid" 2>&1 | Out-Null
+                Write-Info "    Proceso $pid reiniciado (SIGHUP)"
+            }
+        }
+    }
+
+    Start-Sleep -Seconds 2
+    Write-Success "[OK] Backend actualizado. Los servicios afectados se han recargado."
+    Write-Host ""
+}
+
 # Main execution
 Show-Banner
 Test-Prerequisites
@@ -574,6 +630,7 @@ switch ($Action) {
     'start-bunkerm' { Invoke-StartBunkerM }
     'stop-bunkerm'  { Invoke-StopBunkerM }
     'patch-frontend'{ Invoke-PatchFrontend }
+    'patch-backend' { Invoke-PatchBackend }
     'stop-bunkerm' { Invoke-StopBunkerM }
     default {
         Write-Error "Unknown action: $Action"

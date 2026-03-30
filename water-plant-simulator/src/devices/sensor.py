@@ -102,7 +102,8 @@ class SensorDevice(BaseDevice):
     
     def _publish_measurement(self):
         """Publicar medición en el topic MQTT."""
-        timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        local_now = datetime.now().astimezone()
+        timestamp = local_now.strftime('%Y-%m-%dT%H:%M:%S%z')
         value = round(self.current_value, 2)
 
         if self.format == 'csv':
@@ -116,7 +117,7 @@ class SensorDevice(BaseDevice):
         else:
             # Default JSON format
             payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": local_now.isoformat(),
                 "device_id": f"sensor_{self.name}",
                 "value": value,
                 "unit": self.unit,
