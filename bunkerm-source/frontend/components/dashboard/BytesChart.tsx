@@ -126,9 +126,7 @@ export function BytesChart() {
             Loading…
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
-            Not enough data yet for this period
-          </div>
+          <EmptyPeriod period={period} onSwitch={setPeriod} height={250} />
         ) : (
           <ResponsiveContainer width="100%" height={250}>
             <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
@@ -167,6 +165,48 @@ export function BytesChart() {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ── Smart empty state ────────────────────────────────────────────────────────
+const WIDER: Partial<Record<StatsPeriod, StatsPeriod>> = {
+  '15m': '1h',
+  '30m': '1h',
+  '1h':  '12h',
+  '12h': '1d',
+  '1d':  '7d',
+}
+
+function EmptyPeriod({
+  period,
+  onSwitch,
+  height,
+}: {
+  period: StatsPeriod
+  onSwitch: (p: StatsPeriod) => void
+  height: number
+}) {
+  const wider = WIDER[period]
+  return (
+    <div
+      className="flex flex-col items-center justify-center gap-3 text-muted-foreground text-sm"
+      style={{ height }}
+    >
+      <span>No activity recorded in this window.</span>
+      {wider ? (
+        <span className="text-xs">
+          Data may be visible in a longer range —{' '}
+          <button
+            onClick={() => onSwitch(wider)}
+            className="text-sky-500 hover:text-sky-400 underline underline-offset-2 font-medium"
+          >
+            view {wider}
+          </button>
+        </span>
+      ) : (
+        <span className="text-xs">Ticks are recorded every 3 minutes while the broker is active.</span>
+      )}
+    </div>
   )
 }
 

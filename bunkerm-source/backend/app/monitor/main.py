@@ -175,7 +175,9 @@ class MQTTStats:
         
         # Initialize data storage
         self.data_storage = HistoricalDataStorage()
-        self.last_storage_update = datetime.now()
+        # Resume the tick timer from the last persisted tick so that a
+        # patch-backend restart doesn't delay the next tick by a full interval.
+        self.last_storage_update = self._load_last_tick_time()
         
         # Message rate tracking
         self.messages_history = deque(maxlen=15)
@@ -187,6 +189,27 @@ class MQTTStats:
         for _ in range(15):
             self.messages_history.append(0)
             self.published_history.append(0)
+
+    def _load_last_tick_time(self) -> datetime:
+        """Return the timestamp of the last persisted tick, or now() if none exists.
+        This allows the tick timer to resume correctly after a process restart
+        instead of always waiting a full 3-minute interval."""
+        try:
+            data = self.data_storage.load_data()
+            ticks = data.get('bytes_ticks') or data.get('msg_ticks') or []
+            if ticks:
+                last_ts = ticks[-1].get('ts', '')
+                # Strip the trailing 'Z' before parsing (Python < 3.11 fromisoformat)
+                parsed = datetime.fromisoformat(last_ts.rstrip('Z'))
+                # If the last tick is in the past by less than one interval, use it;
+                # otherwise fall back to now() so we don't write immediately on a
+                # very stale restart (e.g. after days offline).
+                age = (datetime.now() - parsed).total_seconds()
+                if 0 < age < 3600:   # within the last hour
+                    return parsed
+        except Exception:
+            pass
+        return datetime.now()
 
     def format_number(self, number: int) -> str:
         """Format large numbers with K/M suffix"""
