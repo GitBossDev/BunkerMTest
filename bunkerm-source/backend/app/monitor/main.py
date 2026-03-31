@@ -205,6 +205,7 @@ class MQTTStats:
         """Update storage every 3 minutes"""
         now = datetime.now()
         if (now - self.last_storage_update).total_seconds() >= 180:  # 3 minutes
+            self.last_storage_update = now   # always advance timer, even on error
             try:
                 self.data_storage.add_hourly_data(
                     float(self.bytes_received_15min),
@@ -215,9 +216,8 @@ class MQTTStats:
                     bytes_received=float(self.bytes_received_15min),
                     bytes_sent=float(self.bytes_sent_15min),
                     msg_received=int(self.messages_received_total),
-                    msg_sent=int(self.messages_sent_total),
+                    msg_sent=int(self.messages_sent),
                 )
-                self.last_storage_update = now
             except Exception as e:
                 logger.error(f"Error updating storage: {e}")
 
