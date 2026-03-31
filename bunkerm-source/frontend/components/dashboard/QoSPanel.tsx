@@ -2,6 +2,7 @@
 
 import { Layers } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import type { MonitorStats } from '@/types'
 
 interface QoSPanelProps {
@@ -27,7 +28,20 @@ export function QoSPanel({ stats }: QoSPanelProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">QoS &amp; Sessions</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium">QoS &amp; Sessions</CardTitle>
+          <InfoTooltip content={
+            <>
+              <p className="font-semibold text-foreground mb-1">Calidad de servicio y sesiones</p>
+              <TipRow label="In-flight" text="Mensajes QoS 1/2 enviados pero aún sin confirmar por el destinatario. Si crece indica congestión." />
+              <TipRow label="Stored" text="Mensajes en cola para clientes offline con sesión persistente (QoS 1/2)." />
+              <TipRow label="Desconectados" text="Clientes con sesión guardada en el broker pero sin conexión activa ahora mismo." />
+              <TipRow label="Sesiones expiradas" text="Sesiones cuyo tiempo de vida (session expiry interval) ha vencido y han sido eliminadas." />
+              <TipRow label="Retained" text="Mensajes con retain=true guardados por el broker; representan el último valor conocido de un topic." />
+              <TipRow label="Ratio retained" text="% de mensajes recibidos que llevaban el flag retain=true." />
+            </>
+          } />
+        </div>
         <div className="p-2 rounded-lg bg-violet-500/10">
           <Layers className="h-4 w-4 text-violet-500" />
         </div>

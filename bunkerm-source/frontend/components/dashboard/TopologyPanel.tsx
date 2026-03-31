@@ -13,6 +13,7 @@ import {
 } from 'recharts'
 import { Network } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import { monitorApi } from '@/lib/api'
 import type { TopologyStats } from '@/types'
 
@@ -54,7 +55,19 @@ export function TopologyPanel() {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between pb-2">
         <div>
-          <CardTitle className="text-sm font-medium">Topic Topology</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium">Topic Topology</CardTitle>
+            <InfoTooltip side="bottom" content={
+              <>
+                <p className="font-semibold text-foreground mb-1">Topología de topics</p>
+                <TipRow label="Topic" text="Ruta jerárquica del canal MQTT, p.ej. casa/salon/temperatura. Los clientes publican y se suscriben a topics." />
+                <TipRow label="Conteo" text="Número de mensajes publicados a ese topic desde el inicio del broker. Se resetea si el broker se reinicia." />
+                <TipRow label="Topics distintos" text="Total de topics únicos vistos por el broker, excluyendo los del sistema ($SYS)." />
+                <TipRow label="Desconectados" text="Clientes con sesión guardada pero sin conexión activa." />
+                <TipRow label="Expirados" text="Sesiones eliminadas por haber superado su session expiry interval." />
+              </>
+            } />
+          </div>
           <CardDescription className="text-xs">
             Top {topics.length} topics by message count
             <span className="ml-4 text-muted-foreground">

@@ -3,6 +3,7 @@
 import { Users } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import ClientGauge from '@/components/dashboard/ClientGauge'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import type { MonitorStats } from '@/types'
 
 interface StatsCardsProps {
@@ -18,7 +19,18 @@ export function StatsCards({ stats }: StatsCardsProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">Clients</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium text-muted-foreground">Clients</CardTitle>
+          <InfoTooltip side="bottom" content={
+            <>
+              <p className="font-semibold text-foreground mb-1">Clientes MQTT</p>
+              <TipRow label="Conectados" text="Clientes con conexión TCP activa en este momento." />
+              <TipRow label="Sesiones activas" text="Total de sesiones registradas por el broker (conectadas + desconectadas pero recordadas)." />
+              <TipRow label="Máximo" text="Pico histórico de clientes conectados simultáneamente desde el último reinicio del broker." />
+              <TipRow label="Suscripciones" text="Total de suscripciones a topics activas en este momento (un cliente puede tener varias)." />
+            </>
+          } />
+        </div>
         <div className="p-2 rounded-lg bg-blue-500/10">
           <Users className="h-4 w-4 text-blue-500" />
         </div>

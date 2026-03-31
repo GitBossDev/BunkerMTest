@@ -2,6 +2,7 @@
 
 import { Activity } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import type { MonitorStats } from '@/types'
 
 interface BrokerHealthProps {
@@ -34,7 +35,18 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
+          <InfoTooltip content={
+            <>
+              <p className="font-semibold text-foreground mb-1">Rendimiento del broker</p>
+              <TipRow label="Msg RX/TX" text="Mensajes recibidos/enviados por segundo. Media calculada por Mosquitto en el último minuto." />
+              <TipRow label="Conn rate" text="Nuevas conexiones de clientes por segundo en el último minuto." />
+              <TipRow label="Bytes RX/TX" text="Volumen de datos transferidos por segundo (incluye cabeceras MQTT)." />
+              <TipRow label="Latencia" text="Tiempo de ida y vuelta: el monitor publica un ping al broker y mide cuánto tarda en llegar. Verde &lt;50ms · Amarillo &lt;200ms · Rojo &gt;200ms." />
+            </>
+          } />
+        </div>
         <div className="p-2 rounded-lg bg-emerald-500/10">
           <Activity className="h-4 w-4 text-emerald-500" />
         </div>

@@ -12,6 +12,7 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import { monitorApi } from '@/lib/api'
 import type { PeriodMessageData, StatsPeriod } from '@/types'
 
@@ -87,7 +88,19 @@ export function MessagesChart({ retained = 0 }: Props) {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
         <div>
-          <CardTitle className="text-sm font-medium">Message Activity</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium">Message Activity</CardTitle>
+            <InfoTooltip side="bottom" content={
+              <>
+                <p className="font-semibold text-foreground mb-1">Actividad de mensajes</p>
+                <TipRow label="Recibidos" text="Mensajes PUBLISH que los clientes han enviado al broker (inbound)." />
+                <TipRow label="Enviados" text="Mensajes que el broker ha entregado a los suscriptores (outbound). Puede ser mayor que los recibidos si hay múltiples suscriptores por topic." />
+                <TipRow label="Total" text="Suma de recibidos + enviados en la ventana temporal. No incluye mensajes de control MQTT (PING, CONNECT, etc.)." />
+                <TipRow label="Retained" text="Total de mensajes con retain=true almacenados actualmente (dato global, no filtrado por período)." />
+                <TipRow label="Granularidad" text="Cada barra representa un intervalo de 3 minutos." />
+              </>
+            } />
+          </div>
           <CardDescription className="text-xs text-muted-foreground">
             Received &amp; sent per interval
           </CardDescription>

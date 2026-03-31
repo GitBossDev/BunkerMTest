@@ -12,6 +12,7 @@ import {
   Legend,
 } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import { monitorApi } from '@/lib/api'
 import type { PeriodBytesData, StatsPeriod } from '@/types'
 
@@ -91,7 +92,19 @@ export function BytesChart() {
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-        <CardTitle className="text-sm font-medium">Bytes Transfer ({unit})</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium">Bytes Transfer ({unit})</CardTitle>
+          <InfoTooltip side="bottom" content={
+            <>
+              <p className="font-semibold text-foreground mb-1">Transferencia de bytes</p>
+              <TipRow label="RX (Received)" text="Bytes recibidos por el broker desde los clientes (mensajes PUBLISH + cabeceras MQTT)." />
+              <TipRow label="TX (Sent)" text="Bytes enviados por el broker a los clientes (entregas de mensajes + ACKs)." />
+              <TipRow label="Escala" text="Se ajusta automáticamente a B/s, KB/s o MB/s según el volumen del período seleccionado." />
+              <TipRow label="Granularidad" text="Cada barra representa un intervalo de 3 minutos." />
+            </>
+          } />
+        </div>
+        </div>
         <div className="flex flex-wrap gap-1">
           {PERIODS.map((p) => (
             <button

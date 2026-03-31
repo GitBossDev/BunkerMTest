@@ -2,6 +2,7 @@
 
 import { Server, Clock, Wifi, WifiOff } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { InfoTooltip, TipRow } from '@/components/ui/info-tooltip'
 import type { MonitorStats } from '@/types'
 
 interface BrokerInfoProps {
@@ -37,7 +38,17 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">Broker</CardTitle>
+        <div className="flex items-center gap-2">
+          <CardTitle className="text-sm font-medium">Broker</CardTitle>
+          <InfoTooltip side="bottom" content={
+            <>
+              <p className="font-semibold text-foreground mb-1">Información del broker</p>
+              <TipRow label="Versión" text="Versión de Eclipse Mosquitto instalada en el contenedor." />
+              <TipRow label="Uptime" text="Tiempo que lleva corriendo el proceso Mosquitto sin reiniciarse. Un reinicio inesperado puede indicar un error." />
+              <TipRow label="Estado" text="Icono verde = monitor conectado al broker · Icono rojo = sin conexión (el broker puede estar reiniciándose)." />
+            </>
+          } />
+        </div>
         <div className={`p-2 rounded-lg ${connected ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
           {connected
             ? <Wifi className="h-4 w-4 text-green-500" />
