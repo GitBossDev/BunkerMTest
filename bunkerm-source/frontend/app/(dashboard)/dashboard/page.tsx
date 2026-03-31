@@ -7,6 +7,9 @@ import { StatsCards } from '@/components/dashboard/StatsCards'
 import { BytesChart } from '@/components/dashboard/BytesChart'
 import { MessagesChart } from '@/components/dashboard/MessagesChart'
 import { BrokerInfo } from '@/components/dashboard/BrokerInfo'
+import { BrokerHealth } from '@/components/dashboard/BrokerHealth'
+import { QoSPanel } from '@/components/dashboard/QoSPanel'
+import { TopologyPanel } from '@/components/dashboard/TopologyPanel'
 import { Button } from '@/components/ui/button'
 import type { MonitorStats } from '@/types'
 
@@ -38,6 +41,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Dashboard</h1>
@@ -64,14 +68,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* ── Row 1: Clients panel ── */}
       <StatsCards stats={stats} />
 
+      {/* ── Row 2: Bytes + Messages charts ── */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         <BytesChart />
         <MessagesChart retained={stats?.retained_messages ?? 0} />
       </div>
 
-      <BrokerInfo stats={stats} />
+      {/* ── Row 3: Broker info + Health + QoS ── */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+        <BrokerInfo stats={stats} />
+        <div className="sm:col-span-2 lg:col-span-2">
+          <BrokerHealth stats={stats} />
+        </div>
+        <QoSPanel stats={stats} />
+      </div>
+
+      {/* ── Row 4: Topic topology ── */}
+      <TopologyPanel />
     </div>
   )
 }

@@ -94,18 +94,47 @@ def _get_current_api_key() -> str:
 
 # Define the topics we're interested in
 MONITORED_TOPICS = {
-    "$SYS/broker/messages/sent": "messages_sent",
-    "$SYS/broker/subscriptions/count": "subscriptions",
-    "$SYS/broker/retained messages/count": "retained_messages",
-    "$SYS/broker/clients/connected": "connected_clients",
-    "$SYS/broker/clients/total": "clients_total",
-    "$SYS/broker/clients/maximum": "clients_maximum",
-    "$SYS/broker/messages/received": "messages_received_total",
-    "$SYS/broker/messages/sent": "messages_sent_total",
-    "$SYS/broker/version": "broker_version",
-    "$SYS/broker/uptime": "broker_uptime",
-    "$SYS/broker/load/bytes/received/15min": "bytes_received_15min",
-    "$SYS/broker/load/bytes/sent/15min": "bytes_sent_15min"
+    # Counts
+    "$SYS/broker/messages/sent":              "messages_sent",
+    "$SYS/broker/messages/received":          "messages_received_total",
+    "$SYS/broker/subscriptions/count":        "subscriptions",
+    "$SYS/broker/retained messages/count":    "retained_messages",
+    "$SYS/broker/messages/inflight":          "messages_inflight",
+    "$SYS/broker/store/messages/count":       "messages_stored",
+    "$SYS/broker/store/messages/bytes":       "messages_store_bytes",
+    # Clients
+    "$SYS/broker/clients/connected":          "connected_clients",
+    "$SYS/broker/clients/total":              "clients_total",
+    "$SYS/broker/clients/maximum":            "clients_maximum",
+    "$SYS/broker/clients/disconnected":       "clients_disconnected",
+    "$SYS/broker/clients/expired":            "clients_expired",
+    # Load rates (float — msg/sec or bytes/sec)
+    "$SYS/broker/load/messages/received/1min": "load_msg_rx_1min",
+    "$SYS/broker/load/messages/sent/1min":     "load_msg_tx_1min",
+    "$SYS/broker/load/bytes/received/1min":    "load_bytes_rx_1min",
+    "$SYS/broker/load/bytes/sent/1min":        "load_bytes_tx_1min",
+    "$SYS/broker/load/bytes/received/15min":   "bytes_received_15min",
+    "$SYS/broker/load/bytes/sent/15min":       "bytes_sent_15min",
+    "$SYS/broker/load/connections/1min":       "load_connections_1min",
+    # Broker info (string)
+    "$SYS/broker/version":                    "broker_version",
+    "$SYS/broker/uptime":                     "broker_uptime",
+}
+
+# Topics whose payload is a float rate value
+_FLOAT_TOPICS = {
+    "$SYS/broker/load/messages/received/1min",
+    "$SYS/broker/load/messages/sent/1min",
+    "$SYS/broker/load/bytes/received/1min",
+    "$SYS/broker/load/bytes/sent/1min",
+    "$SYS/broker/load/bytes/received/15min",
+    "$SYS/broker/load/bytes/sent/15min",
+    "$SYS/broker/load/connections/1min",
+}
+# Topics whose payload is a plain string (not numeric)
+_STRING_TOPICS = {
+    "$SYS/broker/version",
+    "$SYS/broker/uptime",
 }
 
 class MQTTStats:
@@ -118,13 +147,28 @@ class MQTTStats:
         self.connected_clients = 0
         self.bytes_received_15min = 0.0
         self.bytes_sent_15min = 0.0
-        # Extended $SYS fields
+        # Extended $SYS fields — clients
         self.clients_total = 0
         self.clients_maximum = 0
+        self.clients_disconnected = 0
+        self.clients_expired = 0
+        # Extended $SYS fields — messages
         self.messages_received_total = 0
-        self.messages_sent_total = 0
+        self.messages_inflight = 0
+        self.messages_stored = 0
+        self.messages_store_bytes = 0
+        # Extended $SYS fields — load rates
+        self.load_msg_rx_1min = 0.0
+        self.load_msg_tx_1min = 0.0
+        self.load_bytes_rx_1min = 0.0
+        self.load_bytes_tx_1min = 0.0
+        self.load_connections_1min = 0.0
+        # Broker info
         self.broker_version = ""
         self.broker_uptime = ""
+        # Latency round-trip
+        self.latency_ms: float = -1.0
+        self._ping_sent_at: float = 0.0
         
         # Initialize message counter
         self.message_counter = MessageCounter()
@@ -226,15 +270,29 @@ class MQTTStats:
                 "published_history": list(self.published_history),
                 "bytes_stats": hourly_data,  # This contains timestamps, bytes_received, and bytes_sent
                 "daily_message_stats": daily_messages,  # This contains dates and counts
-                # Extended client info for gauge
-                "clients_total": self.clients_total,
-                "clients_maximum": self.clients_maximum,
+                # Extended client info for gauge (subtract 1 to exclude broker monitor)
+                "clients_total": max(0, self.clients_total - 1),
+                "clients_maximum": max(0, self.clients_maximum - 1),
+                "clients_disconnected": self.clients_disconnected,
+                "clients_expired": self.clients_expired,
                 # Broker info
                 "broker_version": self.broker_version,
                 "broker_uptime": self.broker_uptime,
-                # Raw message counts for period filtering
+                # Raw message counts for period reference
                 "messages_received_raw": self.messages_received_total,
-                "messages_sent_raw": self.messages_sent_total,
+                "messages_sent_raw": self.messages_sent,
+                # Load rates
+                "load_msg_rx_1min": round(self.load_msg_rx_1min, 2),
+                "load_msg_tx_1min": round(self.load_msg_tx_1min, 2),
+                "load_bytes_rx_1min": round(self.load_bytes_rx_1min, 2),
+                "load_bytes_tx_1min": round(self.load_bytes_tx_1min, 2),
+                "load_connections_1min": round(self.load_connections_1min, 2),
+                # QoS metrics
+                "messages_inflight": self.messages_inflight,
+                "messages_stored": self.messages_stored,
+                "messages_store_bytes": self.messages_store_bytes,
+                # Latency
+                "latency_ms": self.latency_ms,
             }
 
 class MessageCounter:
@@ -304,11 +362,29 @@ _mqtt_client = None
 # Define the lifespan context manager for FastAPI
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio, time as _t
     global _mqtt_client
     client = connect_mqtt()
     _mqtt_client = client
     client.loop_start()
+
+    async def _latency_pinger():
+        """Publish a ping every 15 s to measure round-trip broker latency."""
+        await asyncio.sleep(5)  # let MQTT connect first
+        while True:
+            try:
+                if _mqtt_client is not None:
+                    sent_at = _t.time()
+                    with mqtt_stats._lock:
+                        mqtt_stats._ping_sent_at = sent_at
+                    _mqtt_client.publish("bunkerm/monitor/ping", str(sent_at), qos=0)
+            except Exception:
+                pass
+            await asyncio.sleep(15)
+
+    _ping_task = asyncio.create_task(_latency_pinger())
     yield
+    _ping_task.cancel()
     client.loop_stop()
     _mqtt_client = None
 
@@ -436,19 +512,24 @@ def on_message(client, userdata, msg):
         try:
             attr_name = MONITORED_TOPICS[msg.topic]
             raw = msg.payload.decode()
-            # String-only fields
-            if msg.topic in ["$SYS/broker/version", "$SYS/broker/uptime"]:
-                with mqtt_stats._lock:
+            with mqtt_stats._lock:
+                if msg.topic in _STRING_TOPICS:
                     setattr(mqtt_stats, attr_name, raw)
-            # Float fields
-            elif msg.topic in ["$SYS/broker/load/bytes/received/15min", "$SYS/broker/load/bytes/sent/15min"]:
-                with mqtt_stats._lock:
+                elif msg.topic in _FLOAT_TOPICS:
                     setattr(mqtt_stats, attr_name, float(raw))
-            else:
-                with mqtt_stats._lock:
+                else:
                     setattr(mqtt_stats, attr_name, int(raw))
         except ValueError as e:
             logger.error(f"Error processing message from {msg.topic}: {e}")
+    # Latency round-trip: measure time from when we sent the ping
+    elif msg.topic == "bunkerm/monitor/ping":
+        try:
+            import time as _t
+            sent_at = float(msg.payload.decode())
+            with mqtt_stats._lock:
+                mqtt_stats.latency_ms = round((_t.time() - sent_at) * 1000, 2)
+        except (ValueError, AttributeError):
+            pass
     # Count non-$SYS messages and track topics
     elif not msg.topic.startswith('$SYS/'):
         mqtt_stats.increment_user_messages()
@@ -663,16 +744,62 @@ async def get_bytes_for_period(request: Request, period: str = "1h"):
     from monitor.data_storage import PERIODS
     if period not in PERIODS:
         raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
-    return _mqtt_client.data_storage.get_bytes_for_period(period)
+    return mqtt_stats.data_storage.get_bytes_for_period(period)
 
 @app.get("/api/v1/stats/messages", dependencies=[Depends(get_api_key)])
 async def get_messages_for_period(request: Request, period: str = "1h"):
-    """Get messages received/sent history for the given period (15m/30m/1h/12h/1d/7d/30d)"""
+    """Get messages received/sent history for the given period."""
     await log_request(request)
     from monitor.data_storage import PERIODS
     if period not in PERIODS:
         raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
-    return _mqtt_client.data_storage.get_messages_for_period(period)
+    return mqtt_stats.data_storage.get_messages_for_period(period)
+
+@app.get("/api/v1/stats/topology", dependencies=[Depends(get_api_key)])
+async def get_topology_stats(request: Request, limit: int = 15):
+    """Top topics by message count plus client churn info."""
+    await log_request(request)
+    all_topics = topic_store.get_all()
+    user_topics = [t for t in all_topics if not t['topic'].startswith('$')]
+    top_n = sorted(user_topics, key=lambda x: x.get('count', 0), reverse=True)[:limit]
+    with mqtt_stats._lock:
+        return {
+            "top_topics": top_n,
+            "total_distinct_topics": len(user_topics),
+            "clients_disconnected": mqtt_stats.clients_disconnected,
+            "clients_expired": mqtt_stats.clients_expired,
+        }
+
+@app.get("/api/v1/stats/health", dependencies=[Depends(get_api_key)])
+async def get_health_stats(request: Request):
+    """Broker load rates and round-trip latency."""
+    await log_request(request)
+    with mqtt_stats._lock:
+        return {
+            "load_msg_rx_1min":      round(mqtt_stats.load_msg_rx_1min, 2),
+            "load_msg_tx_1min":      round(mqtt_stats.load_msg_tx_1min, 2),
+            "load_bytes_rx_1min":    round(mqtt_stats.load_bytes_rx_1min, 2),
+            "load_bytes_tx_1min":    round(mqtt_stats.load_bytes_tx_1min, 2),
+            "load_connections_1min": round(mqtt_stats.load_connections_1min, 2),
+            "latency_ms":            mqtt_stats.latency_ms,
+        }
+
+@app.get("/api/v1/stats/qos", dependencies=[Depends(get_api_key)])
+async def get_qos_stats(request: Request):
+    """QoS in-flight and stored message metrics."""
+    await log_request(request)
+    with mqtt_stats._lock:
+        total_rx = mqtt_stats.messages_received_total
+        total_retained = mqtt_stats.retained_messages
+        retained_ratio = round(total_retained / max(total_rx, 1) * 100, 1)
+        return {
+            "messages_inflight":    mqtt_stats.messages_inflight,
+            "messages_stored":      mqtt_stats.messages_stored,
+            "messages_store_bytes": mqtt_stats.messages_store_bytes,
+            "clients_disconnected": mqtt_stats.clients_disconnected,
+            "clients_expired":      mqtt_stats.clients_expired,
+            "retained_ratio":       retained_ratio,
+        }
 
 @app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])
 async def get_topics(request: Request):

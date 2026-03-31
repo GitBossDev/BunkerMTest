@@ -195,6 +195,9 @@ export const monitorApi = {
   getStats: () => request(buildUrl(MONITOR_API_URL, '/stats')),
   getBytesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/bytes?period=${period}`)),
   getMessagesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/messages?period=${period}`)),
+  getTopologyStats: (limit = 15) => request(buildUrl(MONITOR_API_URL, `/stats/topology?limit=${limit}`)),
+  getHealthStats: () => request(buildUrl(MONITOR_API_URL, '/stats/health')),
+  getQosStats:    () => request(buildUrl(MONITOR_API_URL, '/stats/qos')),
   getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
   publishMessage: (data: { topic: string; payload: string; qos?: number; retain?: boolean }) =>
     request(buildUrl(MONITOR_API_URL, '/publish'), {

@@ -144,12 +144,9 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
           )
         })}
 
-        {/* centre reading */}
-        <text x={cx} y={cy - 20} textAnchor="middle" fontSize={22} fontWeight="bold" fill="currentColor">
+        {/* centre reading — number only, no label */}
+        <text x={cx} y={cy - 14} textAnchor="middle" fontSize={26} fontWeight="bold" fill="currentColor">
           {connected}
-        </text>
-        <text x={cx} y={cy - 6} textAnchor="middle" fontSize={9} fill="currentColor" fillOpacity={0.55}>
-          connected
         </text>
       </svg>
 

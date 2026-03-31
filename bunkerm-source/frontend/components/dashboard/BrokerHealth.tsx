@@ -1,0 +1,63 @@
+'use client'
+
+import { Activity } from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import type { MonitorStats } from '@/types'
+
+interface BrokerHealthProps {
+  stats: MonitorStats | null
+}
+
+function formatBytes(bps: number): string {
+  if (bps < 1024)       return `${bps.toFixed(1)} B/s`
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
+  return `${(bps / (1024 * 1024)).toFixed(2)} MB/s`
+}
+
+function latencyColor(ms: number): string {
+  if (ms < 0)   return 'text-muted-foreground'
+  if (ms < 50)  return 'text-green-500'
+  if (ms < 200) return 'text-yellow-500'
+  return 'text-red-500'
+}
+
+export function BrokerHealth({ stats }: BrokerHealthProps) {
+  const rxMsg  = stats?.load_msg_rx_1min  ?? 0
+  const txMsg  = stats?.load_msg_tx_1min  ?? 0
+  const rxByte = stats?.load_bytes_rx_1min ?? 0
+  const txByte = stats?.load_bytes_tx_1min ?? 0
+  const connRate = stats?.load_connections_1min ?? 0
+  const latency  = stats?.latency_ms ?? -1
+
+  const latencyLabel = latency < 0 ? '—' : `${latency} ms`
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
+        <div className="p-2 rounded-lg bg-emerald-500/10">
+          <Activity className="h-4 w-4 text-emerald-500" />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
+          <Metric label="Msg RX rate"  value={`${rxMsg.toFixed(1)} msg/s`} accent="text-blue-500" />
+          <Metric label="Msg TX rate"  value={`${txMsg.toFixed(1)} msg/s`} accent="text-green-500" />
+          <Metric label="Conn rate"    value={`${connRate.toFixed(2)}/s`}   accent="text-orange-500" />
+          <Metric label="Bytes RX"     value={formatBytes(rxByte)}          accent="text-blue-400" />
+          <Metric label="Bytes TX"     value={formatBytes(txByte)}          accent="text-green-400" />
+          <Metric label="Latency"      value={latencyLabel}                 accent={latencyColor(latency)} />
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function Metric({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className={`text-lg font-bold ${accent ?? 'text-foreground'}`}>{value}</p>
+    </div>
+  )
+}

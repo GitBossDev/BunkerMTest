@@ -42,8 +42,9 @@ class HistoricalDataStorage:
                 "daily_messages": [],
                 "hourly": [],
                 "daily": [],
-                "bytes_ticks": [],    # NEW: fine-grained bytes ticks (3-min intervals)
-                "msg_ticks": [],      # NEW: fine-grained message rate ticks (3-min intervals)
+                "bytes_ticks": [],    # fine-grained bytes ticks (3-min intervals)
+                "msg_ticks": [],      # fine-grained message delta ticks (3-min intervals)
+                "_msg_baseline": {"rx": 0, "tx": 0},  # last cumulative msg counts
             }
             self.save_data(initial_data)
 
@@ -54,6 +55,8 @@ class HistoricalDataStorage:
                 for key in ('daily_messages', 'hourly', 'daily', 'bytes_ticks', 'msg_ticks'):
                     if key not in data:
                         data[key] = []
+                if '_msg_baseline' not in data:
+                    data['_msg_baseline'] = {'rx': 0, 'tx': 0}
                 return data
         except Exception as e:
             print(f"Error loading data: {e}")
@@ -77,19 +80,20 @@ class HistoricalDataStorage:
     # ------------------------------------------------------------------
     def add_tick(self, bytes_received: float, bytes_sent: float,
                  msg_received: int, msg_sent: int):
-        """Record a 3-minute-resolution tick for bytes and message counts."""
+        """Record a 3-minute-resolution tick.
+        Bytes values are already rates (bytes/sec from $SYS).
+        Message values are cumulative totals — we store per-interval deltas.
+        """
         data = self.load_data()
+        baseline = data.get('_msg_baseline', {'rx': 0, 'tx': 0})
+        # Compute deltas; clamp to 0 to handle broker restarts
+        delta_rx = max(0, msg_received - baseline.get('rx', 0))
+        delta_tx = max(0, msg_sent     - baseline.get('tx', 0))
+        data['_msg_baseline'] = {'rx': msg_received, 'tx': msg_sent}
+
         ts = datetime.now().isoformat(timespec='seconds') + 'Z'
-        data['bytes_ticks'].append({
-            'ts': ts,
-            'rx': bytes_received,
-            'tx': bytes_sent,
-        })
-        data['msg_ticks'].append({
-            'ts': ts,
-            'rx': msg_received,
-            'tx': msg_sent,
-        })
+        data['bytes_ticks'].append({'ts': ts, 'rx': bytes_received, 'tx': bytes_sent})
+        data['msg_ticks'].append({'ts': ts, 'rx': delta_rx, 'tx': delta_tx})
         # Prune to 30 days
         cutoff = (datetime.now() - timedelta(minutes=MAX_AGE_MINUTES)).isoformat(timespec='seconds') + 'Z'
         data['bytes_ticks'] = [e for e in data['bytes_ticks'] if e['ts'] >= cutoff]

@@ -80,13 +80,29 @@ export interface MonitorStats {
   }
   mqtt_connected?: boolean
   connection_error?: string
-  // New fields from $SYS broker topics
+  // Extended client info
   clients_total?: number
   clients_maximum?: number
+  clients_disconnected?: number
+  clients_expired?: number
+  // Broker info
   broker_version?: string
   broker_uptime?: string
+  // Raw message counts
   messages_received_raw?: number
   messages_sent_raw?: number
+  // Load rates
+  load_msg_rx_1min?: number
+  load_msg_tx_1min?: number
+  load_bytes_rx_1min?: number
+  load_bytes_tx_1min?: number
+  load_connections_1min?: number
+  // QoS
+  messages_inflight?: number
+  messages_stored?: number
+  messages_store_bytes?: number
+  // Latency
+  latency_ms?: number
 }
 
 export interface PeriodBytesData {
@@ -101,7 +117,23 @@ export interface PeriodMessageData {
   msg_sent: number[]
 }
 
-export type StatsPeriod = '15m' | '30m' | '1h' | '12h' | '1d' | '7d' | '30d'
+export type StatsPeriod = '15m' | '30m' | '1h' | '12h' | '1d' | '7d'
+
+export interface TopicEntry {
+  topic: string
+  value: string
+  count: number
+  retained: boolean
+  qos: number
+  timestamp: string
+}
+
+export interface TopologyStats {
+  top_topics: TopicEntry[]
+  total_distinct_topics: number
+  clients_disconnected: number
+  clients_expired: number
+}
 
 export interface ChartDataPoint {
   time: string

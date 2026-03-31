@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { monitorApi } from '@/lib/api'
 import type { PeriodMessageData, StatsPeriod } from '@/types'
 
-const PERIODS: StatsPeriod[] = ['15m', '30m', '1h', '12h', '1d', '7d', '30d']
+const PERIODS: StatsPeriod[] = ['15m', '30m', '1h', '12h', '1d', '7d']
 
 // Refresh intervals per period (ms)
 const REFRESH_MS: Record<StatsPeriod, number> = {
@@ -25,7 +25,6 @@ const REFRESH_MS: Record<StatsPeriod, number> = {
   '12h': 60_000,
   '1d':  60_000,
   '7d':  120_000,
-  '30d': 300_000,
 }
 
 function formatLabel(ts: string, period: StatsPeriod): string {
@@ -80,18 +79,17 @@ export function MessagesChart({ retained = 0 }: Props) {
     return () => clearInterval(interval)
   }, [fetchData, period])
 
+  const totalRx  = chartData.reduce((s, d) => s + d.received, 0)
+  const totalTx  = chartData.reduce((s, d) => s + d.sent, 0)
+  const totalAll = totalRx + totalTx
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
         <div>
           <CardTitle className="text-sm font-medium">Message Activity</CardTitle>
-          <CardDescription className="text-xs">
-            Received &amp; sent — period: {period}
-            {retained > 0 && (
-              <span className="ml-3 text-cyan-600 dark:text-cyan-400">
-                📦 Retained: {retained}
-              </span>
-            )}
+          <CardDescription className="text-xs text-muted-foreground">
+            Received &amp; sent per interval
           </CardDescription>
         </div>
         <div className="flex flex-wrap gap-1">
@@ -110,17 +108,25 @@ export function MessagesChart({ retained = 0 }: Props) {
           ))}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {/* Summary stats row */}
+        <div className="grid grid-cols-4 gap-2 text-center border rounded-lg p-2 bg-muted/30">
+          <SumStat label="Total" value={totalAll} color="text-foreground" />
+          <SumStat label="Received" value={totalRx} color="text-blue-500" />
+          <SumStat label="Sent" value={totalTx} color="text-green-500" />
+          <SumStat label="Retained" value={retained} color="text-cyan-500" />
+        </div>
+
         {loading ? (
-          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
             Loading…
           </div>
         ) : chartData.length === 0 ? (
-          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
             Not enough data yet for this period
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
               <XAxis dataKey="time" tick={{ fontSize: 10 }} />
@@ -141,6 +147,15 @@ export function MessagesChart({ retained = 0 }: Props) {
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function SumStat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className={`text-base font-bold ${color}`}>{value.toLocaleString()}</p>
+    </div>
   )
 }
 
