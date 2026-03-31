@@ -59,12 +59,12 @@ export function TopologyPanel() {
             <CardTitle className="text-sm font-medium">Topic Topology</CardTitle>
             <InfoTooltip side="bottom" content={
               <>
-                <p className="font-semibold text-foreground mb-1">Topología de topics</p>
-                <TipRow label="Topic" text="Ruta jerárquica del canal MQTT, p.ej. casa/salon/temperatura. Los clientes publican y se suscriben a topics." />
-                <TipRow label="Conteo" text="Número de mensajes publicados a ese topic desde el inicio del broker. Se resetea si el broker se reinicia." />
-                <TipRow label="Topics distintos" text="Total de topics únicos vistos por el broker, excluyendo los del sistema ($SYS)." />
-                <TipRow label="Desconectados" text="Clientes con sesión guardada pero sin conexión activa." />
-                <TipRow label="Expirados" text="Sesiones eliminadas por haber superado su session expiry interval." />
+                <p className="font-semibold text-foreground mb-1">Topic Topology</p>
+                <TipRow label="Topic" text="Hierarchical MQTT channel path, e.g. plant/tank1/level. Clients publish and subscribe to topics." />
+                <TipRow label="Count" text="Number of messages published to that topic since the broker started. Resets on broker restart." />
+                <TipRow label="Distinct topics" text="Total unique topics seen by the broker, excluding system topics ($SYS)." />
+                <TipRow label="Disconnected" text="Clients with a saved session but no active connection right now." />
+                <TipRow label="Expired" text="Sessions removed because their session expiry interval elapsed." />
               </>
             } />
           </div>

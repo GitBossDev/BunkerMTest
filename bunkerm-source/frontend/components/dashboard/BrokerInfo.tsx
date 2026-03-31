@@ -42,10 +42,10 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
           <CardTitle className="text-sm font-medium">Broker</CardTitle>
           <InfoTooltip side="bottom" content={
             <>
-              <p className="font-semibold text-foreground mb-1">Información del broker</p>
-              <TipRow label="Versión" text="Versión de Eclipse Mosquitto instalada en el contenedor." />
-              <TipRow label="Uptime" text="Tiempo que lleva corriendo el proceso Mosquitto sin reiniciarse. Un reinicio inesperado puede indicar un error." />
-              <TipRow label="Estado" text="Icono verde = monitor conectado al broker · Icono rojo = sin conexión (el broker puede estar reiniciándose)." />
+              <p className="font-semibold text-foreground mb-1">Broker Information</p>
+              <TipRow label="Version" text="Eclipse Mosquitto version installed in the container." />
+              <TipRow label="Uptime" text="How long the Mosquitto process has been running without a restart. An unexpected restart may indicate an error." />
+              <TipRow label="Status icon" text="Green = monitor connected to the broker · Red = no connection (the broker may be restarting)." />
             </>
           } />
         </div>

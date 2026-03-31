@@ -96,11 +96,11 @@ export function BytesChart() {
           <CardTitle className="text-sm font-medium">Bytes Transfer ({unit})</CardTitle>
           <InfoTooltip side="bottom" content={
             <>
-              <p className="font-semibold text-foreground mb-1">Transferencia de bytes</p>
-              <TipRow label="RX (Received)" text="Bytes recibidos por el broker desde los clientes (mensajes PUBLISH + cabeceras MQTT)." />
-              <TipRow label="TX (Sent)" text="Bytes enviados por el broker a los clientes (entregas de mensajes + ACKs)." />
-              <TipRow label="Escala" text="Se ajusta automáticamente a B/s, KB/s o MB/s según el volumen del período seleccionado." />
-              <TipRow label="Granularidad" text="Cada barra representa un intervalo de 3 minutos." />
+              <p className="font-semibold text-foreground mb-1">Bytes Transfer</p>
+              <TipRow label="RX (Received)" text="Bytes received by the broker from clients (PUBLISH messages + MQTT protocol headers)." />
+              <TipRow label="TX (Sent)" text="Bytes sent by the broker to clients (message deliveries + ACKs)." />
+              <TipRow label="Scale" text="Automatically adjusts to B/s, KB/s or MB/s based on the volume in the selected period." />
+              <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
             </>
           } />
         </div>

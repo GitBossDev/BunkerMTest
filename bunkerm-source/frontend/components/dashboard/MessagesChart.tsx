@@ -92,12 +92,12 @@ export function MessagesChart({ retained = 0 }: Props) {
             <CardTitle className="text-sm font-medium">Message Activity</CardTitle>
             <InfoTooltip side="bottom" content={
               <>
-                <p className="font-semibold text-foreground mb-1">Actividad de mensajes</p>
-                <TipRow label="Recibidos" text="Mensajes PUBLISH que los clientes han enviado al broker (inbound)." />
-                <TipRow label="Enviados" text="Mensajes que el broker ha entregado a los suscriptores (outbound). Puede ser mayor que los recibidos si hay múltiples suscriptores por topic." />
-                <TipRow label="Total" text="Suma de recibidos + enviados en la ventana temporal. No incluye mensajes de control MQTT (PING, CONNECT, etc.)." />
-                <TipRow label="Retained" text="Total de mensajes con retain=true almacenados actualmente (dato global, no filtrado por período)." />
-                <TipRow label="Granularidad" text="Cada barra representa un intervalo de 3 minutos." />
+                <p className="font-semibold text-foreground mb-1">Message Activity</p>
+                <TipRow label="Received" text="PUBLISH messages sent by clients to the broker (inbound traffic)." />
+                <TipRow label="Sent" text="Messages delivered by the broker to subscribers (outbound). Can exceed received if multiple clients subscribe to the same topic." />
+                <TipRow label="Total" text="Sum of received + sent within the selected time window. Does not include MQTT control packets (PING, CONNECT, etc.)." />
+                <TipRow label="Retained" text="Total messages currently stored with retain=true (global stat, not filtered by period)." />
+                <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
               </>
             } />
           </div>

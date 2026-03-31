@@ -39,11 +39,11 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
           <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
           <InfoTooltip content={
             <>
-              <p className="font-semibold text-foreground mb-1">Rendimiento del broker</p>
-              <TipRow label="Msg RX/TX" text="Mensajes recibidos/enviados por segundo. Media calculada por Mosquitto en el último minuto." />
-              <TipRow label="Conn rate" text="Nuevas conexiones de clientes por segundo en el último minuto." />
-              <TipRow label="Bytes RX/TX" text="Volumen de datos transferidos por segundo (incluye cabeceras MQTT)." />
-              <TipRow label="Latencia" text="Tiempo de ida y vuelta: el monitor publica un ping al broker y mide cuánto tarda en llegar. Verde &lt;50ms · Amarillo &lt;200ms · Rojo &gt;200ms." />
+              <p className="font-semibold text-foreground mb-1">Broker Performance</p>
+              <TipRow label="Msg RX/TX" text="Messages received/sent per second. 1-minute moving average reported by Mosquitto." />
+              <TipRow label="Conn rate" text="New client connections per second over the last minute." />
+              <TipRow label="Bytes RX/TX" text="Data volume transferred per second, including MQTT protocol headers." />
+              <TipRow label="Latency" text="Round-trip time: the monitor publishes a ping to the broker and measures the response time. Green &lt;50ms · Yellow &lt;200ms · Red &gt;200ms." />
             </>
           } />
         </div>

@@ -23,11 +23,11 @@ export function StatsCards({ stats }: StatsCardsProps) {
           <CardTitle className="text-sm font-medium text-muted-foreground">Clients</CardTitle>
           <InfoTooltip side="bottom" content={
             <>
-              <p className="font-semibold text-foreground mb-1">Clientes MQTT</p>
-              <TipRow label="Conectados" text="Clientes con conexión TCP activa en este momento." />
-              <TipRow label="Sesiones activas" text="Total de sesiones registradas por el broker (conectadas + desconectadas pero recordadas)." />
-              <TipRow label="Máximo" text="Pico histórico de clientes conectados simultáneamente desde el último reinicio del broker." />
-              <TipRow label="Suscripciones" text="Total de suscripciones a topics activas en este momento (un cliente puede tener varias)." />
+              <p className="font-semibold text-foreground mb-1">MQTT Clients</p>
+              <TipRow label="Connected" text="Clients with an active TCP connection to the broker right now." />
+              <TipRow label="Active sessions" text="Total sessions registered by the broker (connected + disconnected but remembered via persistent sessions)." />
+              <TipRow label="Max concurrent" text="Historical peak of simultaneously connected clients since the last broker restart." />
+              <TipRow label="Subscriptions" text="Total active topic subscriptions at this moment. A single client can hold multiple subscriptions." />
             </>
           } />
         </div>

@@ -32,13 +32,13 @@ export function QoSPanel({ stats }: QoSPanelProps) {
           <CardTitle className="text-sm font-medium">QoS &amp; Sessions</CardTitle>
           <InfoTooltip content={
             <>
-              <p className="font-semibold text-foreground mb-1">Calidad de servicio y sesiones</p>
-              <TipRow label="In-flight" text="Mensajes QoS 1/2 enviados pero aún sin confirmar por el destinatario. Si crece indica congestión." />
-              <TipRow label="Stored" text="Mensajes en cola para clientes offline con sesión persistente (QoS 1/2)." />
-              <TipRow label="Desconectados" text="Clientes con sesión guardada en el broker pero sin conexión activa ahora mismo." />
-              <TipRow label="Sesiones expiradas" text="Sesiones cuyo tiempo de vida (session expiry interval) ha vencido y han sido eliminadas." />
-              <TipRow label="Retained" text="Mensajes con retain=true guardados por el broker; representan el último valor conocido de un topic." />
-              <TipRow label="Ratio retained" text="% de mensajes recibidos que llevaban el flag retain=true." />
+              <p className="font-semibold text-foreground mb-1">Quality of Service &amp; Sessions</p>
+              <TipRow label="In-flight" text="QoS 1/2 messages sent but not yet acknowledged by the recipient. A growing number indicates congestion." />
+              <TipRow label="Stored" text="Messages queued for offline clients with a persistent session (QoS 1/2)." />
+              <TipRow label="Disconnected" text="Clients with a session saved in the broker but no active connection right now." />
+              <TipRow label="Expired sessions" text="Sessions whose session expiry interval has elapsed and have been removed by the broker." />
+              <TipRow label="Retained" text="Messages stored with retain=true. They represent the last known value for a topic, delivered to new subscribers immediately." />
+              <TipRow label="Retained ratio" text="Percentage of received messages that carried the retain=true flag." />
             </>
           } />
         </div>

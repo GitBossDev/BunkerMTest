@@ -13,18 +13,20 @@ interface InfoTooltipProps {
 
 export function InfoTooltip({ content, side = 'left', className }: InfoTooltipProps) {
   return (
-    <TooltipProvider delayDuration={250}>
+    <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
             className={cn(
-              'inline-flex items-center justify-center rounded-full text-muted-foreground/60 hover:text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+              'inline-flex items-center justify-center rounded-full',
+              'text-sky-500 hover:text-sky-400 transition-colors',
+              'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
               className
             )}
-            aria-label="Más información"
+            aria-label="More information"
           >
-            <Info className="h-3.5 w-3.5" />
+            <Info className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent
