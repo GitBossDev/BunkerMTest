@@ -580,10 +580,11 @@ function Invoke-PatchBackend {
 
     # Map: local subfolder -> container path + process pattern to kill/reload
     $services = @(
-        @{ Name = 'dynsec';     Src = "$backendPath\dynsec";     Dst = '/app/dynsec';     Pattern = 'uvicorn main:app.*1000' },
-        @{ Name = 'monitor';    Src = "$backendPath\monitor";    Dst = '/app/monitor';    Pattern = 'uvicorn main:app.*1001' },
-        @{ Name = 'clientlogs'; Src = "$backendPath\clientlogs"; Dst = '/app/clientlogs'; Pattern = '/app/clientlogs/main.py' },
-        @{ Name = 'config';     Src = "$backendPath\config";     Dst = '/app/config';     Pattern = 'uvicorn main:app.*1005' }
+        @{ Name = 'dynsec';         Src = "$backendPath\dynsec";         Dst = '/app/dynsec';         Pattern = 'uvicorn main:app.*1000' },
+        @{ Name = 'monitor';        Src = "$backendPath\monitor";        Dst = '/app/monitor';        Pattern = 'uvicorn main:app.*1001' },
+        @{ Name = 'clientlogs';     Src = "$backendPath\clientlogs";     Dst = '/app/clientlogs';     Pattern = '/app/clientlogs/main.py' },
+        @{ Name = 'config';         Src = "$backendPath\config";         Dst = '/app/config';         Pattern = 'uvicorn main:app.*1005' },
+        @{ Name = 'smart-anomaly';  Src = "$backendPath\smart-anomaly";  Dst = '/app/smart-anomaly';  Pattern = 'uvicorn app.main:app.*8100' }
     )
 
     foreach ($svc in $services) {
@@ -591,10 +592,10 @@ function Invoke-PatchBackend {
             Write-Info "  Copiando $($svc.Name)..."
             & $script:CE cp "$($svc.Src)/." "bunkerm-platform:$($svc.Dst)/"
             # Find PID and kill so supervisord restarts with new code
-            $pid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep '$($svc.Pattern)' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
-            if ($pid -match '\d+') {
-                & $script:CE exec bunkerm-platform sh -c "kill -HUP $pid" 2>&1 | Out-Null
-                Write-Info "    Proceso $pid reiniciado (SIGHUP)"
+            $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep '$($svc.Pattern)' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
+            if ($svcPid -match '\d+') {
+                & $script:CE exec bunkerm-platform sh -c "kill -HUP $svcPid" 2>&1 | Out-Null
+                Write-Info "    Proceso $svcPid reiniciado (SIGHUP)"
             }
         }
     }
