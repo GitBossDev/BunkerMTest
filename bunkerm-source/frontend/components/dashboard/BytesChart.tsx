@@ -15,7 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { monitorApi } from '@/lib/api'
 import type { PeriodBytesData, StatsPeriod } from '@/types'
 
-const PERIODS: StatsPeriod[] = ['15m', '30m', '1h', '12h', '1d', '7d', '30d']
+const PERIODS: StatsPeriod[] = ['15m', '30m', '1h', '12h', '1d', '7d']
 
 const REFRESH_MS: Record<StatsPeriod, number> = {
   '15m': 10_000,
@@ -24,7 +24,6 @@ const REFRESH_MS: Record<StatsPeriod, number> = {
   '12h': 60_000,
   '1d':  60_000,
   '7d':  120_000,
-  '30d': 300_000,
 }
 
 /** Auto-scale a bytes value and return a human-readable string */
