@@ -21,6 +21,7 @@ services:
       - ./backend/etc/mosquitto/certs:/etc/mosquitto/certs
       - ./backend/etc/mosquitto/conf.d:/etc/mosquitto/conf.d
       - next_data:/nextjs/data  # Persistent user accounts (Next.js auth)
+      - monitor_data:/app/monitor/data  # Persistent broker stats (7-day history)
     environment:
       # MQTT Settings
       - MQTT_BROKER=localhost
@@ -57,4 +58,6 @@ services:
 
 volumes:
   next_data:
+    driver: local
+  monitor_data:
     driver: local

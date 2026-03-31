@@ -20,17 +20,15 @@ PERIODS = {
     "12h":  720,
     "1d":   1440,
     "7d":   10080,
-    "30d":  43200,
 }
-# Maximum storage window is 30 days; we keep minute-resolution entries so
-# fetching any sub-range is just a slice of the same list.
-MAX_AGE_MINUTES = PERIODS["30d"]
+# Keep 7 days of 3-minute ticks. At 1 tick/3min that is ~3360 entries (~200 KB).
+# Sufficient for a full weekly cycle in a broker management context.
+MAX_AGE_MINUTES = PERIODS["7d"]
 
 
 class HistoricalDataStorage:
     def __init__(self, filename="/app/monitor/data/historical_data.json"):
         self.filename = filename
-        self.max_age_days = 7
         # Ensure the data directory exists
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
         self.ensure_file_exists()

@@ -39,3 +39,6 @@ frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/.vercel
+
+# Runtime broker stats (persisted by Docker named volume, not in repo)
+backend/app/monitor/data/historical_data.json
