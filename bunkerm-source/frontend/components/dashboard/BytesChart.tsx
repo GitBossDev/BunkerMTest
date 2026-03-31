@@ -104,7 +104,6 @@ export function BytesChart() {
             </>
           } />
         </div>
-        </div>
         <div className="flex flex-wrap gap-1">
           {PERIODS.map((p) => (
             <button
