@@ -16,6 +16,7 @@ services:
   # PostgreSQL - Reservado para Fase 3-4
   # BunkerM usa SQLite internamente. Este postgres es para los
   # nuevos microservicios propios que se desarrollen en Fase 3-4.
+  # Para activarlo: .\deploy.ps1 -Action start -WithTools
   # ==========================================
   postgres:
     image: postgres:16-alpine
@@ -40,6 +41,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    profiles:
+      - tools  # Solo inicia con: .\deploy.ps1 -Action start -WithTools
 
   # ==========================================
   # Mosquitto standalone - DESACTIVADO

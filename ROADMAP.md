@@ -85,30 +85,47 @@ Desarrollo de una plataforma de gestión de broker MQTT basada en BunkerM (https
 ┌────────────┐  ┌──────────────┐  ┌──────────────┐
 │  Next.js   │  │   FastAPI    │  │  Mosquitto   │
 │  Frontend  │  │   Backend    │  │  MQTT Broker │
-│  (2000)    │  │ (1000-1008)  │  │   (1900)     │
-└────────────┘  └──────┬───────┘  └──────────────┘
+│  (2000)    │  │ (1000-1005,  │  │   (1900)     │
+└────────────┘  │    8100)     │  └──────────────┘
+                └──────┬───────┘
                        │
-                       ▼
-              ┌──────────────┐
-              │  PostgreSQL  │
-              │    (5432)    │
-              └──────────────┘
+              ┌────────▼───────┐
+              │     SQLite     │
+              │  (integrado)   │
+              └────────────────┘
+              ┌────────────────┐
+              │  PostgreSQL    │
+              │  (Fase 3-4,    │
+              │  solo -Tools)  │
+              └────────────────┘
 ```
 
 ---
 
 ## Funcionalidades Propias (Valor Agregado)
 
+### Implementadas (Mejoras al panel base)
+
+| # | Funcionalidad | Estado | Descripcion |
+|---|---------------|--------|-------------|
+| A | **Panel Users + Roles** | [x] COMPLETO | Admin/user con JWT, gestion de usuarios |
+| B | **Client Logs mejorados** | [x] COMPLETO | Subscribe/Publish/AuthFailure, filtros |
+| C | **Connected Clients correcto** | [x] COMPLETO | Reconstruccion desde logs, sin ruido interno |
+| D | **Broker Config UI** | [x] COMPLETO | Listeners, websocket, inflight, queued |
+| E | **ACL Test con wildcards** | [x] COMPLETO | Test topic + wildcards MQTT |
+
+### Pendientes (Fase 4)
+
 | # | Funcionalidad | Puerto | Valor de Negocio |
 |---|---------------|--------|------------------|
 | 1 | **Dashboards Personalizables** | 1006 | Diferenciador visual, widgets drag-and-drop |
-| 2 | **Alertas Avanzadas** | 8100 | Email, SMS, Webhooks, cooldown inteligente |
+| 2 | **Alertas Avanzadas** | 8100 | Email, Webhooks, cooldown inteligente |
 | 3 | **Multi-tenancy Mejorado** | Transversal | Modelo SaaS, aislamiento completo |
 | 4 | **Backup/Restore Automático** | 1007 | Confiabilidad, compliance, recuperación |
 | 5 | **Versionado de ACL** | 1000 | Auditoría, rollback, trazabilidad |
 | 6 | **Simulador de Carga** | 1008 | Testing, benchmarking, demostración |
 
----
+
 
 ## Estado Actual del Proyecto
 
@@ -117,6 +134,7 @@ Desarrollo de una plataforma de gestión de broker MQTT basada en BunkerM (https
 - [x] Selección de industria para simulación (Planta de Tratamiento de Aguas)
 - [x] **FASE 1**: Preparación del Entorno Base [COMPLETO]
 - [x] **FASE 2**: Simulación Industrial [COMPLETO]
+- [x] **Mejoras propias del panel** [COMPLETO]
 - [ ] **FASE 3**: Integración y Pruebas
 - [ ] **FASE 4**: Funcionalidades Propias
 
@@ -129,10 +147,11 @@ Desarrollo de una plataforma de gestión de broker MQTT basada en BunkerM (https
 
 ### Objetivos
 - [x] Fork de BunkerM clonado localmente
-- [x] Docker Compose configurado con todos los servicios
-- [x] Migración a PostgreSQL preparada (script migrate-to-postgres.py)
-- [x] Entorno desplegado y funcionando en localhost
-- [x] Script de gestión automatizado (deploy.ps1)
+- [x] Fork de BunkerM integrado en repositorio propio (GitBossDev/BunkerMTest)
+- [x] Docker Compose configurado (Podman compatible, postgres opcional con -WithTools)
+- [x] Arquitectura monolitica: todo en bunkerm-platform con SQLite
+- [x] Entorno desplegado y funcionando en localhost:2000
+- [x] Script de gestión automatizado (deploy.ps1) con hot-patch
 - [x] Generación de secrets automatizada (generate-secrets.py)
 - [x] Configuración de variables de entorno (.env.dev)
 
@@ -168,52 +187,32 @@ BunkerMTest/
 
 #### 1.2 Servicios Docker Compose
 
-| Servicio | Imagen | Puerto(s) | Volúmenes | Propósito |
-|----------|--------|-----------|-----------|-----------|
-| **postgres** | postgres:16-alpine | 5432 | `./data/postgres` | Base de datos principal |
-| **mosquitto** | eclipse-mosquitto:latest | 1900, 9001 | `./data/mosquitto`, `./config/mosquitto` | Broker MQTT |
-| **bunkerm-backend** | Build from source | 1000-1005, 8100 | `./data/logs` | Servicios Python/FastAPI |
-| **bunkerm-frontend** | Build from source | 3000 | - | Next.js UI |
-| **nginx** | nginx:alpine | 2000 | `./config/nginx` | Reverse proxy |
-| **pgadmin** (opcional) | dpage/pgadmin4 | 5050 | - | Admin de PostgreSQL |
+| Servicio | Imagen | Puerto(s) | Propósito |
+|----------|--------|-----------|----------|
+| **bunkerm** | Build from source | 2000, 1000-1005, 8100, 1901 | Plataforma completa (nginx + Next.js + FastAPI + Mosquitto) |
+| **postgres** | postgres:16-alpine | 5432 | BD para Fase 3-4 (solo con -WithTools) |
+| **pgadmin** (opcional) | dpage/pgadmin4 | 5050 | Admin de PostgreSQL (solo con -WithTools) |
 
 #### 1.3 Variables de Entorno (.env.dev)
 
 ```env
-# PostgreSQL
-POSTGRES_USER=bunkerm
-POSTGRES_PASSWORD=<CAMBIAR_EN_PRODUCCION>
-POSTGRES_DB=bunkerm_db
-DATABASE_URL=postgresql://bunkerm:<CAMBIAR_EN_PRODUCCION>@postgres:5432/bunkerm_db
-
-# Mosquitto
-MQTT_BROKER=mosquitto
-MQTT_PORT=1900
-MQTT_USERNAME=admin
-MQTT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
+# Mosquitto (broker MQTT interno)
+MQTT_USERNAME=bunker
+MQTT_PASSWORD=<GENERADO_POR_SETUP>
 
 # BunkerM Backend
 API_KEY=<GENERAR_UUID_ALEATORIO>
 JWT_SECRET=<GENERAR_SECRET_ALEATORIO>
 AUTH_SECRET=<GENERAR_SECRET_ALEATORIO>
-TIER=enterprise
-DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
+DYSEC_PATH=/var/lib/mosquitto/dynamic-security.json
 
-# Puertos de servicios
-DYNSEC_PORT=1000
-MONITOR_PORT=1001
-CLIENTLOGS_PORT=1002
-AWS_BRIDGE_PORT=1003
-AZURE_BRIDGE_PORT=1004
-CONFIG_PORT=1005
-SMART_ANOMALY_PORT=8100
+# Timezone
+TZ=Europe/Madrid
 
-# Nuevos servicios propios
-DASHBOARD_SERVICE_PORT=1006
-BACKUP_SERVICE_PORT=1007
-LOAD_SIMULATOR_PORT=1008
-
-# pgAdmin (opcional)
+# PostgreSQL (reservado para Fase 3-4, solo activo con -WithTools)
+POSTGRES_USER=bunkerm
+POSTGRES_PASSWORD=<CAMBIAR_EN_PRODUCCION>
+POSTGRES_DB=bunkerm_db
 PGADMIN_DEFAULT_EMAIL=admin@bunkerm.local
 PGADMIN_DEFAULT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 ```
@@ -240,38 +239,32 @@ PGADMIN_DEFAULT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 
 #### 1.5 Comandos de Despliegue
 
-```bash
+```powershell
 # 1. Generar secrets
-python scripts/generate-secrets.py > .env.dev
+.\deploy.ps1 -Action setup
 
-# 2. Crear estructura de directorios
-mkdir -p data/{mosquitto,postgres,logs,backups} config/{mosquitto,postgres,nginx}
+# 2. Construir imagen
+.\deploy.ps1 -Action build
 
-# 3. Copiar configuraciones base
-cp config/mosquitto/mosquitto.conf.example config/mosquitto/mosquitto.conf
+# 3. Levantar servicios
+.\deploy.ps1 -Action start
 
-# 4. Levantar servicios
-docker-compose -f docker-compose.dev.yml up -d
+# 4. Verificar estado
+.\deploy.ps1 -Action status
 
-# 5. Verificar logs
-docker-compose -f docker-compose.dev.yml logs -f
-
-# 6. Ejecutar migraciones
-docker-compose -f docker-compose.dev.yml exec bunkerm-backend alembic upgrade head
-
-# 7. Verificar salud
-./scripts/check-health.sh
+# Opcional: con PostgreSQL + pgAdmin (Fase 3-4)
+.\deploy.ps1 -Action start -WithTools
 ```
 
 #### 1.6 Criterios de Éxito Fase 1
 
-- [x] `docker-compose ps` muestra todos los servicios en estado "Up"
-- [x] PostgreSQL conectado en puerto 5432
-- [x] Mosquitto funcionando en puerto 1900
+- [x] `podman ps` muestra bunkerm-platform en estado "Up"
+- [x] BunkerM UI accesible en http://localhost:2000
+- [x] Mosquitto funcionando en puerto 1901 (externo)
 - [x] Nginx proxy en puerto 2000
-- [x] Script deploy.ps1 con 7 acciones (setup, start, stop, restart, status, logs, clean)
+- [x] Script deploy.ps1 con acciones: setup, build, start, stop, restart, status, logs, clean, patch-backend, patch-frontend
 - [x] Script generate-secrets.py genera .env.dev automáticamente
-- [x] Archivo DEPLOYMENT.md con documentación completa
+- [x] Login con admin@brokerpanel.com / Usuario@1
 - [x] Logs de servicios sin errores críticos
 
 ---
@@ -505,10 +498,61 @@ x] Simulador se levanta con `.\simulator.ps1 start`
 - [x] Script simulator.ps1 con 8 acciones (start, stop, restart, status, logs, anomalies, build, clean)
 - [x] Documentación completa en PHASE2_SIMULATOR.md (400+ líneas)
 - [x] Archivo plant_config.yaml con configuración completa (130+ líneas)
-- [x] Dockerfile optimizado con usuario no privilegiadoonde correctamente)
-- [ ] ACL funciona: intentos no autorizados fallan
-- [ ] Controlador automático enciende bomba cuando nivel < 20%
-- [ ] Anomalías generadas son visibles en logs
+- [x] Dockerfile optimizado con usuario no privilegiado
+- [x] ACL funciona: roles simulator/admin/sub_sensors configurados
+- [x] Controlador automático enciende bomba cuando nivel < 20%
+- [x] Anomalías generadas son visibles en logs
+
+---
+
+## Mejoras Propias del Panel [COMPLETO]
+
+**Estado**: [OK] COMPLETO
+
+Extensiones propias implementadas sobre la base de BunkerM:
+
+### Autenticación y Roles del Panel
+
+- [x] Sistema de usuarios del panel con roles `admin` y `user` (solo lectura)
+- [x] JWT con rol incluido en payload, cookies HTTP-only
+- [x] Nuevo default admin: `admin@brokerpanel.com` / `Usuario@1`
+- [x] Gestion de usuarios en **Settings > Panel Users** (solo admin)
+- [x] Registro publico deshabilitado
+- [x] Middleware Next.js bloquea mutaciones para rol `user`
+
+### Client Logs
+
+- [x] Nuevos tipos de eventos: Subscribe, Publish, Auth Failure
+- [x] Manejo correcto de timezone UTC/Z
+- [x] Replay de logs al inicio (solo events recientes, no historial completo)
+- [x] Filtrado de conexiones internas auto-UUID de mosquitto_ctrl
+- [x] Auth Failure muestra username `unknown` (no datos previos relacionados)
+- [x] Chips de filtro en UI por tipo de evento
+
+### Connected Clients
+
+- [x] Reconstruccion correcta del estado desde logs del broker
+- [x] Clientes externos visibles (MQTT Explorer, bunker admin)
+- [x] Conexiones internas auto-generadas no contaminan la lista
+
+### Broker Configuration
+
+- [x] Formulario estructurado (reemplaza editor JSON)
+- [x] Soporte para listeners con proto tipo (mqtt / websocket)
+- [x] Parametros: `max_inflight_messages`, `max_queued_messages`
+- [x] Backend API actualizado en config service (puerto 1005)
+
+### ACL Management
+
+- [x] Test de acceso a topics desde el dialogo de ACL
+- [x] Soporte de wildcards MQTT (`+` y `#`)
+- [x] Respuesta estructurada: `allowed`, `reason`, `matchedRule`
+
+### Repositorio
+
+- [x] Codigo fuente unificado en repositorio propio (GitBossDev/BunkerMTest)
+- [x] bunkerm-source integrado como codigo propio (no submodulo)
+- [x] Metadatos UI: "BrokerPanel - Para CIC"
 
 ---
 

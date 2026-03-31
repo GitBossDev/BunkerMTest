@@ -140,10 +140,8 @@ function Invoke-Setup {
     $directories = @(
         "data/mosquitto/data",
         "data/mosquitto/log",
-        "data/postgres",
         "data/logs",
         "data/backups",
-        "data/pgadmin",
         "data/bunkerm/nextjs",
         "data/bunkerm/mosquitto",
         "data/bunkerm/logs/api",
@@ -215,7 +213,7 @@ function Invoke-Start {
     }
 
     # Limpiar contenedores huerfanos con el mismo nombre (ej. iniciados manualmente)
-    $orphanContainers = @('bunkerm-platform', 'bunkerm-postgres')
+    $orphanContainers = @('bunkerm-platform')
     foreach ($cname in $orphanContainers) {
         $exists = & $script:CE ps -a --format "{{.Names}}" 2>&1 | Select-String "^${cname}$"
         if ($exists) {
@@ -249,10 +247,10 @@ function Invoke-Start {
     Write-Info "Service URLs:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1901" -ForegroundColor Cyan
-    Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
     
     if ($WithTools) {
         Write-Host "  - pgAdmin:   http://localhost:5050" -ForegroundColor Cyan
+        Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
     }
     
     Write-Host ""
@@ -305,14 +303,6 @@ function Invoke-Status {
     Write-Host ""
     Write-Host "Health Checks:" -ForegroundColor Yellow
     Write-Host ""
-
-    # PostgreSQL (solo si esta corriendo)
-    Write-Host -NoNewline "  PostgreSQL (bunkerm-postgres)... "
-    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
-    & $script:CE exec bunkerm-postgres pg_isready -U bunkerm -d bunkerm_db 2>&1 | Out-Null
-    $pgExit = $LASTEXITCODE
-    $ErrorActionPreference = $savedPref
-    if ($pgExit -eq 0) { Write-Success "[OK]" } else { Write-Host "[NO DISPONIBLE]" -ForegroundColor Yellow }
 
     # BunkerM broker MQTT interno (puerto 1901)
     Write-Host -NoNewline "  BunkerM MQTT (localhost:1901)... "
@@ -474,9 +464,9 @@ function Invoke-StartBunkerM {
         Write-Success "[OK] Red creada"
     }
 
-    # Iniciar solo el servicio bunkerm y sus dependencias
-    Write-Info "Iniciando PostgreSQL y BunkerM..."
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres bunkerm"
+    # Iniciar solo el servicio bunkerm (BunkerM usa SQLite internamente, postgres no es necesario)
+    Write-Info "Iniciando BunkerM..."
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d bunkerm"
     
     Write-Host ""
     Write-Success "[OK] BunkerM iniciado!"
