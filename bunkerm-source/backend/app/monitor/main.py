@@ -20,7 +20,7 @@ import threading
 from typing import Dict, List, Optional
 from collections import deque
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import jwt
@@ -389,7 +389,7 @@ class TopicStore:
             self._topics[topic] = {
                 'topic': topic,
                 'value': value,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                 'count': prev.get('count', 0) + 1,
                 'retained': retained,
                 'qos': qos,

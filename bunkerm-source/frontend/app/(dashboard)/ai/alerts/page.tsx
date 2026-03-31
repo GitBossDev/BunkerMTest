@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { aiApi } from '@/lib/api'
+import { formatRelativeTime } from '@/lib/timeUtils'
 import type { AiAlert, AlertSeverity } from '@/types'
 
 const SEVERITY_CONFIG: Record<AlertSeverity, { label: string; className: string; icon: React.ElementType }> = {
@@ -35,17 +36,6 @@ const ANOMALY_TYPE_LABELS: Record<string, string> = {
   ewma:    'EWMA',
   spike:   'Rate Spike',
   silence: 'Silence',
-}
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const s = Math.floor(diff / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
 }
 
 export default function AlertsPage() {

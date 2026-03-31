@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { monitorApi, dynsecApi } from '@/lib/api'
+import { formatRelativeTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -72,16 +73,6 @@ function countLeaves(node: TreeNode): number {
   )
 }
 
-function relativeTime(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const secs = Math.floor(diffMs / 1000)
-  if (secs < 5) return 'just now'
-  if (secs < 60) return `${secs}s ago`
-  const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  return `${Math.floor(mins / 60)}h ago`
-}
-
 // ── Tree node component ───────────────────────────────────────────────────────
 
 interface TreeNodeProps {
@@ -123,7 +114,7 @@ function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodePr
             ×{t.count}
           </Badge>
           <span className="text-xs text-muted-foreground whitespace-nowrap">
-            {relativeTime(t.timestamp)}
+            {formatRelativeTime(t.timestamp)}
           </span>
           <Eye className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
         </div>
@@ -487,7 +478,7 @@ export default function MqttExplorerPage() {
                 <Badge variant="secondary">QoS {selectedTopic.qos}</Badge>
                 <Badge variant="secondary">×{selectedTopic.count} messages</Badge>
                 <span className="text-xs text-muted-foreground self-center">
-                  {relativeTime(selectedTopic.timestamp)}
+                  {formatRelativeTime(selectedTopic.timestamp)}
                 </span>
               </div>
               <div className="rounded-md border bg-muted/30">

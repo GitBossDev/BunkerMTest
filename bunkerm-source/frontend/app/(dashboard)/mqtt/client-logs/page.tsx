@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { clientlogsApi } from '@/lib/api'
+import { formatAbsoluteTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -209,7 +210,7 @@ export default function ClientLogsPage() {
                   filtered.map((event) => (
                     <TableRow key={event.id}>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {new Date(event.timestamp).toLocaleString()}
+                        {formatAbsoluteTime(event.timestamp)}
                       </TableCell>
                       <TableCell>
                         <EventBadge event={event} />

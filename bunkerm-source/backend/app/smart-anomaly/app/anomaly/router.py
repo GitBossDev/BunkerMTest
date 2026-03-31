@@ -46,7 +46,7 @@ async def list_anomalies(
                 "anomaly_type": r.anomaly_type,
                 "score": r.score,
                 "details": r.details,
-                "detected_at": r.detected_at.isoformat() if r.detected_at else None,
+                "detected_at": (r.detected_at.isoformat() + 'Z') if r.detected_at else None,
             }
             for r in rows
         ]

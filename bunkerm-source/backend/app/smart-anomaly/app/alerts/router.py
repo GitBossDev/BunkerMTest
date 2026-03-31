@@ -45,7 +45,7 @@ async def list_alerts(
                 "severity": r.severity,
                 "description": r.description,
                 "acknowledged": r.acknowledged,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "created_at": (r.created_at.isoformat() + 'Z') if r.created_at else None,
             }
             for r in rows
         ]

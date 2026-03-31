@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Wifi, WifiOff, Ban, Search, Power, PowerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { dynsecApi, clientlogsApi } from '@/lib/api'
+import { formatAbsoluteTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -252,7 +253,7 @@ export default function ConnectedClientsPage() {
                   </TableCell>
 
                   <TableCell className="text-xs text-muted-foreground">
-                    {row.connectedAt ? new Date(row.connectedAt).toLocaleString() : '—'}
+                    {row.connectedAt ? formatAbsoluteTime(row.connectedAt) : '—'}
                   </TableCell>
 
                   <TableCell>

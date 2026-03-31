@@ -1,12 +1,69 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Eye, EyeOff, Copy, RefreshCw, KeyRound, Check } from 'lucide-react'
+import { Eye, EyeOff, Copy, RefreshCw, KeyRound, Check, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { DefaultACLCard } from '@/components/mqtt/DefaultACLCard'
+import { getStoredTimezone, setStoredTimezone } from '@/lib/timeUtils'
+
+const TIMEZONE_OPTIONS: { group: string; zones: { value: string; label: string }[] }[] = [
+  {
+    group: 'Auto-detect',
+    zones: [{ value: 'auto', label: 'Browser timezone (auto)' }],
+  },
+  {
+    group: 'UTC',
+    zones: [{ value: 'UTC', label: 'UTC' }],
+  },
+  {
+    group: 'Europe',
+    zones: [
+      { value: 'Europe/Madrid',    label: 'Madrid (CET/CEST)' },
+      { value: 'Europe/London',    label: 'London (GMT/BST)' },
+      { value: 'Europe/Paris',     label: 'Paris (CET/CEST)' },
+      { value: 'Europe/Berlin',    label: 'Berlin (CET/CEST)' },
+      { value: 'Europe/Lisbon',    label: 'Lisbon (WET/WEST)' },
+      { value: 'Europe/Rome',      label: 'Rome (CET/CEST)' },
+      { value: 'Europe/Amsterdam', label: 'Amsterdam (CET/CEST)' },
+      { value: 'Europe/Warsaw',    label: 'Warsaw (CET/CEST)' },
+      { value: 'Europe/Helsinki',  label: 'Helsinki (EET/EEST)' },
+      { value: 'Europe/Moscow',    label: 'Moscow (MSK)' },
+    ],
+  },
+  {
+    group: 'Americas',
+    zones: [
+      { value: 'America/New_York',    label: 'New York (ET)' },
+      { value: 'America/Chicago',     label: 'Chicago (CT)' },
+      { value: 'America/Denver',      label: 'Denver (MT)' },
+      { value: 'America/Los_Angeles', label: 'Los Angeles (PT)' },
+      { value: 'America/Sao_Paulo',   label: 'São Paulo (BRT)' },
+    ],
+  },
+  {
+    group: 'Asia / Pacific',
+    zones: [
+      { value: 'Asia/Dubai',       label: 'Dubai (GST)' },
+      { value: 'Asia/Kolkata',     label: 'India (IST)' },
+      { value: 'Asia/Bangkok',     label: 'Bangkok (ICT)' },
+      { value: 'Asia/Shanghai',    label: 'China (CST)' },
+      { value: 'Asia/Tokyo',       label: 'Tokyo (JST)' },
+      { value: 'Australia/Sydney', label: 'Sydney (AEST/AEDT)' },
+    ],
+  },
+]
 
 type KeySource = 'env' | 'file' | 'default'
 
@@ -26,6 +83,7 @@ export default function SettingsPage() {
   const [revealed, setRevealed] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [timezone, setTimezone] = useState<string>('auto')
 
   const fetchKey = useCallback(async () => {
     try {
@@ -38,6 +96,13 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => { fetchKey() }, [fetchKey])
+  useEffect(() => { setTimezone(getStoredTimezone()) }, [])
+
+  function handleTimezoneChange(value: string) {
+    setTimezone(value)
+    setStoredTimezone(value)
+    toast.success('Timezone updated')
+  }
 
   async function copyToClipboard() {
     if (!info) return
@@ -82,6 +147,57 @@ export default function SettingsPage() {
       </div>
 
       <DefaultACLCard />
+
+      {/* Timezone */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Clock className="h-4 w-4" />
+            Display Timezone
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Choose the timezone used to display timestamps across the panel. By default the
+            browser&apos;s own timezone is used. Changes take effect immediately.
+          </p>
+          <div className="flex items-center gap-3">
+            <Select value={timezone} onValueChange={handleTimezoneChange}>
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Select timezone" />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMEZONE_OPTIONS.map((group) => (
+                  <SelectGroup key={group.group}>
+                    <SelectLabel>{group.group}</SelectLabel>
+                    {group.zones.map((z) => (
+                      <SelectItem key={z.value} value={z.value}>
+                        {z.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                ))}
+              </SelectContent>
+            </Select>
+            {timezone !== 'auto' && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleTimezoneChange('auto')}
+                className="text-muted-foreground"
+              >
+                Reset to auto
+              </Button>
+            )}
+          </div>
+          {timezone === 'auto' && (
+            <p className="text-xs text-muted-foreground">
+              Currently using browser timezone:{' '}
+              <code>{Intl.DateTimeFormat().resolvedOptions().timeZone}</code>
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

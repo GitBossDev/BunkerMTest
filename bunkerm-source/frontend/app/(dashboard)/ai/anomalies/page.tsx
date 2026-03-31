@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { aiApi } from '@/lib/api'
+import { formatRelativeTime } from '@/lib/timeUtils'
 import type { AiAnomaly, AnomalyType } from '@/types'
 
 const ANOMALY_TYPE_CONFIG: Record<AnomalyType, { label: string; className: string }> = {
@@ -29,17 +30,6 @@ const ANOMALY_TYPE_CONFIG: Record<AnomalyType, { label: string; className: strin
   ewma:    { label: 'EWMA',       className: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
   spike:   { label: 'Rate Spike', className: 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
   silence: { label: 'Silence',    className: 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300' },
-}
-
-function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const s = Math.floor(diff / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  return `${Math.floor(h / 24)}d ago`
 }
 
 function DetailsRow({ details }: { details: Record<string, unknown> }) {
