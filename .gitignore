@@ -37,6 +37,10 @@ wheels/
 .installed.cfg
 *.egg
 
+# Re-include Next.js lib source (the lib/ pattern above is for Python virtualenvs)
+!bunkerm-source/frontend/lib/
+!bunkerm-source/frontend/lib/**
+
 # Node
 node_modules/
 npm-debug.log*
