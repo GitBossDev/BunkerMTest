@@ -193,6 +193,8 @@ export const dynsecApi = {
 
 export const monitorApi = {
   getStats: () => request(buildUrl(MONITOR_API_URL, '/stats')),
+  getBytesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/bytes?period=${period}`)),
+  getMessagesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/messages?period=${period}`)),
   getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
   publishMessage: (data: { topic: string; payload: string; qos?: number; retain?: boolean }) =>
     request(buildUrl(MONITOR_API_URL, '/publish'), {

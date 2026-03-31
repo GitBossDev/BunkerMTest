@@ -98,6 +98,12 @@ MONITORED_TOPICS = {
     "$SYS/broker/subscriptions/count": "subscriptions",
     "$SYS/broker/retained messages/count": "retained_messages",
     "$SYS/broker/clients/connected": "connected_clients",
+    "$SYS/broker/clients/total": "clients_total",
+    "$SYS/broker/clients/maximum": "clients_maximum",
+    "$SYS/broker/messages/received": "messages_received_total",
+    "$SYS/broker/messages/sent": "messages_sent_total",
+    "$SYS/broker/version": "broker_version",
+    "$SYS/broker/uptime": "broker_uptime",
     "$SYS/broker/load/bytes/received/15min": "bytes_received_15min",
     "$SYS/broker/load/bytes/sent/15min": "bytes_sent_15min"
 }
@@ -112,6 +118,13 @@ class MQTTStats:
         self.connected_clients = 0
         self.bytes_received_15min = 0.0
         self.bytes_sent_15min = 0.0
+        # Extended $SYS fields
+        self.clients_total = 0
+        self.clients_maximum = 0
+        self.messages_received_total = 0
+        self.messages_sent_total = 0
+        self.broker_version = ""
+        self.broker_uptime = ""
         
         # Initialize message counter
         self.message_counter = MessageCounter()
@@ -145,13 +158,20 @@ class MQTTStats:
             self.message_counter.increment_count()
 
     def update_storage(self):
-        """Update storage every 30 minutes"""
+        """Update storage every 3 minutes"""
         now = datetime.now()
         if (now - self.last_storage_update).total_seconds() >= 180:  # 3 minutes
             try:
                 self.data_storage.add_hourly_data(
                     float(self.bytes_received_15min),
                     float(self.bytes_sent_15min)
+                )
+                # Also write a fine tick for the period-based charts
+                self.data_storage.add_tick(
+                    bytes_received=float(self.bytes_received_15min),
+                    bytes_sent=float(self.bytes_sent_15min),
+                    msg_received=int(self.messages_received_total),
+                    msg_sent=int(self.messages_sent_total),
                 )
                 self.last_storage_update = now
             except Exception as e:
@@ -205,7 +225,16 @@ class MQTTStats:
                 "messages_history": list(self.messages_history),
                 "published_history": list(self.published_history),
                 "bytes_stats": hourly_data,  # This contains timestamps, bytes_received, and bytes_sent
-                "daily_message_stats": daily_messages  # This contains dates and counts
+                "daily_message_stats": daily_messages,  # This contains dates and counts
+                # Extended client info for gauge
+                "clients_total": self.clients_total,
+                "clients_maximum": self.clients_maximum,
+                # Broker info
+                "broker_version": self.broker_version,
+                "broker_uptime": self.broker_uptime,
+                # Raw message counts for period filtering
+                "messages_received_raw": self.messages_received_total,
+                "messages_sent_raw": self.messages_sent_total,
             }
 
 class MessageCounter:
@@ -405,17 +434,19 @@ def on_message(client, userdata, msg):
     """Handle messages from MQTT broker"""
     if msg.topic in MONITORED_TOPICS:
         try:
-            # Handle byte rate topics differently (they return floats)
-            if msg.topic in ["$SYS/broker/load/bytes/received/15min", "$SYS/broker/load/bytes/sent/15min"]:
-                value = float(msg.payload.decode())
-                attr_name = MONITORED_TOPICS[msg.topic]
+            attr_name = MONITORED_TOPICS[msg.topic]
+            raw = msg.payload.decode()
+            # String-only fields
+            if msg.topic in ["$SYS/broker/version", "$SYS/broker/uptime"]:
                 with mqtt_stats._lock:
-                    setattr(mqtt_stats, attr_name, value)
+                    setattr(mqtt_stats, attr_name, raw)
+            # Float fields
+            elif msg.topic in ["$SYS/broker/load/bytes/received/15min", "$SYS/broker/load/bytes/sent/15min"]:
+                with mqtt_stats._lock:
+                    setattr(mqtt_stats, attr_name, float(raw))
             else:
-                value = int(msg.payload.decode())
-                attr_name = MONITORED_TOPICS[msg.topic]
                 with mqtt_stats._lock:
-                    setattr(mqtt_stats, attr_name, value)
+                    setattr(mqtt_stats, attr_name, int(raw))
         except ValueError as e:
             logger.error(f"Error processing message from {msg.topic}: {e}")
     # Count non-$SYS messages and track topics
@@ -624,6 +655,24 @@ async def test_storage():
             status_code=500,
             content={"error": f"Storage test failed: {str(e)}"}
         )
+
+@app.get("/api/v1/stats/bytes", dependencies=[Depends(get_api_key)])
+async def get_bytes_for_period(request: Request, period: str = "1h"):
+    """Get bytes received/sent history for the given period (15m/30m/1h/12h/1d/7d/30d)"""
+    await log_request(request)
+    from monitor.data_storage import PERIODS
+    if period not in PERIODS:
+        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
+    return _mqtt_client.data_storage.get_bytes_for_period(period)
+
+@app.get("/api/v1/stats/messages", dependencies=[Depends(get_api_key)])
+async def get_messages_for_period(request: Request, period: str = "1h"):
+    """Get messages received/sent history for the given period (15m/30m/1h/12h/1d/7d/30d)"""
+    await log_request(request)
+    from monitor.data_storage import PERIODS
+    if period not in PERIODS:
+        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
+    return _mqtt_client.data_storage.get_messages_for_period(period)
 
 @app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])
 async def get_topics(request: Request):

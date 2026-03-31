@@ -80,7 +80,28 @@ export interface MonitorStats {
   }
   mqtt_connected?: boolean
   connection_error?: string
+  // New fields from $SYS broker topics
+  clients_total?: number
+  clients_maximum?: number
+  broker_version?: string
+  broker_uptime?: string
+  messages_received_raw?: number
+  messages_sent_raw?: number
 }
+
+export interface PeriodBytesData {
+  timestamps: string[]
+  bytes_received: number[]
+  bytes_sent: number[]
+}
+
+export interface PeriodMessageData {
+  timestamps: string[]
+  msg_received: number[]
+  msg_sent: number[]
+}
+
+export type StatsPeriod = '15m' | '30m' | '1h' | '12h' | '1d' | '7d' | '30d'
 
 export interface ChartDataPoint {
   time: string

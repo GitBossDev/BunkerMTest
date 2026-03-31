@@ -242,7 +242,16 @@ function Invoke-Start {
     Write-Host ""
     Write-Info "Waiting for services to be ready (30 seconds)..."
     Start-Sleep -Seconds 30
-    
+
+    # Auto-apply local source changes so container always runs the latest code.
+    # patch-backend and patch-frontend copy source files into the running container
+    # and restart the affected processes. Without this step, a stop+start would lose
+    # any changes applied via a previous patch (because compose down destroys the container).
+    Write-Host ""
+    Write-Info "Applying local source patches to the running container..."
+    Invoke-PatchBackend
+    Invoke-PatchFrontend
+
     Write-Host ""
     Write-Info "Service URLs:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
