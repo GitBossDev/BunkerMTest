@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  # Broker MQTT - Eclipse Mosquitto
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    container_name: greenhouse-mosquitto
+    ports:
+      # Puerto MQTT estándar
+      - "1883:1883"
+      # Puerto WebSockets (para dashboard web)
+      - "9001:9001"
+    volumes:
+      # Configuración personalizada
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      # Persistencia de datos
+      - mosquitto-data:/mosquitto/data
+      # Logs
+      - mosquitto-logs:/mosquitto/log
+    restart: unless-stopped
+    networks:
+      - greenhouse-network
+
+# Volúmenes para persistencia de datos
+volumes:
+  mosquitto-data:
+    driver: local
+  mosquitto-logs:
+    driver: local
+
+# Red personalizada para comunicación entre servicios
+networks:
+  greenhouse-network:
+    driver: bridge
