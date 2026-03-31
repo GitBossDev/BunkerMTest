@@ -28,7 +28,7 @@ import secrets
 import logging
 from logging.handlers import RotatingFileHandler
 import ssl
-from data_storage import HistoricalDataStorage
+from data_storage import HistoricalDataStorage, PERIODS as _STORAGE_PERIODS
 import socket
 import uvicorn
 from contextlib import asynccontextmanager
@@ -739,20 +739,18 @@ async def test_storage():
 
 @app.get("/api/v1/stats/bytes", dependencies=[Depends(get_api_key)])
 async def get_bytes_for_period(request: Request, period: str = "1h"):
-    """Get bytes received/sent history for the given period (15m/30m/1h/12h/1d/7d/30d)"""
+    """Get bytes received/sent history for the given period (15m/30m/1h/12h/1d/7d)"""
     await log_request(request)
-    from monitor.data_storage import PERIODS
-    if period not in PERIODS:
-        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
+    if period not in _STORAGE_PERIODS:
+        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(_STORAGE_PERIODS.keys())}")
     return mqtt_stats.data_storage.get_bytes_for_period(period)
 
 @app.get("/api/v1/stats/messages", dependencies=[Depends(get_api_key)])
 async def get_messages_for_period(request: Request, period: str = "1h"):
     """Get messages received/sent history for the given period."""
     await log_request(request)
-    from monitor.data_storage import PERIODS
-    if period not in PERIODS:
-        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(PERIODS.keys())}")
+    if period not in _STORAGE_PERIODS:
+        raise HTTPException(status_code=400, detail=f"Invalid period '{period}'. Valid: {list(_STORAGE_PERIODS.keys())}")
     return mqtt_stats.data_storage.get_messages_for_period(period)
 
 @app.get("/api/v1/stats/topology", dependencies=[Depends(get_api_key)])
