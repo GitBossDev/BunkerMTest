@@ -181,12 +181,37 @@ function Invoke-Setup {
         Write-Success "[OK] bunkerm-source/ encontrado"
     }
 
+    # Verificar archivos requeridos para el build del contenedor
+    Write-Host ""
+    Write-Info "Verificando archivos necesarios para el build..."
+
+    $requiredFiles = @(
+        @{ Path = "bunkerm-source/backend/mosquitto/dynsec/dynamic-security.json"; Desc = "Bootstrap ACL de Mosquitto" },
+        @{ Path = "bunkerm-source/backend/app/config/.env";                        Desc = "Env del servicio config" }
+    )
+    $buildOk = $true
+    foreach ($f in $requiredFiles) {
+        if (-not (Test-Path $f.Path)) {
+            Write-Warning "Falta: $($f.Path) ($($f.Desc))"
+            $buildOk = $false
+        } else {
+            Write-Success "[OK] $($f.Path)"
+        }
+    }
+    if (-not $buildOk) {
+        Write-Host ""
+        Write-Warning "Uno o mas archivos requeridos estan ausentes."
+        Write-Host "  Esto normalmente indica un problema con el .gitignore del repo fuente." -ForegroundColor Yellow
+        Write-Host "  Ejecuta: git status bunkerm-source/ para diagnosticar." -ForegroundColor Yellow
+    }
+
     Write-Host ""
     Write-Success "Setup completado correctamente!"
     Write-Host ""
     Write-Info "Proximos pasos:"
     Write-Host "  1. Revisa .env.dev y actualiza configuracion SMTP/Twilio si es necesario"
-    Write-Host "  2. Ejecuta: .\deploy.ps1 -Action start"
+    Write-Host "  2. Ejecuta: .\deploy.ps1 -Action build"
+    Write-Host "  3. Ejecuta: .\deploy.ps1 -Action start"
     Write-Host ""
 }
 

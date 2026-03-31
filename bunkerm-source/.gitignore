@@ -3,6 +3,8 @@
 .env.local
 !.env.example
 !.env.local.example
+# Allow the bootstrap .env for the config service (no real secrets, API key loaded from volume at runtime)
+!backend/app/config/.env
 
 # Python
 __pycache__/
@@ -23,8 +25,10 @@ ssl_certificates/*.crt
 # Application data
 backend/logs/
 backend/app/*/logs/
-dynamic-security.json
 *.json.backup
+# Ignore runtime dynamic-security files (broker state), but NOT the bootstrap default
+dynamic-security.json
+!backend/mosquitto/dynsec/dynamic-security.json
 
 # Internal documentation (not for public distribution)
 ARCHITECTURE.md
