@@ -281,6 +281,7 @@ export const azureApi = {
 export const clientlogsApi = {
   getEvents: () => request<{ events: unknown[] }>(buildUrl(CLIENTLOGS_API_URL, '/events')),
   getConnectedClients: () => request<{ clients: unknown[] }>(buildUrl(CLIENTLOGS_API_URL, '/connected-clients')),
+  getLastConnection: () => request<{ info: Record<string, { ip_address: string; port: number; timestamp: string }> }>(buildUrl(CLIENTLOGS_API_URL, '/last-connection')),
   getTopSubscribed: (limit = 15) => request<{ top_subscribed: { topic: string; count: number }[]; total_distinct_subscribed: number }>(buildUrl(CLIENTLOGS_API_URL, `/top-subscribed?limit=${limit}`)),
   enableClient: (username: string) =>
     request(buildUrl(CLIENTLOGS_API_URL, `/enable/${encodeURIComponent(username)}`), { method: 'POST' }),

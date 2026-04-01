@@ -36,6 +36,8 @@ export default function ConnectedClientsPage() {
   const [allUsernames, setAllUsernames] = useState<string[]>([])
   // username → MQTTEvent for currently connected clients (deduplicated by username)
   const [connectedMap, setConnectedMap] = useState<Map<string, MQTTEvent>>(new Map())
+  // username → last known connection info (for offline display)
+  const [lastConnectionInfo, setLastConnectionInfo] = useState<Record<string, { ip_address: string; port: number; timestamp: string }>>({})
   // username → disabled status from API + local overrides
   const [disabledState, setDisabledState] = useState<Record<string, boolean>>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -94,6 +96,13 @@ export default function ConnectedClientsPage() {
         const ms = (healthData.value as { latency_ms?: number }).latency_ms
         if (typeof ms === 'number' && ms >= 0) setBrokerLatencyMs(ms)
       }
+      // Fetch last connection info for offline client IPs
+      try {
+        const lastConn = await clientlogsApi.getLastConnection()
+        setLastConnectionInfo(lastConn.info ?? {})
+      } catch {
+        // non-critical
+      }
     } catch {
       // Silently fail on poll errors
     }
@@ -146,6 +155,7 @@ export default function ConnectedClientsPage() {
   const rows: ClientRow[] = allUsernames.map((username) => {
     const isDisabled = disabledState[username] ?? false
     const connInfo = connectedMap.get(username)
+    const lastConn = lastConnectionInfo[username]
 
     let status: ClientStatus = 'offline'
     if (isDisabled) status = 'disabled'
@@ -154,8 +164,8 @@ export default function ConnectedClientsPage() {
     return {
       username,
       status,
-      ip_address: connInfo?.ip_address,
-      port: connInfo?.port,
+      ip_address: connInfo?.ip_address ?? (status !== 'connected' ? lastConn?.ip_address : undefined),
+      port: connInfo?.port ?? (status !== 'connected' ? lastConn?.port : undefined),
       protocol_level: connInfo?.protocol_level,
       keep_alive: connInfo?.keep_alive,
       connectedAt: connInfo?.timestamp,
@@ -281,7 +291,14 @@ export default function ConnectedClientsPage() {
                   </TableCell>
 
                   <TableCell className="text-sm text-muted-foreground">
-                    {row.ip_address ? `${row.ip_address}:${row.port}` : '—'}
+                    {row.ip_address ? (
+                      <span>
+                        {`${row.ip_address}:${row.port}`}
+                        {row.status !== 'connected' && (
+                          <span className="ml-1 text-xs text-muted-foreground/60">(last seen)</span>
+                        )}
+                      </span>
+                    ) : '—'}
                   </TableCell>
 
                   <TableCell>

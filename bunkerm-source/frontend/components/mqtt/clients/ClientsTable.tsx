@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Search, Plus, Trash2, Shield, Users, RefreshCw, FileJson, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Plus, Trash2, Shield, Users, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -24,7 +24,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { AclImportExportDialog } from './AclImportExportDialog'
 import { CreateClientDialog } from './CreateClientDialog'
 import { ClientRolesDialog } from './ClientRolesDialog'
 import { ClientGroupsDialog } from './ClientGroupsDialog'
@@ -48,7 +47,6 @@ export function ClientsTable({
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 50
   const [createOpen, setCreateOpen] = useState(false)
-  const [aclDialogOpen, setAclDialogOpen] = useState(false)
   const [rolesDialogClient, setRolesDialogClient] = useState<MqttClient | null>(null)
   const [groupsDialogClient, setGroupsDialogClient] = useState<MqttClient | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MqttClient | null>(null)
@@ -117,10 +115,6 @@ export function ClientsTable({
           </div>
           <Button variant="outline" size="icon" onClick={onRefresh} title="Refresh">
             <RefreshCw className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" onClick={() => setAclDialogOpen(true)}>
-            <FileJson className="h-4 w-4 mr-2" />
-            Import / Export ACL
           </Button>
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-4 w-4 mr-2" />
@@ -267,13 +261,6 @@ export function ClientsTable({
           )}
         </div>
       </div>
-
-      {/* ACL import/export dialog */}
-      <AclImportExportDialog
-        open={aclDialogOpen}
-        onOpenChange={setAclDialogOpen}
-        onImportSuccess={onRefresh}
-      />
 
       {/* Create client dialog */}
       <CreateClientDialog

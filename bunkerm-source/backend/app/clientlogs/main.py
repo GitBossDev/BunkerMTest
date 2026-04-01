@@ -92,6 +92,10 @@ class MQTTMonitor:
         # can be attributed to an IP address. Key = unix timestamp string.
         self._pending_ip: Dict[str, Tuple[str, int]] = {}
 
+        # Last known connection info per username (ip, port, timestamp).
+        # Updated on every successful connection, never cleared on disconnect.
+        self._last_connection_info: Dict[str, dict] = {}
+
         # Track (client_id, topic) pairs for publish deduplication.
         # Reset per client on new connection.
         self._seen_publishes: set = set()
@@ -162,6 +166,12 @@ class MQTTMonitor:
         self._client_usernames[client_id] = username
         # Successful connection — remove from pending IP table
         self._pending_ip.pop(ts, None)
+        # Update last known connection info for this username
+        self._last_connection_info[username] = {
+            "ip_address": ip,
+            "port": int(port),
+            "timestamp": event.timestamp,
+        }
 
         # Internal mosquitto_ctrl connections (auto-UUID from localhost): skip entirely.
         # They are ephemeral tool calls — not real clients worth showing.
@@ -414,6 +424,11 @@ async def get_mqtt_events(limit: int = 200):
 @app.get("/api/v1/connected-clients")
 async def get_connected_clients():
     return {"clients": [client.dict() for client in mqtt_monitor.connected_clients.values()]}
+
+@app.get("/api/v1/last-connection")
+async def get_last_connection():
+    """Return the last known connection info (ip, port, timestamp) per username."""
+    return {"info": mqtt_monitor._last_connection_info}
 
 @app.get("/api/v1/top-subscribed")
 async def get_top_subscribed(limit: int = 15):

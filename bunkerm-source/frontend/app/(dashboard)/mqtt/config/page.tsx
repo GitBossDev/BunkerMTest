@@ -184,9 +184,9 @@ export default function MosquittoConfigPage() {
     setIsRestarting(true)
     try {
       await configApi.restartMosquitto()
-      toast.success('Mosquitto reloaded — changes are now active')
+      toast.success('Broker restarting — clients will reconnect in ~2 seconds')
     } catch {
-      toast.error('Failed to reload Mosquitto')
+      toast.error('Failed to restart broker')
     } finally {
       setIsRestarting(false)
     }
@@ -209,7 +209,7 @@ export default function MosquittoConfigPage() {
           </Button>
           <Button variant="outline" size="sm" onClick={handleRestart} disabled={isRestarting || isLoading}>
             {isRestarting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-1" />}
-            Apply (Reload)
+            Restart Broker
           </Button>
           <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty || isLoading}>
             {isSaving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
@@ -218,10 +218,15 @@ export default function MosquittoConfigPage() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        Restart Broker will briefly disconnect all clients (~2s) while applying the saved configuration.
+      </div>
+
       {isDirty && (
         <div className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          Unsaved changes — save and restart the broker to apply.
+          Unsaved changes — save then restart the broker to apply.
         </div>
       )}
 
