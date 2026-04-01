@@ -771,7 +771,7 @@ def connect_mqtt():
                 logger.info(f"Connected to MQTT Broker at {MOSQUITTO_IP}:{MOSQUITTO_PORT}!")
                 client.subscribe([
                     ("$SYS/broker/#", 0),
-                    ("#", 0)
+                    ("#", 2)
                 ])
                 logger.info("Subscribed to topics")
             else:

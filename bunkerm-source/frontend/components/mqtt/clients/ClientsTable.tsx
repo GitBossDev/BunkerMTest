@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { Search, Plus, Trash2, Shield, Users, RefreshCw, FileJson } from 'lucide-react'
+import { Search, Plus, Trash2, Shield, Users, RefreshCw, FileJson, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -45,6 +45,8 @@ export function ClientsTable({
   onRefresh,
 }: ClientsTableProps) {
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 50
   const [createOpen, setCreateOpen] = useState(false)
   const [aclDialogOpen, setAclDialogOpen] = useState(false)
   const [rolesDialogClient, setRolesDialogClient] = useState<MqttClient | null>(null)
@@ -58,6 +60,9 @@ export function ClientsTable({
   const filtered = clients.filter((c) =>
     c.username.toLowerCase().includes(search.toLowerCase())
   )
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
   const handleToggleDisabled = async (client: MqttClient) => {
     // Use local tracked state; if unknown, assume enabled (false)
@@ -106,7 +111,7 @@ export function ClientsTable({
             <Input
               placeholder="Search clients..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
               className="pl-9"
             />
           </div>
@@ -143,7 +148,7 @@ export function ClientsTable({
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((client) => (
+                paginated.map((client) => (
                   <TableRow key={client.username}>
                     <TableCell className="font-medium">{client.username}</TableCell>
 
@@ -246,10 +251,21 @@ export function ClientsTable({
           </Table>
         </div>
 
-        {/* Summary */}
-        <p className="text-xs text-muted-foreground">
-          {filtered.length} of {clients.length} client{clients.length !== 1 ? 's' : ''}
-        </p>
+        {/* Summary + pagination */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span>{filtered.length} of {clients.length} client{clients.length !== 1 ? 's' : ''}</span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="px-2">Page {safePage} of {totalPages}</span>
+              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ACL import/export dialog */}

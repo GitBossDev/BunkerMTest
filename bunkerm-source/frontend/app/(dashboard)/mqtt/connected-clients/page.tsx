@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Wifi, WifiOff, Ban, Search, Power, PowerOff } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, Ban, Search, Power, PowerOff, ChevronLeft, ChevronRight, Timer } from 'lucide-react'
 import { toast } from 'sonner'
-import { dynsecApi, clientlogsApi } from '@/lib/api'
+import { dynsecApi, clientlogsApi, monitorApi } from '@/lib/api'
 import { formatAbsoluteTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,6 +17,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { MQTTEvent, MqttClient } from '@/types'
+
+const PAGE_SIZE = 50
 
 type ClientStatus = 'connected' | 'disabled' | 'offline'
 
@@ -39,6 +41,8 @@ export default function ConnectedClientsPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [actionUsername, setActionUsername] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [brokerLatencyMs, setBrokerLatencyMs] = useState<number | null>(null)
 
   // Full load: fetch all ACL clients + their disabled status
   const loadFull = useCallback(async () => {
@@ -71,15 +75,24 @@ export default function ConnectedClientsPage() {
   // Light poll: only update connected clients (no N+1 detail fetches)
   const fetchConnected = useCallback(async () => {
     try {
-      const data = await clientlogsApi.getConnectedClients()
-      // Deduplicate by username — keep first entry per username
-      const map = new Map<string, MQTTEvent>()
-      for (const ev of (data.clients ?? []) as MQTTEvent[]) {
-        if (ev.username && !map.has(ev.username)) {
-          map.set(ev.username, ev)
+      const [data, healthData] = await Promise.allSettled([
+        clientlogsApi.getConnectedClients(),
+        monitorApi.getHealthStats(),
+      ])
+      if (data.status === 'fulfilled') {
+        // Deduplicate by username — keep first entry per username
+        const map = new Map<string, MQTTEvent>()
+        for (const ev of (data.value.clients ?? []) as MQTTEvent[]) {
+          if (ev.username && !map.has(ev.username)) {
+            map.set(ev.username, ev)
+          }
         }
+        setConnectedMap(map)
       }
-      setConnectedMap(map)
+      if (healthData.status === 'fulfilled') {
+        const ms = (healthData.value as { latency_ms?: number }).latency_ms
+        if (typeof ms === 'number' && ms >= 0) setBrokerLatencyMs(ms)
+      }
     } catch {
       // Silently fail on poll errors
     }
@@ -152,6 +165,10 @@ export default function ConnectedClientsPage() {
     (r) => !search || r.username.toLowerCase().includes(search.toLowerCase())
   )
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
+
   const connectedCount = rows.filter((r) => r.status === 'connected').length
   const disabledCount = rows.filter((r) => r.status === 'disabled').length
 
@@ -175,6 +192,12 @@ export default function ConnectedClientsPage() {
               {disabledCount} disabled
             </Badge>
           )}
+          {brokerLatencyMs !== null && (
+            <Badge variant="secondary" className="gap-1" title="Broker round-trip latency (monitor ping)">
+              <Timer className="h-3 w-3" />
+              RTT {brokerLatencyMs} ms
+            </Badge>
+          )}
           <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
@@ -187,7 +210,7 @@ export default function ConnectedClientsPage() {
         <Input
           placeholder="Search clients..."
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
           className="pl-9"
         />
       </div>
@@ -213,7 +236,7 @@ export default function ConnectedClientsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((row) => (
+              paginated.map((row) => (
                 <TableRow key={row.username}>
                   <TableCell className="font-medium">{row.username}</TableCell>
 
@@ -290,9 +313,20 @@ export default function ConnectedClientsPage() {
         </Table>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        {filtered.length} of {rows.length} client{rows.length !== 1 ? 's' : ''}
-      </p>
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>{filtered.length} of {rows.length} client{rows.length !== 1 ? 's' : ''}</span>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            <span className="px-2">Page {safePage} of {totalPages}</span>
+            <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

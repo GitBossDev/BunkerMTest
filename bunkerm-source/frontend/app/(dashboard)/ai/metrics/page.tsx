@@ -68,9 +68,13 @@ export default function MetricsPage() {
       setEntities(res.entities)
       if (res.entities.length > 0 && !selectedEntity) {
         setSelectedEntity(res.entities[0])
+      } else if (res.entities.length === 0) {
+        // No topics monitored yet — nothing to load
+        setLoading(false)
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load entities')
+      setLoading(false)
     }
   }, [selectedEntity])
 

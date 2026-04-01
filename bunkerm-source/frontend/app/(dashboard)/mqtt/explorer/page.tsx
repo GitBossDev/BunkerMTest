@@ -75,6 +75,8 @@ function countLeaves(node: TreeNode): number {
 
 // ── Tree node component ───────────────────────────────────────────────────────
 
+const TREE_PAGE_SIZE = 200
+
 interface TreeNodeProps {
   node: TreeNode
   depth: number
@@ -84,6 +86,7 @@ interface TreeNodeProps {
 
 function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodeProps) {
   const [open, setOpen] = useState(defaultOpen || depth < 1)
+  const [visibleCount, setVisibleCount] = useState(TREE_PAGE_SIZE)
   const hasChildren = node.children.size > 0
   const isLeaf = !hasChildren && !!node.leaf
   const indent = depth * 16
@@ -126,7 +129,7 @@ function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodePr
   return (
     <div>
       <button
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { setOpen((o) => !o); setVisibleCount(TREE_PAGE_SIZE) }}
         className="flex items-center gap-1.5 w-full py-1.5 px-3 rounded-md hover:bg-muted/50 text-sm text-left"
         style={{ paddingLeft: `${indent + 4}px` }}
       >
@@ -142,9 +145,19 @@ function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodePr
       </button>
       {open && (
         <div>
-          {Array.from(node.children.values()).map((child) => (
+          {Array.from(node.children.values()).slice(0, visibleCount).map((child) => (
             <TreeNodeView key={child.fullPath} node={child} depth={depth + 1} onSelect={onSelect} />
           ))}
+          {node.children.size > visibleCount && (
+            <button
+              className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              style={{ paddingLeft: `${indent + 28}px` }}
+              onClick={(e) => { e.stopPropagation(); setVisibleCount(c => c + TREE_PAGE_SIZE) }}
+            >
+              Show {Math.min(TREE_PAGE_SIZE, node.children.size - visibleCount)} more
+              <span className="opacity-50">({node.children.size - visibleCount} remaining)</span>
+            </button>
+          )}
         </div>
       )}
     </div>

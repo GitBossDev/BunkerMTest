@@ -28,26 +28,13 @@ function SeverityIcon({ severity }: { severity: AlertSeverity }) {
   return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />
 }
 
-function SeverityDot({ severity }: { severity: AlertSeverity }) {
-  const colors: Record<AlertSeverity, string> = {
-    critical: 'bg-destructive',
-    high: 'bg-orange-500',
-    medium: 'bg-yellow-500',
-    low: 'bg-blue-500',
-  }
-  return (
-    <span className={`inline-block h-2 w-2 rounded-full ${colors[severity]} shrink-0 mt-1`} />
-  )
-}
-
 export function UpdateNotification() {
   const { user } = useAuth()
-  const { brokerAlerts, anomalyAlerts, badgeCount, loading, acknowledgeAnomaly, acknowledgeBroker, refresh } =
+  const { brokerAlerts, badgeCount, loading, acknowledgeBroker, refresh } =
     useNotifications(user?.role)
 
-  const isAdmin = user?.role === 'admin'
-  const visibleAnomalies = anomalyAlerts.filter(a => !a.acknowledged)
-  const hasAlerts = brokerAlerts.length > 0 || visibleAnomalies.length > 0
+  // Bell is only meaningful for admins (broker alerts are admin-only)
+  if (user?.role !== 'admin') return null
 
   return (
     <DropdownMenu>
@@ -59,13 +46,13 @@ export function UpdateNotification() {
               {badgeCount > 9 ? '9+' : badgeCount}
             </span>
           )}
-          <span className="sr-only">Alerts</span>
+          <span className="sr-only">Broker Alerts</span>
         </Button>
       </DropdownMenuTrigger>
 
       <DropdownMenuContent className="w-96" align="end">
         <DropdownMenuLabel className="flex items-center justify-between">
-          <span>Alerts</span>
+          <span>Broker Alerts</span>
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={refresh} title="Refresh">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
           </Button>
@@ -73,70 +60,31 @@ export function UpdateNotification() {
         <DropdownMenuSeparator />
 
         <div className="max-h-96 overflow-y-auto">
-          {!hasAlerts ? (
+          {brokerAlerts.length === 0 ? (
             <div className="p-4 flex items-center gap-3 text-muted-foreground">
               <Activity className="h-4 w-4 shrink-0 text-green-500" />
               <span className="text-sm">All systems normal — no active alerts.</span>
             </div>
           ) : (
-            <>
-              {isAdmin && brokerAlerts.length > 0 && (
-                <>
-                  <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Broker
-                  </div>
-                  {brokerAlerts.map(alert => (
-                    <div key={alert.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/50">
-                      <SeverityIcon severity={alert.severity} />
-                      <div className="flex-1 min-w-0 space-y-0.5">
-                        <p className="text-sm font-medium leading-snug">{alert.title}</p>
-                        <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{alert.description}</p>
-                        <p className="text-[11px] text-muted-foreground/60">{timeAgo(alert.timestamp)}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[11px] shrink-0"
-                        onClick={() => acknowledgeBroker(alert.id)}
-                      >
-                        <CheckCheck className="h-3 w-3 mr-1" />
-                        Ack
-                      </Button>
-                    </div>
-                  ))}
-                  {visibleAnomalies.length > 0 && <DropdownMenuSeparator />}
-                </>
-              )}
-
-              {visibleAnomalies.length > 0 && (
-                <>
-                  <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Anomalies
-                  </div>
-                  {visibleAnomalies.map(alert => (
-                    <div key={alert.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/50">
-                      <SeverityDot severity={alert.severity} />
-                      <div className="flex-1 min-w-0 space-y-0.5">
-                        <p className="text-sm font-medium leading-snug">{alert.description}</p>
-                        <p className="text-xs text-muted-foreground leading-snug">
-                          Topic: <span className="font-mono">{alert.entity_id}</span>
-                        </p>
-                        <p className="text-[11px] text-muted-foreground/60">{timeAgo(alert.created_at)}</p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-2 text-[11px] shrink-0"
-                        onClick={() => acknowledgeAnomaly(alert.id)}
-                      >
-                        <CheckCheck className="h-3 w-3 mr-1" />
-                        Ack
-                      </Button>
-                    </div>
-                  ))}
-                </>
-              )}
-            </>
+            brokerAlerts.map(alert => (
+              <div key={alert.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/50">
+                <SeverityIcon severity={alert.severity} />
+                <div className="flex-1 min-w-0 space-y-0.5">
+                  <p className="text-sm font-medium leading-snug">{alert.title}</p>
+                  <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{alert.description}</p>
+                  <p className="text-[11px] text-muted-foreground/60">{timeAgo(alert.timestamp)}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-[11px] shrink-0"
+                  onClick={() => acknowledgeBroker(alert.id)}
+                >
+                  <CheckCheck className="h-3 w-3 mr-1" />
+                  Ack
+                </Button>
+              </div>
+            ))
           )}
         </div>
       </DropdownMenuContent>
