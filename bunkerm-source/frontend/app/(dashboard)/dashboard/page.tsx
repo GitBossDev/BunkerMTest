@@ -10,6 +10,7 @@ import { BrokerInfo } from '@/components/dashboard/BrokerInfo'
 import { BrokerHealth } from '@/components/dashboard/BrokerHealth'
 import { QoSPanel } from '@/components/dashboard/QoSPanel'
 import { TopologyPanel } from '@/components/dashboard/TopologyPanel'
+import { TopSubscribedPanel } from '@/components/dashboard/TopSubscribedPanel'
 import { Button } from '@/components/ui/button'
 import type { MonitorStats } from '@/types'
 
@@ -86,8 +87,11 @@ export default function DashboardPage() {
         <QoSPanel stats={stats} />
       </div>
 
-      {/* ── Row 4: Topic topology ── */}
-      <TopologyPanel />
+      {/* ── Row 4: Topic topology + Top subscribed ── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        <TopologyPanel />
+        <TopSubscribedPanel />
+      </div>
     </div>
   )
 }

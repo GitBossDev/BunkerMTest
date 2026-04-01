@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "dgSpecHash": "PcwJ1tiHuw0=",
+  "success": true,
+  "projectFilePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\Greenhouse.ClientCreator.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\mdchuchon\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "Greenhouse.ClientCreator depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
+      "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\Greenhouse.ClientCreator.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\Greenhouse.ClientCreator.csproj",
+      "libraryId": "MQTTnet",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}

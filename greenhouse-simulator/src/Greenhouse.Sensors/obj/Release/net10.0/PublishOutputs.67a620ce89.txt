@@ -1,0 +1,8 @@
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.exe
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.dll
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.deps.json
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.runtimeconfig.json
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.pdb
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\MQTTnet.dll
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Shared.dll
+C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Sensors\publish\Greenhouse.Shared.pdb

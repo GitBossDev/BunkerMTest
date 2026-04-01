@@ -85,6 +85,8 @@ class MQTTMonitor:
     def __init__(self):
         self.connected_clients: Dict[str, MQTTEvent] = {}
         self.events: deque = deque(maxlen=500)
+        # cumulative subscription count per topic pattern (resets on service restart)
+        self._subscription_counts: Dict[str, int] = {}
 
         # Track "New connection from IP:PORT" lines so auth failures
         # can be attributed to an IP address. Key = unix timestamp string.
@@ -261,7 +263,7 @@ class MQTTMonitor:
         if self._is_admin(username):
             return None
 
-        return MQTTEvent(
+        event = MQTTEvent(
             id=str(uuid.uuid4()),
             timestamp=_ts_to_iso(ts_str),
             event_type="Subscribe",
@@ -277,6 +279,9 @@ class MQTTMonitor:
             topic=topic,
             qos=int(qos_str),
         )
+        # Track cumulative subscription count per topic pattern
+        self._subscription_counts[topic] = self._subscription_counts.get(topic, 0) + 1
+        return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
         """Parse PUBLISH log entries, deduplicated by (client_id, topic)."""
@@ -409,6 +414,16 @@ async def get_mqtt_events(limit: int = 200):
 @app.get("/api/v1/connected-clients")
 async def get_connected_clients():
     return {"clients": [client.dict() for client in mqtt_monitor.connected_clients.values()]}
+
+@app.get("/api/v1/top-subscribed")
+async def get_top_subscribed(limit: int = 15):
+    """Return top topics by cumulative subscription count since service start."""
+    counts = mqtt_monitor._subscription_counts
+    top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return {
+        "top_subscribed": [{"topic": t, "count": c} for t, c in top],
+        "total_distinct_subscribed": len(counts),
+    }
 
 def monitor_mosquitto_logs():
     print("Starting mosquitto log monitoring...")

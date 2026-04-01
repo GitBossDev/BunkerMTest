@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "dgSpecHash": "Z2ClWUGrxBU=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\rrevilla\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
+  ],
+  "logs": [
+    {
+      "code": "NU1603",
+      "level": "Warning",
+      "message": "Greenhouse.Controller depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
+      "projectPath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+      "warningLevel": 1,
+      "filePath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+      "libraryId": "MQTTnet",
+      "targetGraphs": [
+        "net10.0"
+      ]
+    }
+  ]
+}

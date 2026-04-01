@@ -42,6 +42,7 @@ export default function ConnectedClientsPage() {
   const [actionUsername, setActionUsername] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'connected' | 'offline' | 'disabled'>('all')
   const [brokerLatencyMs, setBrokerLatencyMs] = useState<number | null>(null)
 
   // Full load: fetch all ACL clients + their disabled status
@@ -161,9 +162,11 @@ export default function ConnectedClientsPage() {
     }
   })
 
-  const filtered = rows.filter(
-    (r) => !search || r.username.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = rows.filter((r) => {
+    if (search && !r.username.toLowerCase().includes(search.toLowerCase())) return false
+    if (statusFilter !== 'all' && r.status !== statusFilter) return false
+    return true
+  })
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
@@ -205,14 +208,30 @@ export default function ConnectedClientsPage() {
         </div>
       </div>
 
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search clients..."
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-          className="pl-9"
-        />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search clients..."
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+            className="pl-9 w-64"
+          />
+        </div>
+        {(['all', 'connected', 'offline', 'disabled'] as const).map((s) => (
+          <Button
+            key={s}
+            variant={statusFilter === s ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => { setStatusFilter(s); setPage(1) }}
+            className="capitalize"
+          >
+            {s === 'all' ? `All (${rows.length})` :
+             s === 'connected' ? `Online (${connectedCount})` :
+             s === 'offline' ? `Offline (${rows.filter(r => r.status === 'offline').length})` :
+             `Disabled (${disabledCount})`}
+          </Button>
+        ))}
       </div>
 
       <div className="rounded-md border">

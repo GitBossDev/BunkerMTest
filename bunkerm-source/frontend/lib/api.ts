@@ -198,6 +198,7 @@ export const monitorApi = {
   getTopologyStats: (limit = 15) => request(buildUrl(MONITOR_API_URL, `/stats/topology?limit=${limit}`)),
   getHealthStats: () => request(buildUrl(MONITOR_API_URL, '/stats/health')),
   getQosStats:    () => request(buildUrl(MONITOR_API_URL, '/stats/qos')),
+  getResourceStats: () => request<{ mosquitto_cpu_pct: number | null; mosquitto_rss_bytes: number | null; mosquitto_vms_bytes: number | null }>(buildUrl(MONITOR_API_URL, '/stats/resources')),
   getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
   publishMessage: (data: { topic: string; payload: string; qos?: number; retain?: boolean }) =>
     request(buildUrl(MONITOR_API_URL, '/publish'), {
@@ -276,6 +277,7 @@ export const azureApi = {
 export const clientlogsApi = {
   getEvents: () => request<{ events: unknown[] }>(buildUrl(CLIENTLOGS_API_URL, '/events')),
   getConnectedClients: () => request<{ clients: unknown[] }>(buildUrl(CLIENTLOGS_API_URL, '/connected-clients')),
+  getTopSubscribed: (limit = 15) => request<{ top_subscribed: { topic: string; count: number }[]; total_distinct_subscribed: number }>(buildUrl(CLIENTLOGS_API_URL, `/top-subscribed?limit=${limit}`)),
   enableClient: (username: string) =>
     request(buildUrl(CLIENTLOGS_API_URL, `/enable/${encodeURIComponent(username)}`), { method: 'POST' }),
   disableClient: (username: string) =>

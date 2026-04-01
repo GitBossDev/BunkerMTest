@@ -233,7 +233,9 @@ class AlertEngine:
 
             # ── Client capacity ───────────────────────────────────────────────
             connected  = stats.get("total_connected_clients", 0)
-            clients_max = stats.get("clients_maximum", 0) or max_clients
+            # $SYS/broker/clients/maximum is the historical peak (high-water mark),
+            # NOT the configured max_connections limit — always use the env-var default.
+            clients_max = max_clients
             if clients_max > 0 and (connected / clients_max * 100) >= cap_pct:
                 self._raise(
                     self.TYPE_CLIENT_CAPACITY,
@@ -365,6 +367,8 @@ class MQTTStats:
         # Latency round-trip
         self.latency_ms: float = -1.0
         self._ping_sent_at: float = 0.0
+        # Real MQTT connection state (set by on_connect / on_disconnect callbacks)
+        self._is_connected: bool = False
         
         # Initialize message counter
         self.message_counter = MessageCounter()
@@ -512,6 +516,8 @@ class MQTTStats:
                 "messages_store_bytes": self.messages_store_bytes,
                 # Latency
                 "latency_ms": self.latency_ms,
+                # Real MQTT connection flag for alert evaluation
+                "mqtt_connected": self._is_connected,
             }
 
         # Evaluate alert conditions outside the lock
@@ -769,12 +775,14 @@ def connect_mqtt():
         def on_connect(client, userdata, flags, rc, properties=None):
             if rc == 0:
                 logger.info(f"Connected to MQTT Broker at {MOSQUITTO_IP}:{MOSQUITTO_PORT}!")
+                mqtt_stats._is_connected = True
                 client.subscribe([
                     ("$SYS/broker/#", 0),
                     ("#", 2)
                 ])
                 logger.info("Subscribed to topics")
             else:
+                mqtt_stats._is_connected = False
                 logger.error(f"Failed to connect to MQTT broker, return code {rc}")
                 error_codes = {
                     1: "Incorrect protocol version",
@@ -785,6 +793,11 @@ def connect_mqtt():
                 }
                 logger.error(f"Error details: {error_codes.get(rc, 'Unknown error')}")
 
+        def on_disconnect(client, userdata, rc, properties=None):
+            mqtt_stats._is_connected = False
+            if rc != 0:
+                logger.warning(f"Unexpected MQTT disconnect (rc={rc}), will auto-reconnect")
+
         # Use MQTTv5 client
         try:
             client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
@@ -794,6 +807,7 @@ def connect_mqtt():
         
         client.username_pw_set(MOSQUITTO_ADMIN_USERNAME, MOSQUITTO_ADMIN_PASSWORD)
         client.on_connect = on_connect
+        client.on_disconnect = on_disconnect
         client.on_message = on_message
         
         logger.info(f"Attempting to connect to MQTT broker at {MOSQUITTO_IP}:{MOSQUITTO_PORT}")
@@ -1008,6 +1022,27 @@ async def get_health_stats(request: Request):
             "load_connections_1min": round(mqtt_stats.load_connections_1min, 2),
             "latency_ms":            mqtt_stats.latency_ms,
         }
+
+@app.get("/api/v1/stats/resources", dependencies=[Depends(get_api_key)])
+async def get_resource_stats(request: Request):
+    """Mosquitto process resource usage: CPU%, RSS memory."""
+    await log_request(request)
+    try:
+        import psutil
+        procs = [p for p in psutil.process_iter(['name', 'pid', 'cpu_percent', 'memory_info'])
+                 if 'mosquitto' in (p.info.get('name') or '')]
+        if procs:
+            proc = procs[0]
+            cpu = proc.cpu_percent(interval=0.1)
+            mem = proc.memory_info()
+            return {
+                "mosquitto_cpu_pct": round(cpu, 1),
+                "mosquitto_rss_bytes": mem.rss,
+                "mosquitto_vms_bytes": mem.vms,
+            }
+    except Exception as _e:
+        logger.warning("Resource stats error: %s", _e)
+    return {"mosquitto_cpu_pct": None, "mosquitto_rss_bytes": None, "mosquitto_vms_bytes": None}
 
 @app.get("/api/v1/stats/qos", dependencies=[Depends(get_api_key)])
 async def get_qos_stats(request: Request):

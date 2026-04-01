@@ -1,0 +1,2476 @@
+{
+  "clients": [
+    {
+      "username": "1",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "2",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "3",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "4",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "5",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "6",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "7",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "8",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "9",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "10",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "11",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "12",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "13",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "14",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "15",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "16",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "17",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "18",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "19",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "20",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "21",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "22",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "23",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "24",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "25",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "26",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "27",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "28",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "29",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "30",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "31",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "32",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "33",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "34",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "35",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "36",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "37",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "38",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "39",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "40",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "41",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "42",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "43",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "44",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "45",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "46",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "47",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "48",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "49",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "50",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "51",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "52",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "53",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "54",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "55",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "56",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "57",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "58",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "59",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "60",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "61",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "62",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "63",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "64",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "65",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "66",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "67",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "68",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "69",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "70",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "71",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "72",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "73",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "74",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "75",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "76",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "77",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "78",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "79",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "80",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "81",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "82",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "83",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "84",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "85",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "86",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "87",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "88",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "89",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "90",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "91",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "92",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "93",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "94",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "95",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "96",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "97",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "98",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "99",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "100",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "101",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "102",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "103",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "104",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "105",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "106",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "107",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "108",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "109",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "110",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "111",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "112",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "113",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "114",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "115",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "116",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "117",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "118",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "119",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "120",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "121",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "122",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "123",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "124",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "125",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "126",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "127",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "128",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "129",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "130",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "131",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "132",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "133",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "134",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "135",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "136",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "137",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "138",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "139",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "140",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "141",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "142",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "143",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "144",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "145",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "146",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "147",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "148",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "149",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "150",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "151",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "152",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "153",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "154",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "155",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "156",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "157",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "158",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "159",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "160",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "161",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "162",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "163",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "164",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "165",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "166",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "167",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "168",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "169",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "170",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "171",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "172",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "173",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "174",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "175",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "176",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "177",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "178",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "179",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "180",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "181",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "182",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "183",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "184",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "185",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "186",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "187",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "188",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "189",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "190",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "191",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "192",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "193",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "194",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "195",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "196",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "197",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-and-publish"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "198",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "199",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "subscribe-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    },
+    {
+      "username": "200",
+      "textname": "Usuario de ejemplo",
+      "roles": [
+        {
+          "rolename": "publish-only"
+        }
+      ],
+      "password": "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
+      "salt": "Q6wkX9DTyPc6Y8Nf",
+      "iterations": 101
+    }
+  ],
+  "groups": [],
+  "roles": [
+    {
+      "rolename": "publish-only",
+      "acls": [
+        {
+          "acltype": "publishClientSend",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": true
+        },
+        {
+          "acltype": "unsubscribePattern",
+          "topic": "#",
+          "priority": 0,
+          "allow": true
+        },
+        {
+          "acltype": "subscribePattern",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": false
+        }
+      ]
+    },
+    {
+      "rolename": "subscribe-only",
+      "acls": [
+        {
+          "acltype": "publishClientSend",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": false
+        },
+        {
+          "acltype": "subscribePattern",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": true
+        }
+      ]
+    },
+    {
+      "rolename": "subscribe-and-publish",
+      "acls": [
+        {
+          "acltype": "publishClientSend",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": true
+        },
+        {
+          "acltype": "unsubscribePattern",
+          "topic": "#",
+          "priority": 0,
+          "allow": true
+        },
+        {
+          "acltype": "subscribePattern",
+          "topic": "lab/device/#",
+          "priority": 0,
+          "allow": true
+        }
+      ]
+    }
+  ],
+  "defaultACLAccess": {
+    "publishClientSend": true,
+    "publishClientReceive": true,
+    "subscribe": true,
+    "unsubscribe": true
+  }
+}

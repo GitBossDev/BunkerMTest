@@ -7,39 +7,72 @@ using System.Text.Json.Nodes;
 using System.Diagnostics;
 using System.IO;
 
+/**
+    * GREENHOUSE SENSORS - PUBLISHER (FASE 1)
+    * 
+    * Este programa trata de actuar como generador de mensajes para MQTT,
+    * con el objetivo de probar la capacidad del broker y la estabilidad de las conexiones.
+
+    * Estructura del programa:
+    * - Comprueba parámetros de entrada (host, user, pass, clients, timeunit, time), establece el tiempo entre mensajes.
+    * - Empieza a lanzar tareas asíncronas en base al número de clientes deseados con un delay de 0.5 segundos 
+    * - Cada tarea manda al método: MyFunctionAsync, que se encarga de crear un cliente MQTT, conectarse al broker, y publicar mensajes o suscribirse a topics de forma aleatoria.
+    * - Lo primero que hace el método es comprobar la conexion con la cuenta del cliente mediante el método ComprobadorDeConexiones, que devuelve la conexión MQTT.
+    * - Luego, un cliente realiza un número aleatorio de acciones entre 5 y 20 (este no incluido), con el tiempo de espera.
+    * - Cada acción es aleatoria entre publicar o suscribirse a un topic, y el topic también se elige de forma aleatoria entre CO2, Humedad o Temperatura. Además, el QoS de cada mensaje también se elige de forma aleatoria entre 0, 1 y 2.
+    */
 class Programa
 {
     static int id_cliente = 0;
-    static int cuenta_errores= 0;
-    static int elige=2;
+    static int cuenta_errores = 0;
 
-    static async Task Main()
+    static string host = "";
+    static string user = "";
+    static string pass = "";
+    static int clients = 0;
+    static int timeunit = 0;
+    static int time = 0;
+    static async Task Main(string[] args)
     {
+
+
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--host") host = args[++i];
+            if (args[i] == "--user") user = args[++i];
+            if (args[i] == "--pass") pass = args[++i];
+            if (args[i] == "--clients") clients = int.Parse(args[++i]);
+            if (args[i] == "--timeunit") timeunit = int.Parse(args[++i]);
+            if (args[i] == "--time") time = int.Parse(args[++i]);
+        }
+        // Fallback a variables de entorno si CLI no se pasó
+        host = string.IsNullOrEmpty(host) ? Environment.GetEnvironmentVariable("MQTT_HOST") : host;
+        user = string.IsNullOrEmpty(user) ? Environment.GetEnvironmentVariable("MQTT_USER") : user;
+        pass = string.IsNullOrEmpty(pass) ? Environment.GetEnvironmentVariable("MQTT_PASS") : pass;
+        clients = clients == 0 ? int.Parse(Environment.GetEnvironmentVariable("CLIENTS") ?? "100") : clients;
+        timeunit = timeunit == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIMEUNIT") ?? "3") : timeunit;
+        time = time == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIME") ?? "1") : time;
+
+        Console.WriteLine($"Conectando a {host} con {user}");
 
         Console.WriteLine("==============================================");
         Console.WriteLine("  GREENHOUSE MQTT - PUBLISHERS");
         Console.WriteLine("==============================================\n");
-
-
-        Console.WriteLine("¿En que unidad de tiempo quieres enviar los mensajes? (horas:1, minutos:2, segundos:3)");
-        int tiempo = int.Parse(Console.ReadLine());
-        switch ((int)tiempo)
+        // Convertir el tiempo a milisegundos según la unidad seleccionada
+        switch (timeunit)
         {
             case 1:
-                Console.WriteLine("¿Cada cuantas horas quieres enviar el mensaje?");
-                tiempo = int.Parse(Console.ReadLine()) * 3600000;
+                time = time * 3600000;
                 break;
             case 2:
-                Console.WriteLine("¿Cada cuantos minutos quieres enviar el mensaje?");
-                tiempo = int.Parse(Console.ReadLine()) * 60000;
+                time = time * 60000;
                 break;
             case 3:
-                Console.WriteLine("¿Cada cuantos segundos quieres enviar el mensaje?");
-                tiempo = int.Parse(Console.ReadLine()) * 1000;
+                time = time * 1000;
                 break;
             default:
-                Console.WriteLine("Por defecto, ¿Cada cuantos segundos quieres enviar el mensaje?");
-                tiempo = int.Parse(Console.ReadLine()) * 1000;
+                time = time * 1000;
                 break;
         }
 
@@ -47,20 +80,19 @@ class Programa
         Console.WriteLine("PUBLICACIÓN DE MENSAJES");
         Console.WriteLine("==============================================\n");
 
-        Console.WriteLine("Dime el número de clientes que publicarán mensajes:");
-        int numClientes = int.Parse(Console.ReadLine());
 
         var tasks = new List<Task>();
 
-        while (numClientes > 0)
+        // El número de clientes se lanza con un delay entre cada uno para evitar picos de conexión simultáneos
+        while (clients > 0)
         {
-            numClientes--;
+            clients--;
             // Lanzar la función asíncrona en un task en lugar de usar Thread directamente
-            tasks.Add(Task.Run(() => MyFunctionAsync(tiempo)));
+            tasks.Add(Task.Run(() => MyFunctionAsync(time)));
 
             // tiempo entre comienzo de la task de cada cliente
             await Task.Delay(500);
-            
+
         }
 
         // Esperar a que todos los publishers terminen su ciclo de mensajes
@@ -72,14 +104,16 @@ class Programa
     static async Task MyFunctionAsync(int tiempo)
     {
 
-        MqttClientHelper mqttHelper = await ComprobadorDeConexiones();
+        MqttClientHelper mqttHelper = await ComprobadorDeConexiones(); //Comprueba la conexion con la cuenta del cliente y espera que cada task termine
 
 
+        //Intenta diversas opciones para el cliente.
         try
         {
-            int messageCount = Random.Shared.Next(5, 10);
+            int messageCount = Random.Shared.Next(5, 20);
             int id_sensor = Random.Shared.Next(100000000, 999999999);
 
+            //Manda cantidad aleatoria de mensajes entre 5 y 19.
             for (int i = 0; i < messageCount; i++)
             {
                 var sensores_co2 = new List<Sensor_c02> { new Sensor_c02 { Id = id_sensor, Nivel_c02 = Random.Shared.Next(300, 1000) } };
@@ -88,41 +122,183 @@ class Programa
                 // Opciones para formatear el JSON
                 var opciones = new JsonSerializerOptions { WriteIndented = true };
 
-                switch (Random.Shared.Next(1, 4))
+                //CASO 1: Cliente se subscribe. CASO 2: Cliente publica. CASO 3: Ambos casos
+                switch (Random.Shared.Next(1, 3))
                 {
                     case 1:
-                        await mqttHelper.PublishAsync(
 
-                            topic: $"lab/device/{id_sensor}/CO2",
-                            payload: JsonSerializer.Serialize(sensores_co2, opciones),
-                            qos: MqttQualityOfServiceLevel.AtMostOnce
-                        );
-                        Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                        switch (Random.Shared.Next(1, 10)) // de 1 a 9
+                        {
+                            // QOS 0
+                            case 1:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 2:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 3:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            // QOS 1
+                            case 4:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 5:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 6:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            // QOS 2
+                            case 7:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 8:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 9:
+                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
+                                await mqttHelper.SubscribeAsync(
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                        }
                         break;
                     case 2:
-                        await mqttHelper.PublishAsync(
+                        Console.WriteLine($"Publisher {mqttHelper.ClientId} publicando {messageCount} mensajes cada {tiempo / 1000} segundos...");
+                        switch (Random.Shared.Next(1, 10)) // de 1 a 9
+                        {
+                            // QOS 0
+                            case 1:
+                                await mqttHelper.PublishAsync(
 
-                            topic: $"lab/device/{id_sensor}/Humedad",
-                            payload: JsonSerializer.Serialize(sensores_humedad, opciones),
-                            qos: MqttQualityOfServiceLevel.AtMostOnce
-                        );
-                        Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                        break;
-                    case 3:
-                        await mqttHelper.PublishAsync(
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 2:
+                                await mqttHelper.PublishAsync(
 
-                            topic: $"lab/device/{id_sensor}/Temperatura",
-                            payload: JsonSerializer.Serialize(sensores_temp, opciones),
-                            qos: MqttQualityOfServiceLevel.AtMostOnce
-                        );
-                        Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 3:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtMostOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            // QOS 1
+                            case 4:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 5:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 6:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
+                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            // QOS 2
+                            case 7:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/CO2",
+                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 8:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/Humedad",
+                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                            case 9:
+                                await mqttHelper.PublishAsync(
+
+                                    topic: $"lab/device/{id_sensor}/Temperatura",
+                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
+                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
+                                );
+                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                                break;
+                        }
                         break;
                 }
-
-                if (messageCount % 2 == 0)
-                {
-                    await Task.Delay(tiempo);
-                } // Evitar esperar después del último mensaje
+                await Task.Delay(tiempo);
+                // Evitar esperar después del último mensaje
 
 
             }
@@ -143,28 +319,23 @@ class Programa
             await mqttHelper.DisconnectAsync();
             Console.WriteLine("Aplicación finalizada.");
         }
-        
+
     }
     // ? para nullable
     static async Task<MqttClientHelper?> ComprobadorDeConexiones()
     {
         id_cliente = id_cliente + 1;
         // Configurar parámetros de conexión MQTT
-        
-        //var userCreds = MqttClientHelper.CreateDynSecPasswordHash("123456");
-        //AddOrUpdateDynSecClient(id_cliente.ToString(), "Usuario de ejemplo", "admin", userCreds);
+
 
         MqttSettings settings = new MqttSettings
         {
-            BrokerHost = "localhost",  // Mosquitto está corriendo en Docker en nuestra máquina
+            BrokerHost = host,  // Mosquitto está corriendo en Docker en nuestra máquina
             BrokerPort = 1901,          // Puerto estándar MQTT
             ClientId = $"greenhouse-publisher-{id_cliente}",  // ID único para este cliente
-            Username = "bunker",  // Usuario que acabamos de añadir a dynamic-security.json
-            Password = "bunker"
+            Username = id_cliente.ToString(),  // Usuario que acabamos de añadir a dynamic-security.json
+            Password = "123456",  // Contraseña en texto plano
         };
-
-        
-        
 
         // Crear helper MQTT y conectar al broker
         MqttClientHelper mqttHelper = new(settings);
@@ -176,163 +347,28 @@ class Programa
             return null;
         }
         return mqttHelper;
-
     }
 
     /**
     * Función para añadir o actualizar un cliente en el dynamic-security.json de Mosquitto
-*/
-    static void AddOrUpdateDynSecClient(string username, string textname, string role, (string PasswordBase64, string SaltBase64, int Iterations) creds)
+    * con roles seleccionados aleatoriamente (publish-only o subscribe-only)
+    */
+
+
+    internal class Sensor_c02
     {
-        // AppContext.BaseDirectory apunta al directorio bin (por ejemplo ...\bin\Debug\net10.0\).
-        // Subimos hasta la raíz del repositorio y accedemos a backend/mosquitto/dynsec.
-        string dynsecPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", "backend", "mosquitto", "dynsec", "dynamic-security.json"));
+        public int Id { get; set; }
+        public int Nivel_c02 { get; set; }
+    }
 
-        Console.WriteLine($"Usando dynamic-security.json: {dynsecPath}");
-
-        string dynsecDir = Path.GetDirectoryName(dynsecPath)!;
-        if (!Directory.Exists(dynsecDir))
-        {
-            Directory.CreateDirectory(dynsecDir);
-        }
-
-        JsonNode root;
-
-        if (File.Exists(dynsecPath))
-        {
-            string json = File.ReadAllText(dynsecPath);
-            root = JsonNode.Parse(json) ?? new JsonObject();
-        }
-        else
-        {
-            root = new JsonObject();
-        }
-
-        if (root["clients"] == null)
-        {
-            root["clients"] = new JsonArray();
-        }
-
-        var clients = root["clients"]!.AsArray();
-
-        JsonObject? existing = null;
-        foreach (var item in clients)
-        {
-            if (item is JsonObject obj && string.Equals(obj["username"]?.GetValue<string>(), username, StringComparison.OrdinalIgnoreCase))
-            {
-                existing = obj;
-                break;
-            }
-        }
-
-        if (existing != null)
-        {
-            existing["textname"] = textname;
-            existing["password"] = creds.PasswordBase64;
-            existing["salt"] = creds.SaltBase64;
-            existing["iterations"] = creds.Iterations;
-
-            if (existing["roles"] == null)
-            {
-                existing["roles"] = new JsonArray();
-            }
-            var rolesArray = existing["roles"]!.AsArray();
-            bool hasRole = false;
-            foreach (var roleItem in rolesArray)
-            {
-                if (roleItem is JsonObject roleObj && string.Equals(roleObj["rolename"]?.GetValue<string>(), role, StringComparison.OrdinalIgnoreCase))
-                {
-                    hasRole = true;
-                    break;
-                }
-            }
-            if (!hasRole)
-            {
-                rolesArray.Add(new JsonObject { ["rolename"] = role });
-            }
-        }
-        else
-        {
-            var newClient = new JsonObject
-            {
-                ["username"] = username,
-                ["textname"] = textname,
-                ["roles"] = new JsonArray(new JsonObject { ["rolename"] = role }),
-                ["password"] = "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
-                ["salt"] = "Q6wkX9DTyPc6Y8Nf",
-                ["iterations"] = creds.Iterations
-            };
-            clients.Add(newClient);
-        }
-
-        if (root["roles"] == null)
-        {
-            root["roles"] = new JsonArray();
-        }
-
-        bool adminRoleExists = false;
-        foreach (var roleItem in root["roles"]!.AsArray())
-        {
-            if (roleItem is JsonObject roleObj && string.Equals(roleObj["rolename"]?.GetValue<string>(), role, StringComparison.OrdinalIgnoreCase))
-            {
-                adminRoleExists = true;
-                break;
-            }
-        }
-
-        if (!adminRoleExists)
-        {
-            root["roles"]!.AsArray().Add(new JsonObject
-            {
-                ["rolename"] = role,
-                ["acls"] = new JsonArray
-                {
-                    new JsonObject { ["acltype"] = "publishClientSend", ["topic"] = "$CONTROL/dynamic-security/#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "publishClientReceive", ["topic"] = "$CONTROL/dynamic-security/#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "publishClientReceive", ["topic"] = "$SYS/#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "publishClientReceive", ["topic"] = "#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "subscribePattern", ["topic"] = "#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "subscribePattern", ["topic"] = "$CONTROL/dynamic-security/#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "subscribePattern", ["topic"] = "$SYS/#", ["priority"] = 0, ["allow"] = true },
-                    new JsonObject { ["acltype"] = "unsubscribePattern", ["topic"] = "#", ["priority"] = 0, ["allow"] = true }
-                }
-            });
-        }
-
-        if (root["defaultACLAccess"] == null)
-        {
-            root["defaultACLAccess"] = new JsonObject
-            {
-                ["publishClientSend"] = true,
-                ["publishClientReceive"] = true,
-                ["subscribe"] = true,
-                ["unsubscribe"] = true
-            };
-        }
-
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(dynsecPath, root.ToJsonString(options));
-
-        Console.WriteLine("dynamic-security.json actualizado con usuario cliente: "+id_cliente);
+    internal class Sensor_Temp
+    {
+        public int Id { get; set; }
+        public int Temperatura { get; set; }
+    }
+    internal class Sensor_humedad
+    {
+        public int Id { get; set; }
+        public int Humedad { get; set; }
     }
 }
-
-internal class Sensor_c02
-{
-    public int Id { get; set; }
-    public int Nivel_c02 { get; set; }
-}
-
-internal class Sensor_Temp
-{
-    public int Id { get; set; }
-    public int Temperatura { get; set; }
-}
-internal class Sensor_humedad
-{
-    public int Id { get; set; }
-    public int Humedad { get; set; }
-}
-
-
-//clase sensor genérica para tene run json que recoger
