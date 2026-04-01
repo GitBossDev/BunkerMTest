@@ -1042,7 +1042,8 @@ async def acknowledge_broker_alert(request: Request, alert_id: str):
     raise HTTPException(status_code=404, detail="Alert not found")
 
 
-@app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])async def get_topics(request: Request):
+@app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])
+async def get_topics(request: Request):
     """Get all tracked MQTT topics with latest values"""
     await log_request(request)
     return {"topics": topic_store.get_all()}
