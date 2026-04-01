@@ -227,6 +227,10 @@ export const configApi = {
     request(`/api/proxy/config/reset-mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`, {
       method: 'POST',
     }),
+  restartMosquitto: () =>
+    request<{ success: boolean; message: string }>(`/api/proxy/config/restart-mosquitto?nonce=${generateNonce()}&t=${Date.now()}`, {
+      method: 'POST',
+    }),
 
   getDynSecJson: () =>
     request(`/api/proxy/config/dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`),

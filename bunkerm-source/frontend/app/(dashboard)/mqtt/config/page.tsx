@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { Save, RefreshCw, Loader2, AlertTriangle, Info } from 'lucide-react'
+import { Save, RefreshCw, Loader2, AlertTriangle, Info, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { configApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -146,6 +146,7 @@ export default function MosquittoConfigPage() {
   const [saved, setSaved] = useState<ConfigState>(DEFAULT_STATE)
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
 
   const fetchConfig = useCallback(async () => {
     setIsLoading(true)
@@ -171,11 +172,23 @@ export default function MosquittoConfigPage() {
       const payload = buildSavePayload(state)
       await configApi.saveMosquittoConfig(payload)
       setSaved(state)
-      toast.success('Configuration saved — restart the broker to apply changes')
+      toast.success('Configuration saved — click "Apply (Reload)" to activate changes')
     } catch {
       toast.error('Failed to save configuration')
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleRestart = async () => {
+    setIsRestarting(true)
+    try {
+      await configApi.restartMosquitto()
+      toast.success('Mosquitto reloaded — changes are now active')
+    } catch {
+      toast.error('Failed to reload Mosquitto')
+    } finally {
+      setIsRestarting(false)
     }
   }
 
@@ -193,6 +206,10 @@ export default function MosquittoConfigPage() {
           <Button variant="outline" size="sm" onClick={fetchConfig} disabled={isLoading || isSaving}>
             <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? 'animate-spin' : ''}`} />
             Reload
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleRestart} disabled={isRestarting || isLoading}>
+            {isRestarting ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RotateCcw className="h-4 w-4 mr-1" />}
+            Apply (Reload)
           </Button>
           <Button size="sm" onClick={handleSave} disabled={isSaving || !isDirty || isLoading}>
             {isSaving ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
@@ -233,6 +250,10 @@ export default function MosquittoConfigPage() {
                 placeholder="1900"
                 onChange={(v) => set('mqttPort', v)}
               />
+              <div className="flex items-start gap-2 rounded-md bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-400">
+                <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>This is the <strong>internal</strong> container port. Your docker-compose maps it to a different host port (e.g. <strong>1901:1900</strong>). External clients connect to the host port.</span>
+              </div>
 
               <Separator />
 
@@ -299,7 +320,7 @@ export default function MosquittoConfigPage() {
               <NumberField
                 id="maxInflight"
                 label="Max Inflight Messages"
-                description="QoS 1/2 messages in-flight per client. 0 = use broker default (20)."
+                description="QoS 1/2 messages awaiting ACK per client (currently in transit). Too low causes publisher backpressure. 0 = broker default (20)."
                 value={state.maxInflight}
                 min={0}
                 placeholder="default (20)"
@@ -309,7 +330,7 @@ export default function MosquittoConfigPage() {
               <NumberField
                 id="maxQueued"
                 label="Max Queued Messages"
-                description="Messages queued per offline client. 0 = unlimited."
+                description="Messages spooled for offline persistent-session clients; delivered on reconnect. 0 = unlimited (memory risk with many offline clients)."
                 value={state.maxQueued}
                 min={0}
                 placeholder="unlimited"

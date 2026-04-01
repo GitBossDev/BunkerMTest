@@ -75,7 +75,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     title: 'Configuration',
     items: [
       { label: 'Broker Config', href: '/mqtt/config', icon: Settings },
-      { label: 'DynSec Config', href: '/mqtt/dynsec-config', icon: Lock },
+      { label: 'Security & ACL', href: '/mqtt/dynsec-config', icon: Lock },
       { label: 'Import Password', href: '/mqtt/import-password', icon: Upload },
       { label: 'Settings', href: '/settings', icon: KeyRound },
     ],

@@ -1,162 +1,186 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { Download, Upload, RefreshCw, RotateCcw, Loader2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Download, Upload, FileText, CheckCircle, XCircle, Loader2, Info, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 import { configApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Textarea } from '@/components/ui/textarea'
 import { DefaultACLCard } from '@/components/mqtt/DefaultACLCard'
 
 export default function DynSecJsonPage() {
-  const [json, setJson] = useState('')
-  const [original, setOriginal] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isValid, setIsValid] = useState(true)
+  const [file, setFile] = useState<File | null>(null)
+  const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
+  const [importMessage, setImportMessage] = useState('')
+  const [isExporting, setIsExporting] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
 
-  const fetchConfig = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const data = await configApi.getDynSecJson()
-      const formatted = JSON.stringify(data, null, 2)
-      setJson(formatted)
-      setOriginal(formatted)
-      setIsValid(true)
-    } catch {
-      toast.error('Failed to load DynSec configuration')
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchConfig()
-  }, [fetchConfig])
-
-  const handleChange = (value: string) => {
-    setJson(value)
-    try {
-      JSON.parse(value)
-      setIsValid(true)
-    } catch {
-      setIsValid(false)
-    }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] || null
+    setFile(f)
+    setImportStatus('idle')
+    setImportMessage('')
   }
 
-  const handleFormat = () => {
-    try {
-      const parsed = JSON.parse(json)
-      setJson(JSON.stringify(parsed, null, 2))
-      setIsValid(true)
-    } catch {
-      toast.error('Invalid JSON - cannot format')
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const f = e.dataTransfer.files[0]
+    if (f) {
+      setFile(f)
+      setImportStatus('idle')
+      setImportMessage('')
     }
   }
 
   const handleImport = async () => {
-    if (!isValid) {
-      toast.error('JSON is invalid')
-      return
-    }
-    setIsSaving(true)
+    if (!file) return
+    setImportStatus('uploading')
     try {
-      const parsed = JSON.parse(json)
+      const text = await file.text()
+      JSON.parse(text) // validate JSON before sending
       const formData = new FormData()
-      const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: 'application/json' })
-      formData.append('file', blob, 'dynsec.json')
+      formData.append('file', file)
       await configApi.importDynSecJson(formData)
-      setOriginal(json)
+      setImportStatus('success')
+      setImportMessage('DynSec configuration imported successfully')
       toast.success('DynSec configuration imported successfully')
-    } catch {
-      toast.error('Failed to import configuration')
-    } finally {
-      setIsSaving(false)
+    } catch (err) {
+      const msg = err instanceof SyntaxError ? 'File is not valid JSON' : 'Failed to import configuration'
+      setImportStatus('error')
+      setImportMessage(msg)
+      toast.error(msg)
     }
   }
 
-  const handleExport = () => {
-    const blob = new Blob([json], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `dynsec-config-${Date.now()}.json`
-    a.click()
-    URL.revokeObjectURL(url)
+  const handleExport = async () => {
+    setIsExporting(true)
+    try {
+      const data = await configApi.getDynSecJson()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `dynsec-config-${Date.now()}.json`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast.success('Configuration exported')
+    } catch {
+      toast.error('Failed to export configuration')
+    } finally {
+      setIsExporting(false)
+    }
   }
-
-  const isDirty = json !== original
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <h1 className="text-2xl font-bold">DynSec JSON Configuration</h1>
-          <p className="text-muted-foreground text-sm">View and import dynamic security configuration</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={fetchConfig} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            Reload
-          </Button>
-          {isDirty && (
-            <Button variant="outline" size="sm" onClick={() => { setJson(original); setIsValid(true) }}>
-              <RotateCcw className="h-4 w-4" />
-              Reset
-            </Button>
-          )}
-          <Button variant="outline" size="sm" onClick={handleFormat} disabled={!isValid}>
-            Format JSON
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={!json}>
-            <Download className="h-4 w-4" />
-            Export
-          </Button>
-          <Button size="sm" onClick={handleImport} disabled={isSaving || !isValid || !isDirty}>
-            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Import
-          </Button>
-        </div>
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h1 className="text-2xl font-bold">Security &amp; ACL</h1>
+        <p className="text-muted-foreground text-sm">
+          Manage default access rules and the dynamic security plugin configuration
+        </p>
       </div>
 
+      {/* Info banner */}
+      <div className="flex items-start gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+        <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
+        <span>
+          The <strong className="text-foreground">Dynamic Security plugin</strong> stores all clients, groups, roles, and ACLs in a single JSON file (<code className="text-xs bg-muted px-1 rounded">dynamic-security.json</code>). Use the export button to download a backup and the import button to restore or replace the configuration. Changes take effect immediately without a broker restart.
+        </span>
+      </div>
+
+      {/* Default ACL */}
       <DefaultACLCard />
 
+      {/* Export card */}
       <Card>
         <CardHeader>
-          <CardTitle>Dynamic Security Config</CardTitle>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Download className="h-4 w-4" />
+            Export Configuration
+          </CardTitle>
           <CardDescription>
-            Raw JSON configuration for Mosquitto dynamic security plugin.
-            Edit and click Import to apply changes.
+            Download the current DynSec JSON as a backup or for editing offline
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <Textarea
-              value={json}
-              onChange={(e) => handleChange(e.target.value)}
-              className={`font-mono text-xs min-h-[calc(100vh-380px)] resize-none ${
-                !isValid ? 'border-destructive focus-visible:ring-destructive' : ''
-              }`}
-              placeholder="{}"
-              spellCheck={false}
-            />
-          )}
+          <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+            {isExporting
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <Download className="h-4 w-4 mr-2" />}
+            Download dynsec-config.json
+          </Button>
         </CardContent>
       </Card>
 
-      {!isValid && (
-        <p className="text-xs text-destructive">Invalid JSON syntax</p>
-      )}
-      {isDirty && isValid && (
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          You have unsaved changes. Click Import to apply.
-        </p>
-      )}
+      {/* Import card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Upload className="h-4 w-4" />
+            Import Configuration
+          </CardTitle>
+          <CardDescription>
+            Replace the entire DynSec configuration with a JSON file. All existing clients, roles, and ACLs will be overwritten.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>This replaces the complete security configuration. Export a backup first if you want to preserve the current state.</span>
+          </div>
+
+          <div
+            onDrop={handleDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => inputRef.current?.click()}
+            className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+          >
+            <input
+              ref={inputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              accept=".json,application/json"
+            />
+            {file ? (
+              <div className="flex flex-col items-center gap-2">
+                <FileText className="h-10 w-10 text-primary" />
+                <p className="font-medium">{file.name}</p>
+                <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                <Upload className="h-10 w-10" />
+                <p className="font-medium">Drop JSON file here or click to browse</p>
+                <p className="text-xs">Accepts dynamic-security.json files</p>
+              </div>
+            )}
+          </div>
+
+          {importStatus !== 'idle' && (
+            <div className={`flex items-center gap-2 p-3 rounded-lg text-sm ${
+              importStatus === 'success' ? 'bg-green-500/10 text-green-700 dark:text-green-400' :
+              importStatus === 'error' ? 'bg-destructive/10 text-destructive' :
+              'bg-muted text-muted-foreground'
+            }`}>
+              {importStatus === 'success' && <CheckCircle className="h-4 w-4 shrink-0" />}
+              {importStatus === 'error' && <XCircle className="h-4 w-4 shrink-0" />}
+              {importStatus === 'uploading' && <Loader2 className="h-4 w-4 animate-spin shrink-0" />}
+              <span>{importStatus === 'uploading' ? 'Importing...' : importMessage}</span>
+            </div>
+          )}
+
+          <Button
+            onClick={handleImport}
+            disabled={!file || importStatus === 'uploading'}
+          >
+            {importStatus === 'uploading'
+              ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              : <Upload className="h-4 w-4 mr-2" />}
+            Import Configuration
+          </Button>
+        </CardContent>
+      </Card>
     </div>
   )
 }

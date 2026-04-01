@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { DefaultACLCard } from '@/components/mqtt/DefaultACLCard'
 import { getStoredTimezone, setStoredTimezone } from '@/lib/timeUtils'
 
 const TIMEZONE_OPTIONS: { group: string; zones: { value: string; label: string }[] }[] = [
@@ -145,8 +144,6 @@ export default function SettingsPage() {
         </h1>
         <p className="text-muted-foreground text-sm">Manage your BunkerM instance configuration</p>
       </div>
-
-      <DefaultACLCard />
 
       {/* Timezone */}
       <Card>

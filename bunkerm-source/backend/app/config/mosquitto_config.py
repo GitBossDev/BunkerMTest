@@ -479,6 +479,33 @@ def validate_listeners(current_listeners: List[Dict[str, Any]], new_listeners: L
 BROKER_LOG_PATH = os.getenv("BROKER_LOG_PATH", "/var/log/mosquitto/mosquitto.log")
 BROKER_LOG_MAX_LINES = 1000
 
+_MOSQUITTO_PID_FILE = "/var/run/mosquitto.pid"
+
+@router.post("/restart-mosquitto")
+async def restart_mosquitto(api_key: str = Security(get_api_key)):
+    """Send SIGHUP to Mosquitto so it reloads its configuration file."""
+    import signal as _signal
+    try:
+        # Try PID file first
+        pid = None
+        if os.path.isfile(_MOSQUITTO_PID_FILE):
+            with open(_MOSQUITTO_PID_FILE) as _f:
+                pid = int(_f.read().strip())
+        else:
+            # Fall back: find mosquitto process
+            import subprocess as _sp
+            result = _sp.run(["pgrep", "-x", "mosquitto"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                pid = int(result.stdout.strip().split()[0])
+        if pid:
+            os.kill(pid, _signal.SIGHUP)
+            logger.info(f"Sent SIGHUP to Mosquitto PID {pid}")
+            return {"success": True, "message": f"Mosquitto reloading configuration (PID {pid})"}
+        raise RuntimeError("Mosquitto process not found")
+    except Exception as e:
+        logger.error(f"Failed to reload Mosquitto: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to reload Mosquitto: {str(e)}")
+
 
 @router.get("/broker")
 async def get_broker_logs(api_key: str = Security(get_api_key)):
