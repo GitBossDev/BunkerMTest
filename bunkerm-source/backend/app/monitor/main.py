@@ -30,6 +30,7 @@ from logging.handlers import RotatingFileHandler
 import ssl
 from data_storage import HistoricalDataStorage, PERIODS as _STORAGE_PERIODS
 import socket
+import uuid as _uuid
 import uvicorn
 from contextlib import asynccontextmanager
 
@@ -136,6 +137,201 @@ _STRING_TOPICS = {
     "$SYS/broker/version",
     "$SYS/broker/uptime",
 }
+
+class AlertEngine:
+    """Evaluates broker metrics and emits in-memory alerts."""
+
+    # Alert types
+    TYPE_BROKER_DOWN      = "broker_down"
+    TYPE_LATENCY_HIGH     = "latency_high"
+    TYPE_CLIENT_CAPACITY  = "client_capacity"
+    TYPE_MSG_SPIKE        = "msg_spike"
+    TYPE_INFLIGHT_HIGH    = "inflight_high"
+    TYPE_RECONNECT_LOOP   = "reconnect_loop"
+    TYPE_AUTH_FAILURE     = "auth_failure"
+
+    # Severity for each alert type
+    _SEVERITY = {
+        TYPE_BROKER_DOWN:      "critical",
+        TYPE_LATENCY_HIGH:     "high",
+        TYPE_CLIENT_CAPACITY:  "high",
+        TYPE_MSG_SPIKE:        "high",
+        TYPE_INFLIGHT_HIGH:    "high",
+        TYPE_RECONNECT_LOOP:   "high",
+        TYPE_AUTH_FAILURE:     "high",
+    }
+
+    # Human-readable titles
+    _TITLES = {
+        TYPE_BROKER_DOWN:      "Broker Unreachable",
+        TYPE_LATENCY_HIGH:     "High Latency",
+        TYPE_CLIENT_CAPACITY:  "Client Capacity Warning",
+        TYPE_MSG_SPIKE:        "Message Spike Detected",
+        TYPE_INFLIGHT_HIGH:    "In-flight Messages High",
+        TYPE_RECONNECT_LOOP:   "Client Reconnect Loop",
+        TYPE_AUTH_FAILURE:     "Authentication Failures",
+    }
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active: Dict[str, dict] = {}   # keyed by alert type (one per type)
+        self._broker_down_polls: int = 0
+        self._msg_baseline: deque = deque(maxlen=5)
+        # per-client connect timestamps (sliding window for reconnect loop detection)
+        self._reconnect_events: Dict[str, deque] = {}
+        # auth failure timestamps (sliding window)
+        self._auth_fail_events: deque = deque()
+
+    # ── public interface ──────────────────────────────────────────────────────
+
+    def get_alerts(self) -> List[dict]:
+        with self._lock:
+            return list(self._active.values())
+
+    def acknowledge(self, alert_id: str) -> bool:
+        with self._lock:
+            for key, alert in list(self._active.items()):
+                if alert["id"] == alert_id:
+                    del self._active[key]
+                    return True
+        return False
+
+    def evaluate(self, stats: dict):
+        """Called periodically with the latest stats snapshot."""
+        grace_polls   = int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3"))
+        latency_max   = float(os.getenv("ALERT_LATENCY_HIGH_MS", "500"))
+        cap_pct       = float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80"))
+        max_clients   = float(os.getenv("ALERT_CLIENT_MAX_DEFAULT", "10000"))
+        spike_factor  = float(os.getenv("ALERT_MSG_SPIKE_FACTOR", "5"))
+        inflight_max  = int(os.getenv("ALERT_INFLIGHT_MAX", "500"))
+
+        with self._lock:
+            broker_connected = stats.get("mqtt_connected", False)
+
+            # ── Broker down ───────────────────────────────────────────────────
+            if not broker_connected:
+                self._broker_down_polls += 1
+                if self._broker_down_polls >= grace_polls:
+                    self._raise(
+                        self.TYPE_BROKER_DOWN,
+                        f"Broker has not responded for {self._broker_down_polls} consecutive polls "
+                        f"(threshold: {grace_polls}).",
+                    )
+            else:
+                self._broker_down_polls = 0
+                self._clear(self.TYPE_BROKER_DOWN)
+
+            # ── Latency ───────────────────────────────────────────────────────
+            latency = stats.get("latency_ms", -1.0)
+            if latency >= 0 and latency > latency_max:
+                self._raise(
+                    self.TYPE_LATENCY_HIGH,
+                    f"Round-trip latency is {latency:.0f} ms (threshold: {latency_max:.0f} ms).",
+                )
+            else:
+                self._clear(self.TYPE_LATENCY_HIGH)
+
+            # ── Client capacity ───────────────────────────────────────────────
+            connected  = stats.get("total_connected_clients", 0)
+            clients_max = stats.get("clients_maximum", 0) or max_clients
+            if clients_max > 0 and (connected / clients_max * 100) >= cap_pct:
+                self._raise(
+                    self.TYPE_CLIENT_CAPACITY,
+                    f"{connected} clients connected ({connected / clients_max * 100:.1f}% of {int(clients_max)} max, "
+                    f"threshold: {cap_pct:.0f}%).",
+                )
+            else:
+                self._clear(self.TYPE_CLIENT_CAPACITY)
+
+            # ── Message spike ─────────────────────────────────────────────────
+            rx_rate = stats.get("load_msg_rx_1min", 0.0)
+            self._msg_baseline.append(rx_rate)
+            if len(self._msg_baseline) >= 3:
+                baseline_mean = sum(self._msg_baseline) / len(self._msg_baseline)
+                # Only alert if there is a real baseline (> 0) and current is spike
+                if baseline_mean > 0 and rx_rate > baseline_mean * spike_factor:
+                    self._raise(
+                        self.TYPE_MSG_SPIKE,
+                        f"Incoming message rate {rx_rate:.1f} msg/s is {rx_rate / baseline_mean:.1f}× "
+                        f"the recent baseline of {baseline_mean:.1f} msg/s "
+                        f"(threshold: {spike_factor}×).",
+                    )
+                else:
+                    self._clear(self.TYPE_MSG_SPIKE)
+
+            # ── In-flight ─────────────────────────────────────────────────────
+            inflight = stats.get("messages_inflight", 0)
+            if inflight > inflight_max:
+                self._raise(
+                    self.TYPE_INFLIGHT_HIGH,
+                    f"{inflight} messages are awaiting acknowledgement (threshold: {inflight_max}).",
+                )
+            else:
+                self._clear(self.TYPE_INFLIGHT_HIGH)
+
+    def record_connect_event(self, client_id: str):
+        """Called whenever a client connect event is observed."""
+        loop_count  = int(os.getenv("ALERT_RECONNECT_LOOP_COUNT", "5"))
+        window_secs = int(os.getenv("ALERT_RECONNECT_LOOP_WINDOW_S", "60"))
+        now = time.time()
+        with self._lock:
+            if client_id not in self._reconnect_events:
+                self._reconnect_events[client_id] = deque()
+            q = self._reconnect_events[client_id]
+            q.append(now)
+            # Trim old events outside the window
+            while q and now - q[0] > window_secs:
+                q.popleft()
+            if len(q) >= loop_count:
+                self._raise(
+                    self.TYPE_RECONNECT_LOOP,
+                    f"Client '{client_id}' reconnected {len(q)} times in the last {window_secs}s "
+                    f"(threshold: {loop_count}).",
+                    alert_id_suffix=client_id[:32],
+                )
+
+    def record_auth_failure(self):
+        """Called whenever an authentication failure is detected in Mosquitto logs."""
+        fail_count  = int(os.getenv("ALERT_AUTH_FAIL_COUNT", "5"))
+        window_secs = int(os.getenv("ALERT_AUTH_FAIL_WINDOW_S", "60"))
+        now = time.time()
+        with self._lock:
+            self._auth_fail_events.append(now)
+            # Trim old events
+            while self._auth_fail_events and now - self._auth_fail_events[0] > window_secs:
+                self._auth_fail_events.popleft()
+            if len(self._auth_fail_events) >= fail_count:
+                self._raise(
+                    self.TYPE_AUTH_FAILURE,
+                    f"{len(self._auth_fail_events)} authentication failures in the last {window_secs}s "
+                    f"(threshold: {fail_count}).",
+                )
+
+    # ── private helpers ───────────────────────────────────────────────────────
+
+    def _raise(self, alert_type: str, description: str, alert_id_suffix: str = ""):
+        """Upsert an alert. Keeps existing id/timestamp if already active."""
+        key = f"{alert_type}:{alert_id_suffix}" if alert_id_suffix else alert_type
+        if key not in self._active:
+            self._active[key] = {
+                "id": str(_uuid.uuid4()),
+                "type": alert_type,
+                "severity": self._SEVERITY.get(alert_type, "high"),
+                "title": self._TITLES.get(alert_type, alert_type),
+                "description": description,
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        else:
+            # Update description in case the numbers changed, keep id & timestamp
+            self._active[key]["description"] = description
+
+    def _clear(self, alert_type: str):
+        self._active.pop(alert_type, None)
+
+
+# Global alert engine instance
+_alert_engine = AlertEngine()
+
 
 class MQTTStats:
     def __init__(self):
@@ -284,7 +480,7 @@ class MQTTStats:
             hourly_data = self.data_storage.get_hourly_data()
             daily_messages = self.data_storage.get_daily_messages()
             
-            return {
+            stats = {
                 "total_connected_clients": actual_connected_clients,
                 "total_messages_received": self.format_number(total_messages),
                 "total_subscriptions": actual_subscriptions,
@@ -317,6 +513,14 @@ class MQTTStats:
                 # Latency
                 "latency_ms": self.latency_ms,
             }
+
+        # Evaluate alert conditions outside the lock
+        try:
+            _alert_engine.evaluate(stats)
+        except Exception as _ae:
+            logger.warning("AlertEngine.evaluate error: %s", _ae)
+
+        return stats
 
 class MessageCounter:
     def __init__(self, file_path="message_counts.json"):
@@ -822,8 +1026,23 @@ async def get_qos_stats(request: Request):
             "retained_ratio":       retained_ratio,
         }
 
-@app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])
-async def get_topics(request: Request):
+@app.get("/api/v1/alerts/broker", dependencies=[Depends(get_api_key)])
+async def get_broker_alerts(request: Request):
+    """Return currently active broker alerts."""
+    await log_request(request)
+    return {"alerts": _alert_engine.get_alerts()}
+
+
+@app.post("/api/v1/alerts/broker/{alert_id}/acknowledge", dependencies=[Depends(get_api_key)])
+async def acknowledge_broker_alert(request: Request, alert_id: str):
+    """Acknowledge (dismiss) a broker alert by its id."""
+    await log_request(request)
+    if _alert_engine.acknowledge(alert_id):
+        return {"status": "acknowledged"}
+    raise HTTPException(status_code=404, detail="Alert not found")
+
+
+@app.get("/api/v1/topics", dependencies=[Depends(get_api_key)])async def get_topics(request: Request):
     """Get all tracked MQTT topics with latest values"""
     await log_request(request)
     return {"topics": topic_store.get_all()}

@@ -1,9 +1,8 @@
 'use client'
-
-import { Bell, CheckCircle, CloudDownload, AlertCircle, RefreshCw, ExternalLink } from 'lucide-react'
-import { useVersionCheck } from '@/hooks/useVersionCheck'
+import { Bell, AlertTriangle, AlertCircle, Activity, RefreshCw, CheckCheck } from 'lucide-react'
+import { useNotifications, type AlertSeverity } from '@/hooks/useNotifications'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,125 +11,133 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-export function UpdateNotification() {
-  const {
-    versionInfo,
-    loading,
-    error,
-    checkForUpdates,
-    dismiss,
-    clearCacheAndCheck,
-    currentVersion,
-  } = useVersionCheck()
+function timeAgo(isoString: string): string {
+  const ms = Date.now() - new Date(isoString).getTime()
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  return `${Math.floor(h / 24)}d ago`
+}
 
-  const hasUpdate = versionInfo?.updateAvailable ?? false
+function SeverityIcon({ severity }: { severity: AlertSeverity }) {
+  if (severity === 'critical') return <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+  if (severity === 'high') return <AlertTriangle className="h-4 w-4 text-orange-500 shrink-0" />
+  return <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0" />
+}
+
+function SeverityDot({ severity }: { severity: AlertSeverity }) {
+  const colors: Record<AlertSeverity, string> = {
+    critical: 'bg-destructive',
+    high: 'bg-orange-500',
+    medium: 'bg-yellow-500',
+    low: 'bg-blue-500',
+  }
+  return (
+    <span className={`inline-block h-2 w-2 rounded-full ${colors[severity]} shrink-0 mt-1`} />
+  )
+}
+
+export function UpdateNotification() {
+  const { user } = useAuth()
+  const { brokerAlerts, anomalyAlerts, badgeCount, loading, acknowledgeAnomaly, acknowledgeBroker, refresh } =
+    useNotifications(user?.role)
+
+  const isAdmin = user?.role === 'admin'
+  const visibleAnomalies = anomalyAlerts.filter(a => !a.acknowledged)
+  const hasAlerts = brokerAlerts.length > 0 || visibleAnomalies.length > 0
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative">
           <Bell className="h-4 w-4" />
-          {hasUpdate && (
+          {badgeCount > 0 && (
             <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-[10px] font-bold text-destructive-foreground">
-              1
+              {badgeCount > 9 ? '9+' : badgeCount}
             </span>
           )}
-          <span className="sr-only">Notifications</span>
+          <span className="sr-only">Alerts</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent className="w-80" align="end">
+
+      <DropdownMenuContent className="w-96" align="end">
         <DropdownMenuLabel className="flex items-center justify-between">
-          <span>Notifications</span>
-          {hasUpdate && (
-            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={dismiss}>
-              Dismiss
-            </Button>
-          )}
+          <span>Alerts</span>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={refresh} title="Refresh">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
 
-        <div className="max-h-64 overflow-y-auto">
-          {hasUpdate && versionInfo ? (
-            <div className="p-3 space-y-2">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-yellow-500/15">
-                  <CloudDownload className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">New Version Available!</p>
-                  <p className="text-xs text-muted-foreground">
-                    BunkerM <Badge variant="warning" className="mx-0.5">{versionInfo.latestVersion}</Badge> is
-                    available. You are running {versionInfo.currentVersion}.
-                  </p>
-                  {versionInfo.lastChecked && (
-                    <p className="text-xs text-muted-foreground/60">
-                      Checked: {new Date(versionInfo.lastChecked).toLocaleString()}
-                    </p>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mt-1 h-7 text-xs"
-                    onClick={() => window.open(versionInfo.dockerHubUrl, '_blank')}
-                  >
-                    <ExternalLink className="mr-1.5 h-3 w-3" />
-                    View on Docker Hub
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ) : error ? (
-            <div className="p-3">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-destructive/15">
-                  <AlertCircle className="h-4 w-4 text-destructive" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">Update Check Failed</p>
-                  <p className="text-xs text-muted-foreground">
-                    Could not reach Docker Hub. Try again later.
-                  </p>
-                </div>
-              </div>
+        <div className="max-h-96 overflow-y-auto">
+          {!hasAlerts ? (
+            <div className="p-4 flex items-center gap-3 text-muted-foreground">
+              <Activity className="h-4 w-4 shrink-0 text-green-500" />
+              <span className="text-sm">All systems normal — no active alerts.</span>
             </div>
           ) : (
-            <div className="p-3">
-              <div className="flex items-start gap-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500/15">
-                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">No Updates Available</p>
-                  <p className="text-xs text-muted-foreground">
-                    You are running the latest version ({currentVersion}).
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+            <>
+              {isAdmin && brokerAlerts.length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Broker
+                  </div>
+                  {brokerAlerts.map(alert => (
+                    <div key={alert.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/50">
+                      <SeverityIcon severity={alert.severity} />
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <p className="text-sm font-medium leading-snug">{alert.title}</p>
+                        <p className="text-xs text-muted-foreground leading-snug line-clamp-2">{alert.description}</p>
+                        <p className="text-[11px] text-muted-foreground/60">{timeAgo(alert.timestamp)}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[11px] shrink-0"
+                        onClick={() => acknowledgeBroker(alert.id)}
+                      >
+                        <CheckCheck className="h-3 w-3 mr-1" />
+                        Ack
+                      </Button>
+                    </div>
+                  ))}
+                  {visibleAnomalies.length > 0 && <DropdownMenuSeparator />}
+                </>
+              )}
 
-        <DropdownMenuSeparator />
-        <div className="p-2 flex items-center justify-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={checkForUpdates}
-            disabled={loading}
-          >
-            <RefreshCw className={`mr-1.5 h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-            Check for Updates
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs text-muted-foreground"
-            onClick={clearCacheAndCheck}
-            disabled={loading}
-          >
-            Clear Cache
-          </Button>
+              {visibleAnomalies.length > 0 && (
+                <>
+                  <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    Anomalies
+                  </div>
+                  {visibleAnomalies.map(alert => (
+                    <div key={alert.id} className="px-3 py-2 flex items-start gap-2.5 hover:bg-muted/50">
+                      <SeverityDot severity={alert.severity} />
+                      <div className="flex-1 min-w-0 space-y-0.5">
+                        <p className="text-sm font-medium leading-snug">{alert.description}</p>
+                        <p className="text-xs text-muted-foreground leading-snug">
+                          Topic: <span className="font-mono">{alert.entity_id}</span>
+                        </p>
+                        <p className="text-[11px] text-muted-foreground/60">{timeAgo(alert.created_at)}</p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[11px] shrink-0"
+                        onClick={() => acknowledgeAnomaly(alert.id)}
+                      >
+                        <CheckCheck className="h-3 w-3 mr-1" />
+                        Ack
+                      </Button>
+                    </div>
+                  ))}
+                </>
+              )}
+            </>
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

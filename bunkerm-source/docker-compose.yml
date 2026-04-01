@@ -48,6 +48,31 @@ services:
       - MAX_UPLOAD_SIZE=10485760
       - SSL_CERT_PATH=/app/certs/cert.pem
       - SSL_KEY_PATH=/app/certs/key.pem
+      # Smart-anomaly (SQLite — no external DB required)
+      - DATABASE_URL=sqlite+aiosqlite:////nextjs/data/smart-anomaly.db
+      # ── Alert thresholds (adjust per project/industry) ──────────────────────
+      # Broker offline: notify after this many consecutive failed polls (×10 s)
+      - ALERT_BROKER_DOWN_GRACE_POLLS=${ALERT_BROKER_DOWN_GRACE_POLLS:-3}
+      # Latency: alert when round-trip to broker exceeds this value (ms)
+      - ALERT_LATENCY_HIGH_MS=${ALERT_LATENCY_HIGH_MS:-500}
+      # Client capacity: alert when connected clients exceed this % of max_connections
+      - ALERT_CLIENT_CAPACITY_PCT=${ALERT_CLIENT_CAPACITY_PCT:-80}
+      # Default max_connections assumed when broker config is unavailable
+      - ALERT_CLIENT_MAX_DEFAULT=${ALERT_CLIENT_MAX_DEFAULT:-10000}
+      # Message spike: alert when 1-min msg rate exceeds baseline by this multiplier
+      - ALERT_MSG_SPIKE_FACTOR=${ALERT_MSG_SPIKE_FACTOR:-5}
+      # In-flight messages: alert when queue exceeds this count (0 = disabled)
+      - ALERT_INFLIGHT_MAX=${ALERT_INFLIGHT_MAX:-500}
+      # Reconnect loop: alert when a client connects/disconnects more than N times
+      - ALERT_RECONNECT_LOOP_COUNT=${ALERT_RECONNECT_LOOP_COUNT:-5}
+      # Reconnect loop: within this time window (seconds)
+      - ALERT_RECONNECT_LOOP_WINDOW_S=${ALERT_RECONNECT_LOOP_WINDOW_S:-60}
+      # Auth failures: alert after this many failed attempts in the window below
+      - ALERT_AUTH_FAIL_COUNT=${ALERT_AUTH_FAIL_COUNT:-5}
+      # Auth failures: time window (seconds)
+      - ALERT_AUTH_FAIL_WINDOW_S=${ALERT_AUTH_FAIL_WINDOW_S:-60}
+      # Anomaly detection sigma threshold (z-score; higher = fewer alerts)
+      - ANOMALY_SIGMA_THRESHOLD=${ANOMALY_SIGMA_THRESHOLD:-3.0}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:2000/api/auth/me"]

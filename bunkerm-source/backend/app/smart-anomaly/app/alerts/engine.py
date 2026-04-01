@@ -37,6 +37,29 @@ def description_from_anomaly(anomaly: Anomaly) -> str:
     )
 
 
+# Human-readable labels for anomaly types shown in the Notification Center
+_ANOMALY_LABELS = {
+    "z_score": "Unusual Reading",
+    "ewma": "Sudden Trend Change",
+}
+
+
+def friendly_description(anomaly: Anomaly) -> str:
+    """Return a concise, non-technical alert description for the UI."""
+    details = anomaly.details or {}
+    label = _ANOMALY_LABELS.get(anomaly.anomaly_type, "Anomaly Detected")
+    field = details.get("field", "value")
+    sigma = _get_sigma()
+    try:
+        multiplier = round(anomaly.score / max(sigma, 1.0), 1)
+        detail = f"{multiplier}\u00d7 outside normal range"
+    except Exception:
+        detail = f"{anomaly.score:.1f}\u03c3 deviation"
+    if field and field not in ("value", ""):
+        return f"{label}: field '{field}' on topic '{anomaly.entity_id}' was {detail}"
+    return f"{label}: topic '{anomaly.entity_id}' was {detail}"
+
+
 @asynccontextmanager
 async def _get_session(db: AsyncSession | None) -> AsyncGenerator[AsyncSession, None]:
     """Use provided session or create a new one."""
@@ -65,7 +88,7 @@ async def generate_alerts_for_run(
                 continue
 
             severity = severity_from_score(anomaly.score)
-            description = description_from_anomaly(anomaly)
+            description = friendly_description(anomaly)
 
             alert = Alert(
                 tenant_id=tenant_id,
