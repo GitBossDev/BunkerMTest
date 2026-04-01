@@ -20,8 +20,16 @@ const DOCKER_HUB_IMAGE = 'bunkeriot/bunkerm'
 const DOCKER_HUB_URL = `https://hub.docker.com/r/${DOCKER_HUB_IMAGE}`
 const DOCKER_HUB_TAGS_URL = `https://hub.docker.com/v2/repositories/${DOCKER_HUB_IMAGE}/tags`
 const CACHE_KEY = 'bunkerm_version_check'
+const DISMISS_KEY = 'bunkerm_version_dismissed' // stores the version string the user dismissed
 const CACHE_DURATION_MS = 24 * 60 * 60 * 1000 // 24 hours
 const CURRENT_VERSION = process.env.NEXT_PUBLIC_CURRENT_VERSION || 'v2.0.0'
+
+/** Returns true only if latestVersion is newer AND the user hasn't dismissed it. */
+function shouldShowUpdate(latestVersion: string): boolean {
+  if (compareVersions(latestVersion, CURRENT_VERSION) <= 0) return false
+  const dismissed = localStorage.getItem(DISMISS_KEY)
+  return dismissed !== latestVersion
+}
 
 function compareVersions(v1: string, v2: string): number {
   const parse = (v: string) => v.replace(/^v/, '').split('.').map(Number)
@@ -83,7 +91,7 @@ export function useVersionCheck() {
         }
       }
 
-      const updateAvailable = compareVersions(latestVersion, CURRENT_VERSION) > 0
+      const updateAvailable = shouldShowUpdate(latestVersion)
       const info: VersionInfo = {
         currentVersion: CURRENT_VERSION,
         latestVersion,
@@ -106,21 +114,16 @@ export function useVersionCheck() {
 
   const dismiss = useCallback(() => {
     if (versionInfo) {
-      const dismissed = { ...versionInfo, updateAvailable: false }
-      setVersionInfo(dismissed)
-      localStorage.setItem(
-        CACHE_KEY,
-        JSON.stringify({
-          timestamp: Date.now(),
-          latestVersion: versionInfo.latestVersion,
-          data: dismissed,
-        })
-      )
+      // Persist the dismissed version string — not just a boolean flag.
+      // This way a newer version in the future will still trigger the alert.
+      localStorage.setItem(DISMISS_KEY, versionInfo.latestVersion)
+      setVersionInfo({ ...versionInfo, updateAvailable: false })
     }
   }, [versionInfo])
 
   const clearCacheAndCheck = useCallback(() => {
     localStorage.removeItem(CACHE_KEY)
+    localStorage.removeItem(DISMISS_KEY)
     checkForUpdates()
   }, [checkForUpdates])
 
@@ -130,7 +133,8 @@ export function useVersionCheck() {
       if (cached) {
         const parsed: CachedCheck = JSON.parse(cached)
         if (Date.now() - parsed.timestamp < CACHE_DURATION_MS) {
-          const updateAvailable = compareVersions(parsed.latestVersion, CURRENT_VERSION) > 0
+          // Respect dismiss state: only show if the user hasn't dismissed this exact version.
+          const updateAvailable = shouldShowUpdate(parsed.latestVersion)
           setVersionInfo({
             ...parsed.data,
             currentVersion: CURRENT_VERSION,
