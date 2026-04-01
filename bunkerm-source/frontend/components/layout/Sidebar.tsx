@@ -18,9 +18,6 @@ import {
   Wifi,
   Radio,
   KeyRound,
-  BellRing,
-  ScanLine,
-  BarChart2,
   UserCog,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -66,9 +63,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
   {
     title: 'Monitoring',
     items: [
-      { label: 'Alerts', href: '/ai/alerts', icon: BellRing },
-      { label: 'Anomalies', href: '/ai/anomalies', icon: ScanLine },
-      { label: 'Metrics', href: '/ai/metrics', icon: BarChart2 },
+      { label: 'Monitoring', href: '/ai/monitoring', icon: Activity },
     ],
   },
   {
