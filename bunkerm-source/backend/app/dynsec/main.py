@@ -637,33 +637,26 @@ async def create_role(
 @app.get("/api/v1/roles")
 async def list_roles(
     request: Request,
-    nonce: Optional[str] = None,  # Make nonce optional
-    timestamp: Optional[
-        int
-    ] = None,  # Make timestamp optional and ensure it's an integer
+    nonce: Optional[str] = None,
+    timestamp: Optional[int] = None,
     api_key: str = Security(get_api_key),
 ):
-    """List all clients"""
+    """List all roles — reads dynamic-security.json directly (no mosquitto_ctrl connection)."""
     await log_request(request)
-    logger.info(f"Listing clients. Nonce: {nonce}, Timestamp: {timestamp}")
-
     try:
-        command = ["listRoles"]
-
-        success, result = execute_mosquitto_command(command)
-        if not success:
-            logger.error(f"Failed to list roles: {result}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
-
-        logger.info("Successfully retrieved role list")
-        return {"roles": result}
-
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        role_names = [r["rolename"] for r in data.get("roles", []) if "rolename" in r]
+        logger.info(f"Listed {len(role_names)} roles from dynamic-security.json")
+        return {"roles": "\n".join(role_names)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Dynamic security config not found")
     except Exception as e:
         logger.error(f"Unexpected error listing roles: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Internal server error: {str(e)}")
 
 
 # Get Role Details Endpoint
@@ -936,27 +929,22 @@ async def list_groups(
     request: Request,
     api_key: str = Security(get_api_key),
 ):
-    """List all groups"""
+    """List all groups — reads dynamic-security.json directly (no mosquitto_ctrl connection)."""
     await log_request(request)
-    logger.info("Fetching list of all groups")
-
     try:
-        command = ["listGroups"]
-
-        success, result = execute_mosquitto_command(command)
-        if not success:
-            logger.error(f"Failed to list groups: {result}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
-
-        logger.info("Successfully retrieved group list")
-        return {"groups": result}
-
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        group_names = [g["groupname"] for g in data.get("groups", []) if "groupname" in g]
+        logger.info(f"Listed {len(group_names)} groups from dynamic-security.json")
+        return {"groups": "\n".join(group_names)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Dynamic security config not found")
     except Exception as e:
         logger.error(f"Unexpected error listing groups: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}",
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/api/v1/groups/{group_name}")
