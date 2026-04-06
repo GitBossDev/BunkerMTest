@@ -13,7 +13,7 @@ interface StatsCardsProps {
 export function StatsCards({ stats }: StatsCardsProps) {
   const connected    = stats?.total_connected_clients ?? 0
   const disconnected = stats?.clients_disconnected ?? 0
-  const total        = stats?.clients_total ?? connected
+  const total        = connected + disconnected
   const maximum      = stats?.clients_maximum ?? connected
   const subs         = stats?.total_subscriptions ?? 0
 
@@ -27,7 +27,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
               <p className="font-semibold text-foreground mb-1">MQTT Clients</p>
               <TipRow label="Connected" text="Clients with an active TCP connection to the broker right now." />
               <TipRow label="Disconnected" text="Clients with a persistent session saved in the broker but no active connection at this moment." />
-              <TipRow label="Active sessions" text="Total sessions registered by the broker (connected + disconnected persistent sessions)." />
+              <TipRow label="Active sessions" text="Connected + Disconnected (shown above). Disconnected clients retain a persistent session in the broker and receive queued QoS 1/2 messages upon reconnect." />
               <TipRow label="Max concurrent" text="Historical peak of simultaneously connected clients since the last broker restart." />
               <TipRow label="Subscriptions" text="Total active topic subscriptions at this moment. A single client can hold multiple subscriptions." />
             </>
