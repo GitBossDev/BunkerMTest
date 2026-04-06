@@ -16,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { MQTTEvent, MqttClient } from '@/types'
+import type { MQTTEvent } from '@/types'
 
 const PAGE_SIZE = 50
 
@@ -41,33 +41,20 @@ export default function ConnectedClientsPage() {
   // username → disabled status from API + local overrides
   const [disabledState, setDisabledState] = useState<Record<string, boolean>>({})
   const [isLoading, setIsLoading] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [actionUsername, setActionUsername] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<'all' | 'connected' | 'offline' | 'disabled'>('all')
   const [brokerLatencyMs, setBrokerLatencyMs] = useState<number | null>(null)
 
-  // Full load: fetch all ACL clients + their disabled status
+  // Full load: fetch all clients + disabled state from a single JSON read (no N+1)
   const loadFull = useCallback(async () => {
     setIsLoading(true)
     try {
-      const clientsRes = await dynsecApi.getClients()
-      const usernames = (clientsRes as MqttClient[]).map((c) => c.username)
-      setAllUsernames(usernames)
-
-      // Fetch disabled status for each client in parallel
-      const detailResults = await Promise.allSettled(
-        usernames.map((u) => dynsecApi.getClient(u))
-      )
-      const disabled: Record<string, boolean> = {}
-      usernames.forEach((username, i) => {
-        const res = detailResults[i]
-        if (res.status === 'fulfilled') {
-          const d = res.value as { client?: { disabled?: boolean } }
-          disabled[username] = d.client?.disabled ?? false
-        }
-      })
-      setDisabledState(disabled)
+      const res = await dynsecApi.getClientsDisabledMap()
+      setAllUsernames(res.usernames)
+      setDisabledState(res.map)
     } catch {
       toast.error('Failed to load clients')
     } finally {
@@ -113,6 +100,7 @@ export default function ConnectedClientsPage() {
     const init = async () => {
       await loadFull()
       await fetchConnected()
+      setIsInitialLoading(false)
     }
     init()
     const interval = setInterval(fetchConnected, 5000)
@@ -184,6 +172,17 @@ export default function ConnectedClientsPage() {
 
   const connectedCount = rows.filter((r) => r.status === 'connected').length
   const disabledCount = rows.filter((r) => r.status === 'disabled').length
+
+  if (isInitialLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <RefreshCw className="h-6 w-6 animate-spin" />
+          <p className="text-sm">Loading clients...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">

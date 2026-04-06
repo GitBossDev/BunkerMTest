@@ -78,6 +78,30 @@ export const dynsecApi = {
   // Clients
   getClients: () => request(buildUrl(DYNSEC_API_URL, '/clients')).then(parseClients),
   getClient: (username: string) => request(buildUrl(DYNSEC_API_URL, `/clients/${username}`)),
+
+  // Paginated client list with full details — reads dynamic-security.json server-side (Alt A+B).
+  // Returns { clients, total, page, limit, pages } — no N+1 subprocess calls.
+  getClientsPaginated: (params?: { page?: number; limit?: number; search?: string }) => {
+    const p = new URLSearchParams()
+    if (params?.page !== undefined) p.set('page', String(params.page))
+    if (params?.limit !== undefined) p.set('limit', String(params.limit))
+    if (params?.search) p.set('search', params.search)
+    const qs = p.toString()
+    const path = qs ? `/clients?${qs}` : '/clients'
+    return request<{
+      clients: { username: string; disabled: boolean; roles: string[]; groups: string[] }[]
+      total: number
+      page: number
+      limit: number
+      pages: number
+    }>(buildUrl(DYNSEC_API_URL, path))
+  },
+
+  // Disabled-state map for all clients (single JSON read — for Connected Clients page).
+  getClientsDisabledMap: () =>
+    request<{ map: Record<string, boolean>; usernames: string[] }>(
+      buildUrl(DYNSEC_API_URL, '/clients/disabled-map')
+    ),
   createClient: (data: { username: string; password: string }) =>
     request(buildUrl(DYNSEC_API_URL, '/clients'), {
       method: 'POST',

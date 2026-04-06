@@ -310,33 +310,112 @@ async def create_client(
         )
 
 
-# List Clients Endpoint
+# List Clients Endpoint — Alt A+B: reads dynamic-security.json directly (O(1) file read)
+# instead of spawning N subprocesses via mosquitto_ctrl.
+# Supports server-side pagination (?page=&limit=) and search (?search=).
 @app.get("/api/v1/clients")
 async def list_clients(
     request: Request,
-    nonce: Optional[str] = None,  # Make nonce optional
-    timestamp: Optional[
-        int
-    ] = None,  # Make timestamp optional and ensure it's an integer
+    page: int = 1,
+    limit: int = 50,
+    search: Optional[str] = None,
+    nonce: Optional[str] = None,
+    timestamp: Optional[int] = None,
     api_key: str = Security(get_api_key),
 ):
-    """List all clients"""
+    """List clients with full details (roles, groups, disabled) from dynamic-security.json.
+    Single file read regardless of client count — scales to 10K+ clients."""
     await log_request(request)
-    logger.info(f"Listing clients. Nonce: {nonce}, Timestamp: {timestamp}")
-
     try:
-        command = ["listClients"]
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        raw_clients = data.get("clients", [])
 
-        success, result = execute_mosquitto_command(command)
-        if not success:
-            logger.error(f"Failed to list clients: {result}")
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+        # Server-side search filter (case-insensitive username match)
+        if search:
+            q = search.lower()
+            raw_clients = [c for c in raw_clients if q in c.get("username", "").lower()]
 
-        logger.info("Successfully retrieved client list")
-        return {"clients": result}
+        total = len(raw_clients)
+        total_pages = max(1, -(-total // limit))  # ceiling division
 
+        # Server-side pagination slice
+        start = (page - 1) * limit
+        page_clients = raw_clients[start: start + limit]
+
+        clients_out = [
+            {
+                "username": c.get("username", ""),
+                "disabled": c.get("disabled", False),
+                "roles": [
+                    r["rolename"] if isinstance(r, dict) else r
+                    for r in c.get("roles", [])
+                ],
+                "groups": [
+                    g["groupname"] if isinstance(g, dict) else g
+                    for g in c.get("groups", [])
+                ],
+            }
+            for c in page_clients
+        ]
+
+        logger.info(f"Listing clients: page={page}/{total_pages}, search={search!r}, total={total}")
+        return {
+            "clients": clients_out,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": total_pages,
+        }
+
+    except FileNotFoundError:
+        logger.error(f"dynamic-security.json not found at {dynsec_path}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Dynamic security config not found",
+        )
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse dynamic-security.json: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to parse dynamic security config",
+        )
     except Exception as e:
         logger.error(f"Unexpected error listing clients: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
+        )
+
+
+# Disabled-map Endpoint — single JSON read returning {username: disabled} for ALL clients.
+# Used by Connected Clients page to avoid N+1 subprocess calls.
+# MUST be defined before /clients/{username} so FastAPI matches it first.
+@app.get("/api/v1/clients/disabled-map")
+async def get_clients_disabled_map(
+    request: Request,
+    api_key: str = Security(get_api_key),
+):
+    """Return {username: bool} disabled map for every client. Single file read, no pagination."""
+    await log_request(request)
+    try:
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        clients = data.get("clients", [])
+        disabled_map = {
+            c["username"]: c.get("disabled", False)
+            for c in clients
+            if "username" in c
+        }
+        return {"map": disabled_map, "usernames": list(disabled_map.keys())}
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Dynamic security config not found",
+        )
+    except Exception as e:
+        logger.error(f"Error reading dynsec JSON for disabled map: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )

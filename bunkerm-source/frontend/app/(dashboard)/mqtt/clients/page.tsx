@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -8,42 +8,46 @@ import { ClientsTable } from '@/components/mqtt/clients/ClientsTable'
 import { dynsecApi } from '@/lib/api'
 import type { MqttClient, Role, Group } from '@/types'
 
+const PAGE_SIZE = 50
+
 export default function ClientsPage() {
   const [clients, setClients] = useState<MqttClient[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [groups, setGroups] = useState<Group[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  // Server-side pagination & search state
+  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const fetchData = useCallback(async (showRefreshIndicator = false) => {
-    if (showRefreshIndicator) setRefreshing(true)
+  // Core fetch — reads page+search from dynamic-security.json in one backend call (no N+1)
+  const fetchClients = useCallback(async (
+    p: number,
+    s: string,
+    showRefresh = false,
+  ) => {
+    if (showRefresh) setRefreshing(true)
     try {
-      const [clientsRes, rolesRes, groupsRes] = await Promise.all([
-        dynsecApi.getClients(),
+      const [res, rolesRes, groupsRes] = await Promise.all([
+        dynsecApi.getClientsPaginated({ page: p, limit: PAGE_SIZE, search: s || undefined }),
         dynsecApi.getRoles(),
         dynsecApi.getGroups(),
       ])
-      const clientsList = clientsRes as MqttClient[]
-
-      // Fetch each client's details in parallel to get role/group counts and disabled state
-      const detailResults = await Promise.allSettled(
-        clientsList.map((c) => dynsecApi.getClient(c.username))
-      )
-      const clientsWithCounts = clientsList.map((client, i) => {
-        const result = detailResults[i]
-        if (result.status === 'fulfilled') {
-          const d = result.value as { client?: { roles?: { name: string }[]; groups?: { name: string }[]; disabled?: boolean } }
-          return {
-            ...client,
-            roles: (d.client?.roles ?? []).map((r) => ({ rolename: r.name })),
-            groups: (d.client?.groups ?? []).map((g) => ({ groupname: g.name })),
-            disabled: d.client?.disabled ?? false,
-          }
-        }
-        return client
-      })
-
-      setClients(clientsWithCounts)
+      // Map flat role/group string arrays to the { rolename, groupname } shape
+      const clientsList: MqttClient[] = res.clients.map((c) => ({
+        username: c.username,
+        disabled: c.disabled,
+        roles: c.roles.map((r) => ({ rolename: r })),
+        groups: c.groups.map((g) => ({ groupname: g })),
+      }))
+      setClients(clientsList)
+      setTotal(res.total)
+      setTotalPages(res.pages)
+      // If a delete left us on a now-empty page, clamp back
+      if (p > res.pages) setPage(Math.max(1, res.pages))
       setRoles(rolesRes as Role[])
       setGroups(groupsRes as Group[])
     } catch (err) {
@@ -54,11 +58,29 @@ export default function ClientsPage() {
     }
   }, [])
 
+  // Initial load
   useEffect(() => {
-    fetchData()
-  }, [fetchData])
+    fetchClients(1, '')
+  }, [fetchClients])
 
-  const handleRefresh = () => fetchData(true)
+  // Debounced search — resets to page 1 after 300 ms idle
+  const handleSearchChange = useCallback((value: string) => {
+    setSearch(value)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => {
+      setPage(1)
+      fetchClients(1, value)
+    }, 300)
+  }, [fetchClients])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    setPage(newPage)
+    fetchClients(newPage, search)
+  }, [search, fetchClients])
+
+  const handleRefresh = useCallback(() => {
+    fetchClients(page, search, true)
+  }, [page, search, fetchClients])
 
   if (loading) {
     return (
@@ -96,7 +118,14 @@ export default function ClientsPage() {
         availableRoles={roles}
         availableGroups={groups}
         onRefresh={handleRefresh}
+        total={total}
+        page={page}
+        totalPages={totalPages}
+        search={search}
+        onSearchChange={handleSearchChange}
+        onPageChange={handlePageChange}
       />
     </div>
   )
 }
+

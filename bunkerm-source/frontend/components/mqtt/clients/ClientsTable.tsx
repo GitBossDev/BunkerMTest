@@ -31,10 +31,17 @@ import { dynsecApi } from '@/lib/api'
 import type { MqttClient, Role, Group } from '@/types'
 
 interface ClientsTableProps {
-  clients: MqttClient[]
+  clients: MqttClient[]        // Current page's clients (already paginated by parent)
   availableRoles: Role[]
   availableGroups: Group[]
   onRefresh: () => void
+  // Server-side pagination & search (controlled by parent/page)
+  total: number
+  page: number
+  totalPages: number
+  search: string
+  onSearchChange: (value: string) => void
+  onPageChange: (page: number) => void
 }
 
 export function ClientsTable({
@@ -42,30 +49,21 @@ export function ClientsTable({
   availableRoles,
   availableGroups,
   onRefresh,
+  total,
+  page,
+  totalPages,
+  search,
+  onSearchChange,
+  onPageChange,
 }: ClientsTableProps) {
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const PAGE_SIZE = 50
   const [createOpen, setCreateOpen] = useState(false)
   const [rolesDialogClient, setRolesDialogClient] = useState<MqttClient | null>(null)
   const [groupsDialogClient, setGroupsDialogClient] = useState<MqttClient | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MqttClient | null>(null)
   const [deletingUsername, setDeletingUsername] = useState<string | null>(null)
   const [togglingUsername, setTogglingUsername] = useState<string | null>(null)
-  // Track disabled state locally since the list endpoint doesn't return it
+  // Optimistic UI: tracks toggle state locally between re-fetches
   const [localDisabled, setLocalDisabled] = useState<Record<string, boolean>>({})
-
-  const filtered = clients.filter((c) =>
-    c.username.toLowerCase().includes(search.toLowerCase())
-  )
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const safePage = Math.min(page, totalPages)
-  const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
-
-  const handleToggleDisabled = async (client: MqttClient) => {
-    // Use local tracked state; if unknown, assume enabled (false)
-    const isCurrentlyDisabled = localDisabled[client.username] ?? client.disabled ?? false
-    setTogglingUsername(client.username)
     try {
       if (isCurrentlyDisabled) {
         await dynsecApi.enableClient(client.username)
@@ -109,7 +107,7 @@ export function ClientsTable({
             <Input
               placeholder="Search clients..."
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              onChange={(e) => onSearchChange(e.target.value)}
               className="pl-9"
             />
           </div>
@@ -135,14 +133,14 @@ export function ClientsTable({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filtered.length === 0 ? (
+              {clients.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
                     {search ? 'No clients match your search.' : 'No clients found.'}
                   </TableCell>
                 </TableRow>
               ) : (
-                paginated.map((client) => (
+                clients.map((client) => (
                   <TableRow key={client.username}>
                     <TableCell className="font-medium">{client.username}</TableCell>
 
@@ -247,14 +245,14 @@ export function ClientsTable({
 
         {/* Summary + pagination */}
         <div className="flex items-center justify-between text-xs text-muted-foreground">
-          <span>{filtered.length} of {clients.length} client{clients.length !== 1 ? 's' : ''}</span>
+          <span>{total} client{total !== 1 ? 's' : ''}{search ? ` matching "${search}"` : ''}</span>
           {totalPages > 1 && (
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>
+              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
                 <ChevronLeft className="h-3.5 w-3.5" />
               </Button>
-              <span className="px-2">Page {safePage} of {totalPages}</span>
-              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
+              <span className="px-2">Page {page} of {totalPages}</span>
+              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page >= totalPages}>
                 <ChevronRight className="h-3.5 w-3.5" />
               </Button>
             </div>
