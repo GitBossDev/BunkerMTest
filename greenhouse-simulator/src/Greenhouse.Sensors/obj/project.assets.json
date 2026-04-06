@@ -79,19 +79,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\rrevilla\\.nuget\\packages\\": {}
+    "C:\\Users\\mdchuchon\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+      "projectUniqueName": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
       "projectName": "Greenhouse.Sensors",
-      "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
-      "packagesPath": "C:\\Users\\rrevilla\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\obj\\",
+      "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+      "packagesPath": "C:\\Users\\mdchuchon\\.nuget\\packages\\",
+      "outputPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\rrevilla\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\mdchuchon\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
@@ -103,8 +103,8 @@
         "net10.0": {
           "targetAlias": "net10.0",
           "projectReferences": {
-            "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
-              "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
+            "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
+              "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
             }
           }
         }
@@ -429,7 +429,7 @@
       "code": "NU1603",
       "level": "Warning",
       "warningLevel": 1,
-      "message": "Greenhouse.Sensors depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
+      "message": "Greenhouse.Sensors depends on MQTTnet (>= 4.3.7) but MQTTnet 4.3.7 was not found. MQTTnet 4.3.7.1207 was resolved instead.",
       "libraryId": "MQTTnet",
       "targetGraphs": [
         "net10.0"

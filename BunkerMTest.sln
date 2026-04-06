@@ -1,0 +1,53 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "greenhouse-simulator", "greenhouse-simulator", "{9769D07F-FDD7-AF57-29AB-40DE035614ED}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{417C9A59-D085-B749-81E0-718D25C09B0F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Greenhouse.ClientCreator", "greenhouse-simulator\src\Greenhouse.ClientCreator\Greenhouse.ClientCreator.csproj", "{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Greenhouse.Controller", "greenhouse-simulator\src\Greenhouse.Controller\Greenhouse.Controller.csproj", "{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Greenhouse.Sensors", "greenhouse-simulator\src\Greenhouse.Sensors\Greenhouse.Sensors.csproj", "{77670320-9789-C381-106B-AC6AF5DB1F4B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Greenhouse.Shared", "greenhouse-simulator\src\Greenhouse.Shared\Greenhouse.Shared.csproj", "{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96}.Release|Any CPU.Build.0 = Release|Any CPU
+		{77670320-9789-C381-106B-AC6AF5DB1F4B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{77670320-9789-C381-106B-AC6AF5DB1F4B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{77670320-9789-C381-106B-AC6AF5DB1F4B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{77670320-9789-C381-106B-AC6AF5DB1F4B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{417C9A59-D085-B749-81E0-718D25C09B0F} = {9769D07F-FDD7-AF57-29AB-40DE035614ED}
+		{8BAFC4FE-D7C5-95E4-8001-2EF1725455B5} = {417C9A59-D085-B749-81E0-718D25C09B0F}
+		{6A956A9C-E4AD-1D21-A2EA-7DAFA18D9F96} = {417C9A59-D085-B749-81E0-718D25C09B0F}
+		{77670320-9789-C381-106B-AC6AF5DB1F4B} = {417C9A59-D085-B749-81E0-718D25C09B0F}
+		{F37D97A8-103C-2BFF-D9E0-20D30F0F07F5} = {417C9A59-D085-B749-81E0-718D25C09B0F}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {E011EB95-CA5E-4356-9E22-DBD7891A92CC}
+	EndGlobalSection
+EndGlobal

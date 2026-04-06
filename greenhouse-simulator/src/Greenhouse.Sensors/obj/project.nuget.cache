@@ -1,19 +1,19 @@
 {
   "version": 2,
-  "dgSpecHash": "a9qQV0VX6qQ=",
+  "dgSpecHash": "KaD79E811m4=",
   "success": true,
-  "projectFilePath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+  "projectFilePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\rrevilla\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
+    "C:\\Users\\mdchuchon\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
   ],
   "logs": [
     {
       "code": "NU1603",
       "level": "Warning",
-      "message": "Greenhouse.Sensors depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
-      "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+      "message": "Greenhouse.Sensors depends on MQTTnet (>= 4.3.7) but MQTTnet 4.3.7 was not found. MQTTnet 4.3.7.1207 was resolved instead.",
+      "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
       "warningLevel": 1,
-      "filePath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+      "filePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
       "libraryId": "MQTTnet",
       "targetGraphs": [
         "net10.0"

@@ -1,20 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj": {}
+    "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj": {}
   },
   "projects": {
-    "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj": {
+    "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+        "projectUniqueName": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
         "projectName": "Greenhouse.Sensors",
-        "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
-        "packagesPath": "C:\\Users\\rrevilla\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Sensors\\obj\\",
+        "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
+        "packagesPath": "C:\\Users\\mdchuchon\\.nuget\\packages\\",
+        "outputPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\rrevilla\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\mdchuchon\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
@@ -26,8 +26,8 @@
           "net10.0": {
             "targetAlias": "net10.0",
             "projectReferences": {
-              "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
-                "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
+              "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
+                "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
               }
             }
           }
@@ -347,17 +347,17 @@
         }
       }
     },
-    "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
+    "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
+        "projectUniqueName": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
         "projectName": "Greenhouse.Shared",
-        "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
-        "packagesPath": "C:\\Users\\rrevilla\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\obj\\",
+        "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
+        "packagesPath": "C:\\Users\\mdchuchon\\.nuget\\packages\\",
+        "outputPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
-          "C:\\Users\\rrevilla\\AppData\\Roaming\\NuGet\\NuGet.Config"
+          "C:\\Users\\mdchuchon\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net10.0"
