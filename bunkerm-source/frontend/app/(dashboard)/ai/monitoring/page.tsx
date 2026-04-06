@@ -4,20 +4,17 @@ import { useEffect, useState, useCallback } from 'react'
 import {
   RefreshCw,
   BellRing,
-  ScanLine,
-  BarChart2,
   CheckCheck,
   AlertTriangle,
-  Info,
   Zap,
-  ChevronDown,
-  ChevronRight,
-  TrendingUp,
+  Info,
+  History,
+  Download,
+  ShieldAlert,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
@@ -34,87 +31,71 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { aiApi } from '@/lib/api'
+import { monitorApi } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/timeUtils'
-import type { AiAlert, AlertSeverity, AiAnomaly, AnomalyType, AiMetrics } from '@/types'
+import type { BrokerAlert, BrokerAlertSeverity } from '@/types'
 
-// ─── Alerts config ────────────────────────────────────────────────────────────
+// ─── Severity config ──────────────────────────────────────────────────────────
 
-const SEVERITY_CONFIG: Record<AlertSeverity, { label: string; className: string; icon: React.ElementType }> = {
+const SEVERITY_CONFIG: Record<BrokerAlertSeverity, { label: string; className: string; icon: React.ElementType }> = {
   critical: { label: 'Critical', className: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400', icon: Zap },
   high:     { label: 'High',     className: 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400', icon: AlertTriangle },
   medium:   { label: 'Medium',   className: 'bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400', icon: AlertTriangle },
   low:      { label: 'Low',      className: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400', icon: Info },
 }
 
-const ANOMALY_TYPE_LABELS: Record<string, string> = {
-  z_score: 'Z-Score',
-  ewma:    'EWMA',
-  spike:   'Rate Spike',
-  silence: 'Silence',
+const STATUS_CONFIG = {
+  active:       { label: 'Active',       className: 'bg-red-100 text-red-700 border-red-200' },
+  acknowledged: { label: 'Acknowledged', className: 'bg-gray-100 text-gray-600 border-gray-200' },
+  cleared:      { label: 'Cleared',      className: 'bg-green-100 text-green-700 border-green-200' },
 }
 
-// ─── Anomalies config ─────────────────────────────────────────────────────────
-
-const ANOMALY_TYPE_CONFIG: Record<AnomalyType, { label: string; className: string }> = {
-  z_score: { label: 'Z-Score',    className: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-400' },
-  ewma:    { label: 'EWMA',       className: 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
-  spike:   { label: 'Rate Spike', className: 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-400' },
-  silence: { label: 'Silence',    className: 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300' },
+const TYPE_LABELS: Record<string, string> = {
+  broker_down:      'Broker Down',
+  client_capacity:  'Connection Capacity',
+  reconnect_loop:   'Reconnect Loop',
+  auth_failure:     'Auth Failure',
 }
 
-function DetailsRow({ details }: { details: Record<string, unknown> }) {
-  const interesting = Object.entries(details).filter(([k]) => !['method'].includes(k))
-  if (interesting.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-2 mt-1">
-      {interesting.map(([k, v]) => (
-        <span key={k} className="text-xs text-muted-foreground">
-          <span className="font-medium">{k}:</span>{' '}
-          {typeof v === 'number' ? v.toFixed(3) : String(v)}
-        </span>
-      ))}
-    </div>
+// ─── Download helpers ─────────────────────────────────────────────────────────
+
+function downloadCsv(data: BrokerAlert[], filename: string) {
+  const cols = ['timestamp', 'type', 'severity', 'title', 'status', 'description', 'impact', 'resolved_at']
+  const header = cols.join(',')
+  const rows = data.map((a) =>
+    cols.map((c) => {
+      const v = (a as Record<string, unknown>)[c] ?? ''
+      return `"${String(v).replace(/"/g, '""')}"`
+    }).join(',')
   )
+  const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
 }
 
-// ─── Main page ────────────────────────────────────────────────────────────────
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function MonitoringPage() {
-  // ── Alerts state ────────────────────────────────────────────────────────────
-  const [alerts, setAlerts] = useState<AiAlert[]>([])
+  // Active alerts
+  const [alerts, setAlerts] = useState<BrokerAlert[]>([])
   const [alertsLoading, setAlertsLoading] = useState(true)
   const [alertsRefreshing, setAlertsRefreshing] = useState(false)
-  const [severityFilter, setSeverityFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('unacknowledged')
   const [acknowledging, setAcknowledging] = useState<Set<string>>(new Set())
 
-  // ── Anomalies state ─────────────────────────────────────────────────────────
-  const [anomalies, setAnomalies] = useState<AiAnomaly[]>([])
-  const [anomaliesLoading, setAnomaliesLoading] = useState(true)
-  const [anomaliesRefreshing, setAnomaliesRefreshing] = useState(false)
-  const [entityFilter, setEntityFilter] = useState('')
+  // History
+  const [history, setHistory] = useState<BrokerAlert[]>([])
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [severityFilter, setSeverityFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  // ── Metrics state ────────────────────────────────────────────────────────────
-  const [entities, setEntities] = useState<string[]>([])
-  const [selectedEntity, setSelectedEntity] = useState<string>('')
-  const [metricWindow, setMetricWindow] = useState<'1h' | '24h'>('1h')
-  const [metrics1h, setMetrics1h] = useState<AiMetrics | null>(null)
-  const [metrics24h, setMetrics24h] = useState<AiMetrics | null>(null)
-  const [metricsLoading, setMetricsLoading] = useState(true)
-  const [metricsRefreshing, setMetricsRefreshing] = useState(false)
+  // ── Fetch active alerts ───────────────────────────────────────────────────
 
-  // ── Alerts logic ─────────────────────────────────────────────────────────────
   const fetchAlerts = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setAlertsRefreshing(true)
     try {
-      const params: Parameters<typeof aiApi.getAlerts>[0] = { limit: 100 }
-      if (severityFilter !== 'all') params.severity = severityFilter
-      if (statusFilter !== 'all') params.acknowledged = statusFilter === 'acknowledged'
-      const res = await aiApi.getAlerts(params)
+      const res = await monitorApi.getBrokerAlerts()
       setAlerts(res.alerts)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load alerts')
@@ -122,529 +103,279 @@ export default function MonitoringPage() {
       setAlertsLoading(false)
       setAlertsRefreshing(false)
     }
-  }, [severityFilter, statusFilter])
+  }, [])
+
+  // ── Fetch history ─────────────────────────────────────────────────────────
+
+  const fetchHistory = useCallback(async () => {
+    try {
+      const res = await monitorApi.getAlertHistory()
+      setHistory(res.history)
+    } catch {
+      // silently ignore — history is best-effort
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    fetchAlerts()
-    const interval = setInterval(() => fetchAlerts(), 30_000)
+    fetchAlerts(true)
+    fetchHistory()
+    const interval = setInterval(() => {
+      fetchAlerts()
+      fetchHistory()
+    }, 30_000)
     return () => clearInterval(interval)
-  }, [fetchAlerts])
+  }, [fetchAlerts, fetchHistory])
 
-  const handleAcknowledge = async (alert: AiAlert) => {
+  // ── Acknowledge ───────────────────────────────────────────────────────────
+
+  const handleAcknowledge = async (alert: BrokerAlert) => {
     setAcknowledging((prev) => new Set(prev).add(alert.id))
     try {
-      await aiApi.acknowledgeAlert(alert.id)
+      await monitorApi.acknowledgeAlert(alert.id)
       toast.success('Alert acknowledged')
-      fetchAlerts()
+      await Promise.all([fetchAlerts(), fetchHistory()])
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to acknowledge alert')
     } finally {
-      setAcknowledging((prev) => {
-        const next = new Set(prev)
-        next.delete(alert.id)
-        return next
-      })
+      setAcknowledging((prev) => { const n = new Set(prev); n.delete(alert.id); return n })
     }
   }
 
-  const unacknowledgedCount = alerts.filter((a) => !a.acknowledged).length
+  // ── Filtered history ──────────────────────────────────────────────────────
 
-  // ── Anomalies logic ──────────────────────────────────────────────────────────
-  const fetchAnomalies = useCallback(async (showRefreshIndicator = false) => {
-    if (showRefreshIndicator) setAnomaliesRefreshing(true)
-    try {
-      const params: Parameters<typeof aiApi.getAnomalies>[0] = { limit: 100 }
-      if (entityFilter.trim()) params.entity_id = entityFilter.trim()
-      if (typeFilter !== 'all') params.anomaly_type = typeFilter
-      const res = await aiApi.getAnomalies(params)
-      setAnomalies(res.anomalies)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load anomalies')
-    } finally {
-      setAnomaliesLoading(false)
-      setAnomaliesRefreshing(false)
-    }
-  }, [entityFilter, typeFilter])
+  const filteredHistory = history.filter((h) => {
+    if (severityFilter !== 'all' && h.severity !== severityFilter) return false
+    if (typeFilter !== 'all' && h.type !== typeFilter) return false
+    return true
+  })
 
-  useEffect(() => {
-    fetchAnomalies()
-    const interval = setInterval(() => fetchAnomalies(), 30_000)
-    return () => clearInterval(interval)
-  }, [fetchAnomalies])
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  const toggleExpand = (id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
-      return next
-    })
-  }
-
-  // ── Metrics logic ────────────────────────────────────────────────────────────
-  const fetchEntities = useCallback(async () => {
-    try {
-      const res = await aiApi.getEntities('topic')
-      setEntities(res.entities)
-      if (res.entities.length > 0 && !selectedEntity) {
-        setSelectedEntity(res.entities[0])
-      } else if (res.entities.length === 0) {
-        setMetricsLoading(false)
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load entities')
-      setMetricsLoading(false)
-    }
-  }, [selectedEntity])
-
-  const fetchMetrics = useCallback(async (showRefreshIndicator = false) => {
-    if (!selectedEntity) return
-    if (showRefreshIndicator) setMetricsRefreshing(true)
-    try {
-      const [res1h, res24h] = await Promise.all([
-        aiApi.getMetrics(selectedEntity, '1h'),
-        aiApi.getMetrics(selectedEntity, '24h'),
-      ])
-      setMetrics1h(res1h)
-      setMetrics24h(res24h)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load metrics')
-    } finally {
-      setMetricsLoading(false)
-      setMetricsRefreshing(false)
-    }
-  }, [selectedEntity])
-
-  useEffect(() => {
-    fetchEntities()
-  }, [fetchEntities])
-
-  useEffect(() => {
-    if (selectedEntity) {
-      setMetricsLoading(true)
-      fetchMetrics()
-      const interval = setInterval(() => fetchMetrics(), 60_000)
-      return () => clearInterval(interval)
-    }
-  }, [selectedEntity, fetchMetrics])
-
-  const currentMetrics = metricWindow === '1h' ? metrics1h : metrics24h
-  const allFields = currentMetrics ? Object.keys(currentMetrics.fields) : []
-
-  // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Monitoring</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Alerts, anomaly detections, and statistical metrics in one view.
-        </p>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+            <ShieldAlert className="h-6 w-6" />
+            Alerts
+          </h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Broker management alerts — capacity, connectivity, auth and reconnect issues. Refreshes every 30s.
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { fetchAlerts(true); fetchHistory() }}
+          disabled={alertsRefreshing}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${alertsRefreshing ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
-      <Tabs defaultValue="alerts">
-        <TabsList>
-          <TabsTrigger value="alerts" className="flex items-center gap-2">
-            <BellRing className="h-4 w-4" />
-            Alerts
-            {unacknowledgedCount > 0 && (
+      {/* ── Active alerts ────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <BellRing className="h-4 w-4 text-orange-500" />
+            Active Alerts
+            {alerts.length > 0 && (
               <Badge variant="destructive" className="ml-1 h-5 px-1.5 text-xs">
-                {unacknowledgedCount}
+                {alerts.length}
               </Badge>
             )}
-          </TabsTrigger>
-          <TabsTrigger value="anomalies" className="flex items-center gap-2">
-            <ScanLine className="h-4 w-4" />
-            Anomalies
-          </TabsTrigger>
-          <TabsTrigger value="metrics" className="flex items-center gap-2">
-            <BarChart2 className="h-4 w-4" />
-            Metrics
-          </TabsTrigger>
-        </TabsList>
-
-        {/* ── Alerts tab ───────────────────────────────────────────────────── */}
-        <TabsContent value="alerts" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              Auto-detected anomaly alerts. Refreshes every 30s.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => fetchAlerts(true)} disabled={alertsRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${alertsRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
-
-          {/* Filters */}
-          <div className="flex gap-3 flex-wrap">
-            <Select value={severityFilter} onValueChange={setSeverityFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="Severity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Severities</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="unacknowledged">Unacknowledged</SelectItem>
-                <SelectItem value="acknowledged">Acknowledged</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
           {alertsLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                <RefreshCw className="h-6 w-6 animate-spin" />
+            <div className="flex items-center justify-center py-12 text-muted-foreground">
+              <div className="flex flex-col items-center gap-3">
+                <RefreshCw className="h-5 w-5 animate-spin" />
                 <p className="text-sm">Loading alerts...</p>
               </div>
             </div>
           ) : alerts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border rounded-lg">
-              <BellRing className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm font-medium">No alerts found</p>
-              <p className="text-xs mt-1">Alerts appear when anomalies exceed the detection threshold.</p>
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <BellRing className="h-9 w-9 mb-3 opacity-25" />
+              <p className="text-sm font-medium">No active alerts</p>
+              <p className="text-xs mt-1">Alerts appear when a broker condition exceeds its threshold.</p>
             </div>
           ) : (
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-28">Severity</TableHead>
-                    <TableHead>Entity</TableHead>
-                    <TableHead className="w-28">Type</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead className="w-28 text-right">Time</TableHead>
-                    <TableHead className="w-32 text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {alerts.map((alert) => {
-                    const cfg = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.low
-                    const SeverityIcon = cfg.icon
-                    return (
-                      <TableRow key={alert.id} className={alert.acknowledged ? 'opacity-50' : ''}>
-                        <TableCell>
-                          <Badge className={`${cfg.className} border flex items-center gap-1 w-fit`}>
-                            <SeverityIcon className="h-3 w-3" />
-                            {cfg.label}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                            {alert.entity_id}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-sm">
-                          {ANOMALY_TYPE_LABELS[alert.anomaly_type] ?? alert.anomaly_type}
-                        </TableCell>
-                        <TableCell className="text-sm max-w-xs truncate" title={alert.description}>
-                          {alert.description}
-                        </TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
-                          {formatRelativeTime(alert.created_at)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {!alert.acknowledged && (
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="h-7 text-xs"
-                              disabled={acknowledging.has(alert.id)}
-                              onClick={() => handleAcknowledge(alert)}
-                            >
-                              <CheckCheck className="h-3 w-3 mr-1" />
-                              {acknowledging.has(alert.id) ? 'Saving…' : 'Acknowledge'}
-                            </Button>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </TabsContent>
-
-        {/* ── Anomalies tab ────────────────────────────────────────────────── */}
-        <TabsContent value="anomalies" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              Statistical deviations detected across MQTT topics. Refreshes every 30s.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => fetchAnomalies(true)} disabled={anomaliesRefreshing}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${anomaliesRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
-
-          {/* Filters */}
-          <div className="flex gap-3 flex-wrap">
-            <Input
-              placeholder="Filter by entity (e.g. factory/sensor1)"
-              value={entityFilter}
-              onChange={(e) => setEntityFilter(e.target.value)}
-              className="w-72"
-            />
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-44">
-                <SelectValue placeholder="Anomaly type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="z_score">Z-Score</SelectItem>
-                <SelectItem value="ewma">EWMA</SelectItem>
-                <SelectItem value="spike">Rate Spike</SelectItem>
-                <SelectItem value="silence">Silence</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {anomaliesLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                <RefreshCw className="h-6 w-6 animate-spin" />
-                <p className="text-sm">Loading anomalies...</p>
-              </div>
-            </div>
-          ) : anomalies.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border rounded-lg">
-              <ScanLine className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm font-medium">No anomalies detected</p>
-              <p className="text-xs mt-1">Anomalies appear once the metrics engine has built a baseline.</p>
-            </div>
-          ) : (
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-8" />
-                    <TableHead>Entity</TableHead>
-                    <TableHead className="w-32">Type</TableHead>
-                    <TableHead className="w-24">Score</TableHead>
-                    <TableHead className="w-28 text-right">Detected</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {anomalies.map((anomaly) => {
-                    const cfg = ANOMALY_TYPE_CONFIG[anomaly.anomaly_type] ?? ANOMALY_TYPE_CONFIG.z_score
-                    const isExpanded = expanded.has(anomaly.id)
-                    return (
-                      <>
-                        <TableRow
-                          key={anomaly.id}
-                          className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => toggleExpand(anomaly.id)}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28 pl-4">Severity</TableHead>
+                  <TableHead className="w-40">Type</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-full">Impact</TableHead>
+                  <TableHead className="w-28 text-right">Since</TableHead>
+                  <TableHead className="w-32 text-right pr-4">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {alerts.map((alert) => {
+                  const cfg = SEVERITY_CONFIG[alert.severity] ?? SEVERITY_CONFIG.high
+                  const SeverityIcon = cfg.icon
+                  return (
+                    <TableRow key={alert.id}>
+                      <TableCell className="pl-4">
+                        <Badge className={`${cfg.className} border flex items-center gap-1 w-fit`}>
+                          <SeverityIcon className="h-3 w-3" />
+                          {cfg.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-sm font-medium">
+                        {TYPE_LABELS[alert.type] ?? alert.type}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-xs" title={alert.description}>
+                        {alert.description}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {alert.impact}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                        {formatRelativeTime(alert.timestamp)}
+                      </TableCell>
+                      <TableCell className="text-right pr-4">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          disabled={acknowledging.has(alert.id)}
+                          onClick={() => handleAcknowledge(alert)}
                         >
-                          <TableCell className="text-muted-foreground">
-                            {isExpanded
-                              ? <ChevronDown className="h-3 w-3" />
-                              : <ChevronRight className="h-3 w-3" />}
-                          </TableCell>
-                          <TableCell>
-                            <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                              {anomaly.entity_id}
-                            </span>
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={`${cfg.className} border text-xs`}>
-                              {cfg.label}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <span className={`font-mono text-sm font-semibold ${anomaly.score > 5 ? 'text-red-600' : anomaly.score > 3 ? 'text-orange-500' : 'text-yellow-600'}`}>
-                              {anomaly.score.toFixed(2)}σ
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
-                            {formatRelativeTime(anomaly.detected_at)}
-                          </TableCell>
-                        </TableRow>
-                        {isExpanded && (
-                          <TableRow key={`${anomaly.id}-details`} className="bg-muted/30">
-                            <TableCell />
-                            <TableCell colSpan={4} className="py-3">
-                              <DetailsRow details={anomaly.details} />
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                          <CheckCheck className="h-3 w-3 mr-1" />
+                          {acknowledging.has(alert.id) ? 'Saving…' : 'Acknowledge'}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
           )}
-        </TabsContent>
+        </CardContent>
+      </Card>
 
-        {/* ── Metrics tab ──────────────────────────────────────────────────── */}
-        <TabsContent value="metrics" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">
-              Statistical baselines computed per topic. Updates every 60s.
-            </p>
-            <Button variant="outline" size="sm" onClick={() => fetchMetrics(true)} disabled={metricsRefreshing || !selectedEntity}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${metricsRefreshing ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-          </div>
-
-          {metricsLoading && entities.length === 0 ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="flex flex-col items-center gap-3 text-muted-foreground">
-                <RefreshCw className="h-6 w-6 animate-spin" />
-                <p className="text-sm">Loading metrics...</p>
-              </div>
+      {/* ── Alert history ─────────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <History className="h-4 w-4 text-muted-foreground" />
+              Alert History
+              {history.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {history.length} / 200 records
+                </span>
+              )}
+            </CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Filters */}
+              <Select value={severityFilter} onValueChange={setSeverityFilter}>
+                <SelectTrigger className="h-8 w-36 text-xs">
+                  <SelectValue placeholder="Severity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Severities</SelectItem>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="h-8 w-44 text-xs">
+                  <SelectValue placeholder="Alert type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="broker_down">Broker Down</SelectItem>
+                  <SelectItem value="client_capacity">Connection Capacity</SelectItem>
+                  <SelectItem value="reconnect_loop">Reconnect Loop</SelectItem>
+                  <SelectItem value="auth_failure">Auth Failure</SelectItem>
+                </SelectContent>
+              </Select>
+              {/* Download */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs"
+                disabled={filteredHistory.length === 0}
+                onClick={() => downloadCsv(filteredHistory, `bunkerm-alerts-${new Date().toISOString().slice(0, 10)}.csv`)}
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" />
+                Export CSV
+              </Button>
             </div>
-          ) : entities.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border rounded-lg">
-              <BarChart2 className="h-10 w-10 mb-3 opacity-30" />
-              <p className="text-sm font-medium">No metrics available yet</p>
-              <p className="text-xs mt-1">Metrics are computed after the first 60s metrics cycle runs.</p>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {historyLoading ? (
+            <div className="flex items-center justify-center py-10 text-muted-foreground">
+              <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+              <p className="text-sm">Loading history...</p>
+            </div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <History className="h-9 w-9 mb-3 opacity-25" />
+              <p className="text-sm font-medium">No history yet</p>
+              <p className="text-xs mt-1">Events are recorded as alerts are raised, acknowledged or cleared.</p>
             </div>
           ) : (
-            <>
-              {/* Entity + Window selector */}
-              <div className="flex gap-3 flex-wrap items-center">
-                <Select value={selectedEntity} onValueChange={setSelectedEntity}>
-                  <SelectTrigger className="w-72">
-                    <SelectValue placeholder="Select topic" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {entities.map((e) => (
-                      <SelectItem key={e} value={e}>
-                        <span className="font-mono text-xs">{e}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <div className="flex border rounded-md overflow-hidden">
-                  {(['1h', '24h'] as const).map((w) => (
-                    <button
-                      key={w}
-                      onClick={() => setMetricWindow(w)}
-                      className={`px-4 py-1.5 text-sm font-medium transition-colors ${
-                        metricWindow === w
-                          ? 'bg-primary text-primary-foreground'
-                          : 'text-muted-foreground hover:bg-muted'
-                      }`}
-                    >
-                      {w}
-                    </button>
-                  ))}
-                </div>
-
-                {currentMetrics && (
-                  <Badge variant="outline" className="text-xs">
-                    {selectedEntity}
-                  </Badge>
-                )}
-              </div>
-
-              {/* Stats overview cards */}
-              {currentMetrics && allFields.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  {allFields.slice(0, 4).map((field) => {
-                    const f = currentMetrics.fields[field]
-                    return (
-                      <Card key={field}>
-                        <CardHeader className="pb-1 pt-4 px-4">
-                          <CardTitle className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                            {field}
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="px-4 pb-4 space-y-1">
-                          <p className="text-xl font-bold font-mono">
-                            {f.mean !== null ? f.mean.toFixed(2) : '—'}
-                          </p>
-                          <div className="flex gap-3 text-xs text-muted-foreground">
-                            <span>σ {f.std !== null ? f.std.toFixed(2) : '—'}</span>
-                            <span>n={f.count}</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Detailed comparison table — 1h vs 24h */}
-              {metrics1h && metrics24h && allFields.length > 0 && (
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Field</TableHead>
-                        <TableHead className="text-center" colSpan={3}>
-                          <span className="flex items-center justify-center gap-1">
-                            <TrendingUp className="h-3 w-3" /> 1h Window
-                          </span>
-                        </TableHead>
-                        <TableHead className="text-center" colSpan={3}>
-                          <span className="flex items-center justify-center gap-1">
-                            <TrendingUp className="h-3 w-3" /> 24h Window
-                          </span>
-                        </TableHead>
-                      </TableRow>
-                      <TableRow>
-                        <TableHead />
-                        <TableHead className="text-right text-xs">Mean</TableHead>
-                        <TableHead className="text-right text-xs">Std Dev</TableHead>
-                        <TableHead className="text-right text-xs">Count</TableHead>
-                        <TableHead className="text-right text-xs">Mean</TableHead>
-                        <TableHead className="text-right text-xs">Std Dev</TableHead>
-                        <TableHead className="text-right text-xs">Count</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {allFields.map((field) => {
-                        const f1 = metrics1h.fields[field]
-                        const f24 = metrics24h.fields[field]
-                        return (
-                          <TableRow key={field}>
-                            <TableCell>
-                              <span className="font-mono text-xs font-medium">{field}</span>
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {f1?.mean !== null && f1?.mean !== undefined ? f1.mean.toFixed(3) : '—'}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">
-                              {f1?.std !== null && f1?.std !== undefined ? f1.std.toFixed(3) : '—'}
-                            </TableCell>
-                            <TableCell className="text-right text-sm text-muted-foreground">
-                              {f1?.count ?? '—'}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm">
-                              {f24?.mean !== null && f24?.mean !== undefined ? f24.mean.toFixed(3) : '—'}
-                            </TableCell>
-                            <TableCell className="text-right font-mono text-sm text-muted-foreground">
-                              {f24?.std !== null && f24?.std !== undefined ? f24.std.toFixed(3) : '—'}
-                            </TableCell>
-                            <TableCell className="text-right text-sm text-muted-foreground">
-                              {f24?.count ?? '—'}
-                            </TableCell>
-                          </TableRow>
-                        )
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
-              )}
-            </>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-28 pl-4">Severity</TableHead>
+                  <TableHead className="w-40">Type</TableHead>
+                  <TableHead className="w-28">Status</TableHead>
+                  <TableHead>Description</TableHead>
+                  <TableHead className="w-32 text-right">Triggered</TableHead>
+                  <TableHead className="w-32 text-right pr-4">Resolved</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredHistory.map((h, idx) => {
+                  const cfg = SEVERITY_CONFIG[h.severity] ?? SEVERITY_CONFIG.high
+                  const SeverityIcon = cfg.icon
+                  const statusCfg = STATUS_CONFIG[h.status] ?? STATUS_CONFIG.cleared
+                  return (
+                    <TableRow key={`${h.id}-${idx}`} className="text-sm">
+                      <TableCell className="pl-4">
+                        <Badge className={`${cfg.className} border flex items-center gap-1 w-fit`}>
+                          <SeverityIcon className="h-3 w-3" />
+                          {cfg.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {TYPE_LABELS[h.type] ?? h.type}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className={`${statusCfg.className} border text-xs`}>
+                          {statusCfg.label}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground max-w-sm truncate" title={h.description}>
+                        {h.description}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap">
+                        {new Date(h.timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="text-right text-xs text-muted-foreground whitespace-nowrap pr-4">
+                        {h.resolved_at ? new Date(h.resolved_at).toLocaleString() : '—'}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
           )}
-        </TabsContent>
-      </Tabs>
+        </CardContent>
+      </Card>
     </div>
   )
 }

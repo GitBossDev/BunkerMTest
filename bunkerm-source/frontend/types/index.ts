@@ -208,6 +208,23 @@ export interface LogEntry {
   raw: string
 }
 
+// ── Broker Alert types (monitor service) ────────────────────────────────────
+
+export type BrokerAlertSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type BrokerAlertStatus = 'active' | 'acknowledged' | 'cleared'
+
+export interface BrokerAlert {
+  id: string
+  type: string
+  severity: BrokerAlertSeverity
+  title: string
+  impact: string
+  description: string
+  timestamp: string
+  status: BrokerAlertStatus
+  resolved_at?: string
+}
+
 // ── Smart Anomaly Detection types ────────────────────────────────────────────
 
 export type AlertSeverity = 'low' | 'medium' | 'high' | 'critical'

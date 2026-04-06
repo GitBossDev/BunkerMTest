@@ -63,7 +63,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
   {
     title: 'Monitoring',
     items: [
-      { label: 'Monitoring', href: '/ai/monitoring', icon: Activity },
+      { label: 'Alerts', href: '/ai/monitoring', icon: Activity },
     ],
   },
   {

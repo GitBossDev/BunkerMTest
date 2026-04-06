@@ -169,22 +169,16 @@ def _read_max_connections() -> int:
 class AlertEngine:
     """Evaluates broker metrics and emits in-memory alerts."""
 
-    # Alert types
+    # Alert types — only broker management concerns (data interpretation is handled externally)
     TYPE_BROKER_DOWN      = "broker_down"
-    TYPE_LATENCY_HIGH     = "latency_high"
     TYPE_CLIENT_CAPACITY  = "client_capacity"
-    TYPE_MSG_SPIKE        = "msg_spike"
-    TYPE_INFLIGHT_HIGH    = "inflight_high"
     TYPE_RECONNECT_LOOP   = "reconnect_loop"
     TYPE_AUTH_FAILURE     = "auth_failure"
 
     # Severity for each alert type
     _SEVERITY = {
         TYPE_BROKER_DOWN:      "critical",
-        TYPE_LATENCY_HIGH:     "high",
         TYPE_CLIENT_CAPACITY:  "high",
-        TYPE_MSG_SPIKE:        "high",
-        TYPE_INFLIGHT_HIGH:    "high",
         TYPE_RECONNECT_LOOP:   "high",
         TYPE_AUTH_FAILURE:     "high",
     }
@@ -192,23 +186,31 @@ class AlertEngine:
     # Human-readable titles
     _TITLES = {
         TYPE_BROKER_DOWN:      "Broker Unreachable",
-        TYPE_LATENCY_HIGH:     "High Latency",
         TYPE_CLIENT_CAPACITY:  "Client Capacity Warning",
-        TYPE_MSG_SPIKE:        "Message Spike Detected",
-        TYPE_INFLIGHT_HIGH:    "In-flight Messages High",
         TYPE_RECONNECT_LOOP:   "Client Reconnect Loop",
         TYPE_AUTH_FAILURE:     "Authentication Failures",
+    }
+
+    # Human-readable impact descriptions
+    _IMPACT = {
+        TYPE_BROKER_DOWN:      "New MQTT connections are rejected. All clients lose connectivity.",
+        TYPE_CLIENT_CAPACITY:  "Approaching the configured connection limit. New clients may be refused.",
+        TYPE_RECONNECT_LOOP:   "Excessive reconnects consume broker resources and may indicate a client bug.",
+        TYPE_AUTH_FAILURE:     "Repeated authentication failures may indicate a brute-force attempt.",
     }
 
     def __init__(self):
         self._lock = threading.Lock()
         self._active: Dict[str, dict] = {}   # keyed by alert type (one per type)
         self._broker_down_polls: int = 0
-        self._msg_baseline: deque = deque(maxlen=5)
         # per-client connect timestamps (sliding window for reconnect loop detection)
         self._reconnect_events: Dict[str, deque] = {}
         # auth failure timestamps (sliding window)
         self._auth_fail_events: deque = deque()
+        # cooldown: don't re-raise an alert type until this timestamp (per alert key)
+        self._cooldown_until: Dict[str, float] = {}
+        # persistent history of raised alerts (max 200 entries)
+        self._alert_history: deque = deque(maxlen=200)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -216,22 +218,32 @@ class AlertEngine:
         with self._lock:
             return list(self._active.values())
 
+    def get_history(self) -> List[dict]:
+        with self._lock:
+            return list(self._alert_history)
+
     def acknowledge(self, alert_id: str) -> bool:
+        cooldown_secs = int(os.getenv("ALERT_COOLDOWN_MINUTES", "15")) * 60
         with self._lock:
             for key, alert in list(self._active.items()):
                 if alert["id"] == alert_id:
+                    # Record in history as acknowledged
+                    self._alert_history.append({
+                        **alert,
+                        "status": "acknowledged",
+                        "resolved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    })
                     del self._active[key]
+                    # Set cooldown so this alert type won't re-fire immediately
+                    self._cooldown_until[key] = time.time() + cooldown_secs
                     return True
         return False
 
     def evaluate(self, stats: dict):
         """Called periodically with the latest stats snapshot."""
         grace_polls   = int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3"))
-        latency_max   = float(os.getenv("ALERT_LATENCY_HIGH_MS", "500"))
         cap_pct       = float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80"))
         max_clients   = float(_read_max_connections())
-        spike_factor  = float(os.getenv("ALERT_MSG_SPIKE_FACTOR", "5"))
-        inflight_max  = int(os.getenv("ALERT_INFLIGHT_MAX", "500"))
 
         with self._lock:
             broker_connected = stats.get("mqtt_connected", False)
@@ -249,20 +261,8 @@ class AlertEngine:
                 self._broker_down_polls = 0
                 self._clear(self.TYPE_BROKER_DOWN)
 
-            # ── Latency ───────────────────────────────────────────────────────
-            latency = stats.get("latency_ms", -1.0)
-            if latency >= 0 and latency > latency_max:
-                self._raise(
-                    self.TYPE_LATENCY_HIGH,
-                    f"Round-trip latency is {latency:.0f} ms (threshold: {latency_max:.0f} ms).",
-                )
-            else:
-                self._clear(self.TYPE_LATENCY_HIGH)
-
             # ── Client capacity ───────────────────────────────────────────────
-            connected  = stats.get("total_connected_clients", 0)
-            # $SYS/broker/clients/maximum is the historical peak (high-water mark),
-            # NOT the configured max_connections limit — always use the env-var default.
+            connected   = stats.get("total_connected_clients", 0)
             clients_max = max_clients
             if clients_max > 0 and (connected / clients_max * 100) >= cap_pct:
                 self._raise(
@@ -272,32 +272,6 @@ class AlertEngine:
                 )
             else:
                 self._clear(self.TYPE_CLIENT_CAPACITY)
-
-            # ── Message spike ─────────────────────────────────────────────────
-            rx_rate = stats.get("load_msg_rx_1min", 0.0)
-            self._msg_baseline.append(rx_rate)
-            if len(self._msg_baseline) >= 3:
-                baseline_mean = sum(self._msg_baseline) / len(self._msg_baseline)
-                # Only alert if there is a real baseline (> 0) and current is spike
-                if baseline_mean > 0 and rx_rate > baseline_mean * spike_factor:
-                    self._raise(
-                        self.TYPE_MSG_SPIKE,
-                        f"Incoming message rate {rx_rate:.1f} msg/s is {rx_rate / baseline_mean:.1f}× "
-                        f"the recent baseline of {baseline_mean:.1f} msg/s "
-                        f"(threshold: {spike_factor}×).",
-                    )
-                else:
-                    self._clear(self.TYPE_MSG_SPIKE)
-
-            # ── In-flight ─────────────────────────────────────────────────────
-            inflight = stats.get("messages_inflight", 0)
-            if inflight > inflight_max:
-                self._raise(
-                    self.TYPE_INFLIGHT_HIGH,
-                    f"{inflight} messages are awaiting acknowledgement (threshold: {inflight_max}).",
-                )
-            else:
-                self._clear(self.TYPE_INFLIGHT_HIGH)
 
     def record_connect_event(self, client_id: str):
         """Called whenever a client connect event is observed."""
@@ -340,23 +314,38 @@ class AlertEngine:
     # ── private helpers ───────────────────────────────────────────────────────
 
     def _raise(self, alert_type: str, description: str, alert_id_suffix: str = ""):
-        """Upsert an alert. Keeps existing id/timestamp if already active."""
+        """Upsert an alert. Respects cooldown; records new events in history."""
         key = f"{alert_type}:{alert_id_suffix}" if alert_id_suffix else alert_type
+        # Respect per-key cooldown set after acknowledgement
+        if key not in self._active and self._cooldown_until.get(key, 0) > time.time():
+            return
         if key not in self._active:
-            self._active[key] = {
+            entry = {
                 "id": str(_uuid.uuid4()),
                 "type": alert_type,
                 "severity": self._SEVERITY.get(alert_type, "high"),
                 "title": self._TITLES.get(alert_type, alert_type),
+                "impact": self._IMPACT.get(alert_type, ""),
                 "description": description,
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "status": "active",
             }
+            self._active[key] = entry
+            # Also add to history when first raised
+            self._alert_history.append({**entry})
         else:
             # Update description in case the numbers changed, keep id & timestamp
             self._active[key]["description"] = description
 
     def _clear(self, alert_type: str):
-        self._active.pop(alert_type, None)
+        entry = self._active.pop(alert_type, None)
+        if entry is not None:
+            # Record as auto-resolved in history
+            self._alert_history.append({
+                **entry,
+                "status": "cleared",
+                "resolved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
 
 
 # Global alert engine instance
@@ -1104,6 +1093,14 @@ async def get_broker_alerts(request: Request):
     """Return currently active broker alerts."""
     await log_request(request)
     return {"alerts": _alert_engine.get_alerts()}
+
+
+@app.get("/api/v1/alerts/broker/history", dependencies=[Depends(get_api_key)])
+async def get_broker_alert_history(request: Request):
+    """Return the alert history (up to 200 most recent events, newest first)."""
+    await log_request(request)
+    history = list(reversed(_alert_engine.get_history()))
+    return {"history": history, "total": len(history)}
 
 
 @app.post("/api/v1/alerts/broker/{alert_id}/acknowledge", dependencies=[Depends(get_api_key)])
