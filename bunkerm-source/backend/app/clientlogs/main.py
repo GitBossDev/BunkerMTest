@@ -84,7 +84,7 @@ class MQTTEvent(BaseModel):
 class MQTTMonitor:
     def __init__(self):
         self.connected_clients: Dict[str, MQTTEvent] = {}
-        self.events: deque = deque(maxlen=500)
+        self.events: deque = deque(maxlen=1000)
         # cumulative subscription count per topic pattern (resets on service restart)
         self._subscription_counts: Dict[str, int] = {}
 
@@ -416,7 +416,7 @@ async def disable_client(username: str):
         raise HTTPException(status_code=500, detail=f"Failed to disable client: {str(e)}")
 
 @app.get("/api/v1/events")
-async def get_mqtt_events(limit: int = 200):
+async def get_mqtt_events(limit: int = 1000):
     all_events = list(mqtt_monitor.events)
     sorted_events = sorted(all_events, key=lambda x: x.timestamp, reverse=True)[:limit]
     return {"events": [event.dict() for event in sorted_events]}

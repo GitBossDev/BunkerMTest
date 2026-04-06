@@ -170,11 +170,12 @@ export default function MosquittoConfigPage() {
     setIsSaving(true)
     try {
       const payload = buildSavePayload(state)
-      await configApi.saveMosquittoConfig(payload)
+      const result = await configApi.saveMosquittoConfig(payload)
+      if (!result.success) throw new Error(result.message ?? 'Save failed')
       setSaved(state)
       toast.success('Configuration saved — click "Apply (Reload)" to activate changes')
-    } catch {
-      toast.error('Failed to save configuration')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save configuration')
     } finally {
       setIsSaving(false)
     }

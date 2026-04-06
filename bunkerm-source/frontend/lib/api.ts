@@ -243,7 +243,7 @@ export const configApi = {
       `/api/proxy/config/mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`
     ),
   saveMosquittoConfig: (configData: unknown) =>
-    request(`/api/proxy/config/mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request<{ success: boolean; message?: string }>(`/api/proxy/config/mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`, {
       method: 'POST',
       body: JSON.stringify(configData),
     }),

@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
+import { Download, Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { clientlogsApi } from '@/lib/api'
 import { formatAbsoluteTime } from '@/lib/timeUtils'
@@ -106,6 +106,23 @@ export default function ClientLogsPage() {
     })
   }
 
+  const downloadEvents = () => {
+    const header = 'Timestamp,Event,Username,Client ID,Topic,IP Address,Protocol,Details'
+    const rows = filtered.map((e) =>
+      [e.timestamp, e.event_type, e.username, e.client_id, e.topic ?? '', `${e.ip_address}:${e.port}`, e.protocol_level, e.details ?? '']
+        .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`)
+        .join(',')
+    )
+    const content = [header, ...rows].join('\n')
+    const blob = new Blob([content], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `client-logs-${Date.now()}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const filtered = events.filter((e) => {
     if (!activeTypes.has(e.event_type)) return false
     if (!search) return true
@@ -126,10 +143,16 @@ export default function ClientLogsPage() {
           <h1 className="text-2xl font-bold">Client Logs</h1>
           <p className="text-muted-foreground text-sm">MQTT client events: connections, subscriptions, publishes and auth failures</p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchEvents} disabled={isLoading}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={downloadEvents} disabled={filtered.length === 0}>
+            <Download className="h-4 w-4 mr-2" />
+            Download CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchEvents} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="flex items-center gap-3">

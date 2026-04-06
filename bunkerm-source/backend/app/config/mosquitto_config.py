@@ -463,13 +463,6 @@ def validate_listeners(current_listeners: List[Dict[str, Any]], new_listeners: L
         if count > 1:
             return False, f"Duplicate listener port {port} found in configuration"
     
-    # Also check for duplicate listener ports in the default configuration that aren't being updated
-    default_ports = [1900, 8080]  # From the DEFAULT_CONFIG
-    
-    for port in port_counts:
-        if port in default_ports and any(l.get('port') != port for l in new_listeners):
-            return False, f"Port {port} is already used by Mosquitto's default configuration"
-    
     return True, ""
 
 
