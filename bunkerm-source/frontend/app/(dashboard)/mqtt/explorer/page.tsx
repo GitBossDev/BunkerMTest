@@ -11,7 +11,7 @@ import {
   Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { monitorApi, dynsecApi } from '@/lib/api'
+import { monitorApi } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import type { MqttTopic, MqttClient } from '@/types'
+import type { MqttTopic } from '@/types'
 
 // ── Tree types ────────────────────────────────────────────────────────────────
 
@@ -182,12 +182,11 @@ function validatePayload(payload: string, type: PayloadType): string | null {
 // ── Publish Panel ─────────────────────────────────────────────────────────────
 
 interface PublishPanelProps {
-  clients: MqttClient[]
+  // no clients needed — publish always uses the monitor's admin MQTT connection
 }
 
-function PublishPanel({ clients }: PublishPanelProps) {
+function PublishPanel(_props: PublishPanelProps) {
   const [open, setOpen] = useState(false)
-  const [selectedClient, setSelectedClient] = useState('')
   const [topic, setTopic] = useState('')
   const [payload, setPayload] = useState('')
   const [payloadType, setPayloadType] = useState<PayloadType>('RAW')
@@ -241,24 +240,9 @@ function PublishPanel({ clients }: PublishPanelProps) {
 
       {open && (
         <CardContent className="pt-0 pb-5 space-y-4">
-          {/* Row 1: Client + Topic */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="pub-client">Client</Label>
-              <Select value={selectedClient} onValueChange={setSelectedClient}>
-                <SelectTrigger id="pub-client">
-                  <SelectValue placeholder="Select a client..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {clients.map((c) => (
-                    <SelectItem key={c.username} value={c.username}>
-                      {c.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
+          {/* Row 1: Topic + admin badge */}
+          <div className="flex items-end gap-4">
+            <div className="flex-1 space-y-1.5">
               <Label htmlFor="pub-topic">Topic</Label>
               <Input
                 id="pub-topic"
@@ -266,6 +250,12 @@ function PublishPanel({ clients }: PublishPanelProps) {
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="invisible">Connection</Label>
+              <div className="flex items-center h-9 px-3 rounded-md border bg-muted/40 text-xs text-muted-foreground whitespace-nowrap">
+                Admin connection
+              </div>
             </div>
           </div>
 
@@ -356,7 +346,6 @@ export default function MqttExplorerPage() {
   const [topics, setTopics] = useState<MqttTopic[]>([])
   const [search, setSearch] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [clients, setClients] = useState<MqttClient[]>([])
   const [selectedTopic, setSelectedTopic] = useState<MqttTopic | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -379,10 +368,6 @@ export default function MqttExplorerPage() {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
   }, [fetchTopics])
-
-  useEffect(() => {
-    dynsecApi.getClients().then(setClients).catch(() => {})
-  }, [])
 
   // Keep selected topic up to date as data refreshes
   useEffect(() => {
@@ -424,7 +409,7 @@ export default function MqttExplorerPage() {
       </div>
 
       {/* Publish panel (accordion) */}
-      <PublishPanel clients={clients} />
+      <PublishPanel />
 
       {/* Filter bar */}
       <div className="flex items-center gap-3">

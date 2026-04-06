@@ -666,82 +666,39 @@ async def get_role(
     request: Request,
     api_key: str = Security(get_api_key),
 ):
-    """Get details for a specific role"""
+    """Get details for a specific role — reads dynamic-security.json directly (no mosquitto_ctrl connection)."""
     await log_request(request)
     logger.info(f"Fetching details for role: {role_name}")
-
     try:
-        command = ["getRole", role_name]
-
-        success, result = execute_mosquitto_command(command)
-        if not success:
-            logger.error(f"Role not found: {role_name}")
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        role_data = next(
+            (r for r in data.get("roles", []) if r.get("rolename") == role_name), None
+        )
+        if role_data is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Role {role_name} not found",
             )
-
-        try:
-            lines = result.split("\n")
-            acls = []
-
-            for line in lines:
-                line = line.strip()
-                if "ACLs:" in line or any(
-                    acl_type in line
-                    for acl_type in [
-                        "publishClientSend",
-                        "publishClientReceive",
-                        "subscribeLiteral",
-                        "subscribePattern",
-                        "unsubscribeLiteral",
-                        "unsubscribePattern",
-                    ]
-                ):
-                    acl_info = (
-                        line.split("ACLs:")[1].strip()
-                        if "ACLs:" in line
-                        else line.strip()
-                    )
-
-                    parts = [p.strip() for p in acl_info.split(":")]
-                    if len(parts) >= 3:
-                        acl_type = parts[0].strip()
-                        permission = parts[1].strip()
-                        topic_and_priority = parts[2].strip()
-
-                        topic = topic_and_priority.split("(")[0].strip()
-                        priority = "0"
-                        if "(priority:" in topic_and_priority:
-                            priority = (
-                                topic_and_priority.split("priority:")[1]
-                                .strip(")")
-                                .strip()
-                            )
-
-                        acls.append(
-                            {
-                                "topic": topic,
-                                "aclType": acl_type,
-                                "permission": permission,
-                                "priority": int(priority),
-                            }
-                        )
-
-            logger.info(f"Successfully retrieved details for role: {role_name}")
-            return {"role": role_name, "acls": acls}
-
-        except Exception as parse_error:
-            logger.error(f"Error parsing role details: {str(parse_error)}")
-            return {
-                "role": role_name,
-                "acls": [],
-                "raw_output": result,
-                "error": str(parse_error),
+        acls = [
+            {
+                "topic": a.get("topic", ""),
+                "aclType": a.get("acltype", ""),
+                "permission": "allow" if a.get("allow", False) else "deny",
+                "priority": a.get("priority", -1),
             }
-
+            for a in role_data.get("acls", [])
+        ]
+        logger.info(f"Successfully retrieved details for role: {role_name}")
+        return {"role": role_name, "acls": acls}
     except HTTPException:
         raise
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Dynamic security config not found",
+        )
     except Exception as e:
         logger.error(f"Unexpected error getting role {role_name}: {str(e)}")
         raise HTTPException(
@@ -958,60 +915,37 @@ async def get_group(
     logger.info(f"Fetching details for group: {group_name}")
 
     try:
-        command = ["getGroup", group_name]
-
-        success, result = execute_mosquitto_command(command)
-        if not success:
-            logger.error(f"Group not found: {group_name}")
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
+        group_data = next(
+            (g for g in data.get("groups", []) if g.get("groupname") == group_name), None
+        )
+        if group_data is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Group {group_name} not found",
             )
-
-        try:
-            # Parse the output
-            lines = result.split("\n")
-            group_info = {"name": "", "roles": [], "clients": []}
-
-            for line in lines:
-                line = line.strip()
-                if line.startswith("Groupname:"):
-                    group_info["name"] = line.split("Groupname:")[1].strip()
-                elif line.startswith("Roles:"):
-                    role_info = line.split("Roles:")[1].strip()
-                    if role_info:
-                        role_parts = role_info.split("(")
-                        role_name = role_parts[0].strip()
-                        priority = (
-                            role_parts[1].split(")")[0].replace("priority:", "").strip()
-                        )
-                        group_info["roles"].append(
-                            {"name": role_name, "priority": priority}
-                        )
-                elif (
-                    line
-                    and not line.startswith("Groupname:")
-                    and not line.startswith("Roles:")
-                ):
-                    if line.startswith("Clients:"):
-                        client = line.split("Clients:")[1].strip()
-                        if client:
-                            group_info["clients"].append(client)
-                    else:
-                        group_info["clients"].append(line.strip())
-
-            logger.info(f"Successfully retrieved details for group: {group_name}")
-            return {"group": group_info}
-
-        except Exception as parse_error:
-            logger.error(f"Error parsing group details: {str(parse_error)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error parsing group details: {str(parse_error)}",
-            )
-
+        group_info = {
+            "name": group_data.get("groupname", ""),
+            "roles": [
+                {"name": r.get("rolename", ""), "priority": r.get("priority", -1)}
+                for r in group_data.get("roles", [])
+            ],
+            "clients": [
+                c.get("username", "") if isinstance(c, dict) else str(c)
+                for c in group_data.get("clients", [])
+            ],
+        }
+        logger.info(f"Successfully retrieved details for group: {group_name}")
+        return {"group": group_info}
     except HTTPException:
         raise
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Dynamic security config not found",
+        )
     except Exception as e:
         logger.error(f"Unexpected error getting group {group_name}: {str(e)}")
         raise HTTPException(

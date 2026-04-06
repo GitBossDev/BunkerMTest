@@ -15,6 +15,17 @@ function parseNameList(raw: unknown): string[] {
 
 function parseClients(res: unknown): MqttClient[] {
   const raw = (res as Record<string, unknown>)?.clients ?? res
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return []
+    // New paginated format: array of objects with a username field
+    if (typeof raw[0] === 'object' && raw[0] !== null) {
+      return (raw as Array<{ username: string }>)
+        .map((c) => ({ username: c.username }))
+        .filter((c) => c.username)
+    }
+    // Legacy string-array format
+    return (raw as string[]).filter(Boolean).map((username) => ({ username }))
+  }
   return parseNameList(raw).map((username) => ({ username }))
 }
 
