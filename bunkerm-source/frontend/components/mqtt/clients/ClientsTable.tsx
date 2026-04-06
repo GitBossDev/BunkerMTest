@@ -64,6 +64,11 @@ export function ClientsTable({
   const [togglingUsername, setTogglingUsername] = useState<string | null>(null)
   // Optimistic UI: tracks toggle state locally between re-fetches
   const [localDisabled, setLocalDisabled] = useState<Record<string, boolean>>({})
+
+  const handleToggleDisabled = async (client: MqttClient) => {
+    // Use local tracked state; if unknown, assume enabled (false)
+    const isCurrentlyDisabled = localDisabled[client.username] ?? client.disabled ?? false
+    setTogglingUsername(client.username)
     try {
       if (isCurrentlyDisabled) {
         await dynsecApi.enableClient(client.username)
