@@ -1,0 +1,22 @@
+[
+  {
+    "pattern": "sensors/+/temperature",
+    "max_silence_secs": 600,
+    "label": "Temperature sensors"
+  },
+  {
+    "pattern": "sensors/+/humidity",
+    "max_silence_secs": 600,
+    "label": "Humidity sensors"
+  },
+  {
+    "pattern": "devices/+/heartbeat",
+    "max_silence_secs": 300,
+    "label": "Device heartbeats"
+  },
+  {
+    "pattern": "factory/line1/#",
+    "max_silence_secs": 120,
+    "label": "Production line 1"
+  }
+]

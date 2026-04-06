@@ -17,6 +17,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from paho.mqtt import client as mqtt_client
 import threading
+import re
 from typing import Dict, List, Optional
 from collections import deque
 import time
@@ -174,6 +175,7 @@ class AlertEngine:
     TYPE_CLIENT_CAPACITY  = "client_capacity"
     TYPE_RECONNECT_LOOP   = "reconnect_loop"
     TYPE_AUTH_FAILURE     = "auth_failure"
+    TYPE_DEVICE_SILENT    = "device_silent"
 
     # Severity for each alert type
     _SEVERITY = {
@@ -181,6 +183,7 @@ class AlertEngine:
         TYPE_CLIENT_CAPACITY:  "high",
         TYPE_RECONNECT_LOOP:   "high",
         TYPE_AUTH_FAILURE:     "high",
+        TYPE_DEVICE_SILENT:    "high",
     }
 
     # Human-readable titles
@@ -189,6 +192,7 @@ class AlertEngine:
         TYPE_CLIENT_CAPACITY:  "Client Capacity Warning",
         TYPE_RECONNECT_LOOP:   "Client Reconnect Loop",
         TYPE_AUTH_FAILURE:     "Authentication Failures",
+        TYPE_DEVICE_SILENT:    "Device Silent",
     }
 
     # Human-readable impact descriptions
@@ -197,6 +201,7 @@ class AlertEngine:
         TYPE_CLIENT_CAPACITY:  "Approaching the configured connection limit. New clients may be refused.",
         TYPE_RECONNECT_LOOP:   "Excessive reconnects consume broker resources and may indicate a client bug.",
         TYPE_AUTH_FAILURE:     "Repeated authentication failures may indicate a brute-force attempt.",
+        TYPE_DEVICE_SILENT:    "A monitored topic has not published within the expected interval. The device may be offline, stuck, or losing connectivity.",
     }
 
     def __init__(self):
@@ -211,6 +216,10 @@ class AlertEngine:
         self._cooldown_until: Dict[str, float] = {}
         # persistent history of raised alerts (max 200 entries)
         self._alert_history: deque = deque(maxlen=200)
+        # watchlist cache for device_silent checks
+        self._watchlist_cache: List[dict] = []
+        self._watchlist_ts: float = 0.0
+        self._watchlist_patterns: List[tuple] = []  # (pattern_str, compiled_re, max_silence_secs, label)
 
     # ── public interface ──────────────────────────────────────────────────────
 
@@ -239,11 +248,13 @@ class AlertEngine:
                     return True
         return False
 
-    def evaluate(self, stats: dict):
+    def evaluate(self, stats: dict, topics: Optional[List[dict]] = None):
         """Called periodically with the latest stats snapshot."""
         grace_polls   = int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3"))
         cap_pct       = float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80"))
         max_clients   = float(_read_max_connections())
+        # Load watchlist before taking the lock (involves file I/O)
+        watchlist = self._load_watchlist() if topics is not None else []
 
         with self._lock:
             broker_connected = stats.get("mqtt_connected", False)
@@ -272,6 +283,10 @@ class AlertEngine:
                 )
             else:
                 self._clear(self.TYPE_CLIENT_CAPACITY)
+
+            # ── Device silent ─────────────────────────────────────────────────
+            if topics is not None and watchlist:
+                self._check_silent_devices_locked(topics, watchlist)
 
     def record_connect_event(self, client_id: str):
         """Called whenever a client connect event is observed."""
@@ -311,6 +326,75 @@ class AlertEngine:
                     f"(threshold: {fail_count}).",
                 )
 
+    # ── watchlist helpers ─────────────────────────────────────────────────────
+
+    def _load_watchlist(self) -> List[dict]:
+        """Read silent_watchlist.json, cache result for 30 s."""
+        path = os.getenv("ALERT_WATCHLIST_PATH", "/app/monitor/silent_watchlist.json")
+        now = time.time()
+        if self._watchlist_cache is not None and now - self._watchlist_ts < 30.0:
+            return self._watchlist_cache
+        try:
+            with open(path) as _f:
+                data = json.load(_f)
+            rules = data if isinstance(data, list) else []
+        except (FileNotFoundError, json.JSONDecodeError):
+            rules = []
+        # Compile regexes for each rule
+        compiled = []
+        for r in rules:
+            pattern = r.get("pattern", "")
+            max_s   = int(r.get("max_silence_secs", 0))
+            label   = r.get("label", pattern)
+            if pattern and max_s > 0:
+                compiled.append((pattern, self._mqtt_to_regex(pattern), max_s, label))
+        self._watchlist_cache = rules
+        self._watchlist_patterns = compiled
+        self._watchlist_ts = now
+        return rules
+
+    @staticmethod
+    def _mqtt_to_regex(pattern: str) -> re.Pattern:
+        """Convert an MQTT topic pattern (using + and #) to a compiled regex.
+        +  matches a single level (no slashes)
+        #  matches the rest of the topic path (must appear only at the end)
+        """
+        # Escape all regex metacharacters, then restore + and # semantics
+        escaped = re.escape(pattern)
+        escaped = escaped.replace(r"\+", "[^/]+").replace(r"\#", ".+")
+        return re.compile(f"^{escaped}$")
+
+    def _check_silent_devices_locked(self, topics: List[dict], watchlist: List[dict]):
+        """Raise / clear device_silent alerts. Assumes self._lock is held."""
+        now_dt = datetime.now(timezone.utc)
+        now_ts = time.time()
+        for (pattern_str, regex, max_silence, label) in self._watchlist_patterns:
+            matching = [t for t in topics if regex.match(t.get("topic", ""))]
+            if not matching:
+                # Pattern configured but never seen in the broker — not an alert;
+                # could be a new deployment or a legitimate topic gap.
+                continue
+            for t in matching:
+                topic     = t["topic"]
+                ts_str    = t.get("timestamp", "")
+                suffix    = f"{pattern_str}:{topic}"[:64]
+                try:
+                    last_dt = datetime.fromisoformat(ts_str.rstrip("Z")).replace(tzinfo=timezone.utc)
+                    age_secs = (now_dt - last_dt).total_seconds()
+                except (ValueError, AttributeError):
+                    continue
+                if age_secs >= max_silence:
+                    mins_silent   = int(age_secs // 60)
+                    mins_thresh   = max_silence // 60
+                    self._raise(
+                        self.TYPE_DEVICE_SILENT,
+                        f"Topic '{topic}' (rule: '{label}') silent for {mins_silent} min "
+                        f"(threshold: {mins_thresh} min).",
+                        alert_id_suffix=suffix,
+                    )
+                else:
+                    self._clear_key(f"{self.TYPE_DEVICE_SILENT}:{suffix}")
+
     # ── private helpers ───────────────────────────────────────────────────────
 
     def _raise(self, alert_type: str, description: str, alert_id_suffix: str = ""):
@@ -341,6 +425,16 @@ class AlertEngine:
         entry = self._active.pop(alert_type, None)
         if entry is not None:
             # Record as auto-resolved in history
+            self._alert_history.append({
+                **entry,
+                "status": "cleared",
+                "resolved_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
+
+    def _clear_key(self, key: str):
+        """Clear an alert by its full key (used for suffixed alerts like device_silent)."""
+        entry = self._active.pop(key, None)
+        if entry is not None:
             self._alert_history.append({
                 **entry,
                 "status": "cleared",
@@ -548,7 +642,7 @@ class MQTTStats:
 
         # Evaluate alert conditions outside the lock
         try:
-            _alert_engine.evaluate(stats)
+            _alert_engine.evaluate(stats, topic_store.get_all())
         except Exception as _ae:
             logger.warning("AlertEngine.evaluate error: %s", _ae)
 
