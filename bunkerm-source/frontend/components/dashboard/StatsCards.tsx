@@ -21,7 +21,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <div className="flex items-center gap-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Clients</CardTitle>
+          <CardTitle className="text-sm font-medium">Clients</CardTitle>
           <InfoTooltip side="bottom" content={
             <>
               <p className="font-semibold text-foreground mb-1">MQTT Clients</p>
@@ -44,13 +44,13 @@ export function StatsCards({ stats }: StatsCardsProps) {
             <ClientGauge connected={connected} total={total} maximum={maximum} />
           </div>
 
-          {/* Stats — single column */}
-          <div className="flex flex-col gap-3 w-full sm:w-auto">
-            <Stat label="Connected"     value={connected}    accent="text-blue-500" />
-            <Stat label="Disconnected"  value={disconnected} accent="text-orange-400" />
+          {/* Stats — 2 columns */}
+          <div className="grid grid-cols-2 gap-x-8 gap-y-4 w-full sm:w-auto">
+            <Stat label="Connected"      value={connected}    accent="text-blue-500" />
+            <Stat label="Disconnected"   value={disconnected} accent="text-orange-400" />
             <Stat label="Active sessions" value={total} />
-            <Stat label="Max concurrent"  value={maximum}    accent="text-orange-500" />
-            <Stat label="Subscriptions"   value={subs}       accent="text-purple-500" />
+            <Stat label="Max concurrent"  value={maximum}     accent="text-orange-500" />
+            <Stat label="Subscriptions"   value={subs}        accent="text-purple-500" />
           </div>
         </div>
       </CardContent>

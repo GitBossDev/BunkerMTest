@@ -40,7 +40,7 @@ export function QoSPanel({ stats }: QoSPanelProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
           <Metric label="In-flight msgs" value={String(inflight)}                              accent="text-yellow-500" />
           <Metric label="Stored msgs"    value={`${stored} (${formatBytes(storeBytes)})`} />
           <Metric label="Retained msgs"  value={String(retained)}                              accent="text-cyan-500" />
@@ -53,8 +53,8 @@ export function QoSPanel({ stats }: QoSPanelProps) {
 function Metric({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className={`text-lg font-bold ${accent ?? 'text-foreground'}`}>{value}</p>
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className={`text-xl font-bold ${accent ?? 'text-foreground'}`}>{value}</p>
     </div>
   )
 }

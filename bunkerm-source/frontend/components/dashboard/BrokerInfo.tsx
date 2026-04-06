@@ -102,7 +102,7 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
 function Stat({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <div className="flex items-center gap-1 text-muted-foreground text-[10px] uppercase tracking-wide">
+      <div className="flex items-center gap-1 text-muted-foreground text-xs uppercase tracking-wide">
         {icon}
         {label}
       </div>

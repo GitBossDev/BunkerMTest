@@ -186,7 +186,7 @@ export function BytesChart() {
 function SumStat({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={`text-base font-bold ${color}`}>{value}</p>
     </div>
   )

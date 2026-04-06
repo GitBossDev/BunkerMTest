@@ -164,7 +164,7 @@ export function MessagesChart({ retained = 0 }: Props) {
 function SumStat({ label, value, color }: { label: string; value: number; color: string }) {
   return (
     <div>
-      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={`text-base font-bold ${color}`}>{value.toLocaleString()}</p>
     </div>
   )

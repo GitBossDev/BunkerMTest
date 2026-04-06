@@ -77,15 +77,19 @@ export default function DashboardPage() {
         <QoSPanel stats={stats} />
       </div>
 
-      {/* ── Row 2: Bytes + Messages charts ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-        <BytesChart />
-        <MessagesChart retained={stats?.retained_messages ?? 0} />
+      {/* ── Row 2: Bytes Transfer (2/3) + Broker Health (1/3) ── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <BytesChart />
+        </div>
+        <BrokerHealth stats={stats} />
       </div>
 
-      {/* ── Row 3: Broker Health + Broker Info (same height) ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-        <BrokerHealth stats={stats} />
+      {/* ── Row 3: Message Activity (2/3) + Broker Info (1/3) ── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <MessagesChart retained={stats?.retained_messages ?? 0} />
+        </div>
         <BrokerInfo stats={stats} />
       </div>
 
