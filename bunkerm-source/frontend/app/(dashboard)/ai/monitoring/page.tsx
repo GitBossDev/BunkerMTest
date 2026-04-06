@@ -64,7 +64,7 @@ function downloadCsv(data: BrokerAlert[], filename: string) {
   const header = cols.join(',')
   const rows = data.map((a) =>
     cols.map((c) => {
-      const v = (a as Record<string, unknown>)[c] ?? ''
+      const v = (a as unknown as Record<string, unknown>)[c] ?? ''
       return `"${String(v).replace(/"/g, '""')}"`
     }).join(',')
   )
