@@ -1,0 +1,8 @@
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.exe
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.dll
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.deps.json
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.runtimeconfig.json
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Sensors.pdb
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\MQTTnet.dll
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Shared.dll
+C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Sensors\publish\Greenhouse.Shared.pdb
