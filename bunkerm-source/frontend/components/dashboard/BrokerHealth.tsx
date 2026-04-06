@@ -27,10 +27,9 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
   const txMsg  = stats?.load_msg_tx_1min  ?? 0
   const rxByte = stats?.load_bytes_rx_1min ?? 0
   const txByte = stats?.load_bytes_tx_1min ?? 0
-  const connRate = stats?.load_connections_1min ?? 0
   const latency  = stats?.latency_ms ?? -1
 
-  const latencyLabel = latency < 0 ? '—' : `${latency} ms`
+  const latencyLabel = latency < 0 ? '—' : `${Math.round(latency)} ms`
 
   return (
     <Card>
@@ -41,7 +40,6 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
             <>
               <p className="font-semibold text-foreground mb-1">Broker Performance</p>
               <TipRow label="Msg RX/TX" text="Messages received/sent per second. 1-minute moving average reported by Mosquitto." />
-              <TipRow label="Conn rate" text="New client connections per second over the last minute." />
               <TipRow label="Bytes RX/TX" text="Data volume transferred per second, including MQTT protocol headers." />
               <TipRow label="Latency" text="Round-trip time: the monitor publishes a ping to the broker and measures the response time. Green &lt;50ms · Yellow &lt;200ms · Red &gt;200ms." />
             </>
@@ -52,13 +50,12 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
-          <Metric label="Msg RX rate"  value={`${rxMsg.toFixed(1)} msg/s`} accent="text-blue-500" />
-          <Metric label="Msg TX rate"  value={`${txMsg.toFixed(1)} msg/s`} accent="text-green-500" />
-          <Metric label="Conn rate"    value={`${connRate.toFixed(2)}/s`}   accent="text-orange-500" />
-          <Metric label="Bytes RX"     value={formatBytes(rxByte)}          accent="text-blue-400" />
-          <Metric label="Bytes TX"     value={formatBytes(txByte)}          accent="text-green-400" />
-          <Metric label="Latency"      value={latencyLabel}                 accent={latencyColor(latency)} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+          <Metric label="Msg RX rate"  value={`${rxMsg.toFixed(1)} msg/s`}  accent="text-blue-500" />
+          <Metric label="Msg TX rate"  value={`${txMsg.toFixed(1)} msg/s`}  accent="text-green-500" />
+          <Metric label="Bytes RX"     value={formatBytes(rxByte)}           accent="text-blue-400" />
+          <Metric label="Bytes TX"     value={formatBytes(txByte)}           accent="text-green-400" />
+          <Metric label="Latency"      value={latencyLabel}                  accent={latencyColor(latency)} />
         </div>
       </CardContent>
     </Card>

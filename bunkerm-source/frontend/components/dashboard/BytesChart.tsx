@@ -53,7 +53,7 @@ function formatLabel(ts: string, period: StatsPeriod): string {
 export function BytesChart() {
   const [period, setPeriod] = useState<StatsPeriod>('1h')
   const [chartData, setChartData] = useState<{ time: string; sent: number; received: number }[]>([])
-  const [unit, setUnit] = useState('B/s')
+  const [unit, setUnit] = useState('B')
   const [loading, setLoading] = useState(true)
 
   const fetchData = useCallback(async () => {
@@ -66,7 +66,7 @@ export function BytesChart() {
 
       const allValues = [...raw.bytes_received, ...raw.bytes_sent]
       const { divisor, unit: u } = autoScaleBytes(allValues)
-      setUnit(`${u}/s`)
+      setUnit(u)
 
       setChartData(
         raw.timestamps.map((ts, i) => ({
@@ -99,7 +99,7 @@ export function BytesChart() {
               <p className="font-semibold text-foreground mb-1">Bytes Transfer</p>
               <TipRow label="RX (Received)" text="Bytes received by the broker from clients (PUBLISH messages + MQTT protocol headers)." />
               <TipRow label="TX (Sent)" text="Bytes sent by the broker to clients (message deliveries + ACKs)." />
-              <TipRow label="Scale" text="Automatically adjusts to B/s, KB/s or MB/s based on the volume in the selected period." />
+              <TipRow label="Scale" text="Automatically adjusts to B, KB or MB based on the volume in the selected period." />
               <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
             </>
           } />
@@ -120,22 +120,36 @@ export function BytesChart() {
           ))}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        {/* Summary stats row */}
+        {!loading && chartData.length > 0 && (() => {
+          const totalRx  = chartData.reduce((s, d) => s + d.received, 0)
+          const totalTx  = chartData.reduce((s, d) => s + d.sent, 0)
+          const totalAll = parseFloat((totalRx + totalTx).toFixed(2))
+          return (
+            <div className="grid grid-cols-3 gap-2 text-center border rounded-lg p-2 bg-muted/30">
+              <SumStat label="Total"    value={`${totalAll.toLocaleString()} ${unit}`}   color="text-foreground" />
+              <SumStat label="Received" value={`${parseFloat(totalRx.toFixed(2)).toLocaleString()} ${unit}`} color="text-blue-500" />
+              <SumStat label="Sent"     value={`${parseFloat(totalTx.toFixed(2)).toLocaleString()} ${unit}`} color="text-green-500" />
+            </div>
+          )
+        })()}
+
         {loading ? (
-          <div className="flex items-center justify-center h-[250px] text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-[220px] text-muted-foreground text-sm">
             Loading…
           </div>
         ) : chartData.length === 0 ? (
-          <EmptyPeriod period={period} onSwitch={setPeriod} height={250} />
+          <EmptyPeriod period={period} onSwitch={setPeriod} height={220} />
         ) : (
-          <ResponsiveContainer width="100%" height={250}>
+          <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 0 }}>
               <defs>
-                <linearGradient id="bytesSent" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="bytesReceived" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#3b82f6" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
-                <linearGradient id="bytesReceived" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id="bytesSent" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#22c55e" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
                 </linearGradient>
@@ -158,13 +172,23 @@ export function BytesChart() {
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Area type="monotone" dataKey="sent"     name="Sent"     stroke="#3b82f6" fill="url(#bytesSent)"     strokeWidth={2} />
-              <Area type="monotone" dataKey="received" name="Received" stroke="#22c55e" fill="url(#bytesReceived)" strokeWidth={2} />
+              <Area type="monotone" dataKey="received" name="Received" stroke="#3b82f6" fill="url(#bytesReceived)" strokeWidth={2} />
+              <Area type="monotone" dataKey="sent"     name="Sent"     stroke="#22c55e" fill="url(#bytesSent)"     strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ── Summary stat cell ────────────────────────────────────────────────────────
+function SumStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div>
+      <p className="text-[10px] text-muted-foreground uppercase tracking-wide">{label}</p>
+      <p className={`text-base font-bold ${color}`}>{value}</p>
+    </div>
   )
 }
 

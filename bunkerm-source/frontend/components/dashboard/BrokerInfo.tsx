@@ -88,11 +88,11 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="flex flex-col gap-3">
-          <Stat icon={<Server className="h-3.5 w-3.5 text-slate-400" />} label="Version" value={version} />
-          <Stat icon={<Clock className="h-3.5 w-3.5 text-slate-400" />}  label="Uptime"  value={uptime} />
-          <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}    label="CPU"     value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
-          <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />} label="RAM (RSS)" value={fmtBytes(rss)} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          <Stat icon={<Server className="h-3.5 w-3.5 text-slate-400" />}       label="Version"   value={version} />
+          <Stat icon={<Clock className="h-3.5 w-3.5 text-slate-400" />}        label="Uptime"    value={uptime} />
+          <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}          label="CPU"       value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
+          <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />}  label="RAM (RSS)" value={fmtBytes(rss)} />
         </div>
       </CardContent>
     </Card>

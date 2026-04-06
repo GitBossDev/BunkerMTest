@@ -11,10 +11,11 @@ interface StatsCardsProps {
 }
 
 export function StatsCards({ stats }: StatsCardsProps) {
-  const connected = stats?.total_connected_clients ?? 0
-  const total     = stats?.clients_total ?? connected
-  const maximum   = stats?.clients_maximum ?? connected
-  const subs      = stats?.total_subscriptions ?? 0
+  const connected    = stats?.total_connected_clients ?? 0
+  const disconnected = stats?.clients_disconnected ?? 0
+  const total        = stats?.clients_total ?? connected
+  const maximum      = stats?.clients_maximum ?? connected
+  const subs         = stats?.total_subscriptions ?? 0
 
   return (
     <Card>
@@ -25,7 +26,8 @@ export function StatsCards({ stats }: StatsCardsProps) {
             <>
               <p className="font-semibold text-foreground mb-1">MQTT Clients</p>
               <TipRow label="Connected" text="Clients with an active TCP connection to the broker right now." />
-              <TipRow label="Active sessions" text="Total sessions registered by the broker (connected + disconnected but remembered via persistent sessions)." />
+              <TipRow label="Disconnected" text="Clients with a persistent session saved in the broker but no active connection at this moment." />
+              <TipRow label="Active sessions" text="Total sessions registered by the broker (connected + disconnected persistent sessions)." />
               <TipRow label="Max concurrent" text="Historical peak of simultaneously connected clients since the last broker restart." />
               <TipRow label="Subscriptions" text="Total active topic subscriptions at this moment. A single client can hold multiple subscriptions." />
             </>
@@ -42,12 +44,13 @@ export function StatsCards({ stats }: StatsCardsProps) {
             <ClientGauge connected={connected} total={total} maximum={maximum} />
           </div>
 
-          {/* Stats */}
-          <div className="flex-1 grid grid-cols-2 gap-x-8 gap-y-4 w-full sm:w-auto">
-            <Stat label="Connected" value={connected} accent="text-blue-500" />
+          {/* Stats — single column */}
+          <div className="flex flex-col gap-3 w-full sm:w-auto">
+            <Stat label="Connected"     value={connected}    accent="text-blue-500" />
+            <Stat label="Disconnected"  value={disconnected} accent="text-orange-400" />
             <Stat label="Active sessions" value={total} />
-            <Stat label="Max concurrent" value={maximum} accent="text-orange-500" />
-            <Stat label="Subscriptions" value={subs} accent="text-purple-500" />
+            <Stat label="Max concurrent"  value={maximum}    accent="text-orange-500" />
+            <Stat label="Subscriptions"   value={subs}       accent="text-purple-500" />
           </div>
         </div>
       </CardContent>

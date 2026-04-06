@@ -69,8 +69,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* ── Row 1: Clients panel ── */}
-      <StatsCards stats={stats} />
+      {/* ── Row 1: Clients (2/3) + QoS (1/3) ── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <StatsCards stats={stats} />
+        </div>
+        <QoSPanel stats={stats} />
+      </div>
 
       {/* ── Row 2: Bytes + Messages charts ── */}
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
@@ -78,13 +83,10 @@ export default function DashboardPage() {
         <MessagesChart retained={stats?.retained_messages ?? 0} />
       </div>
 
-      {/* ── Row 3: Broker info + Health + QoS ── */}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
+      {/* ── Row 3: Broker Health + Broker Info (same height) ── */}
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        <BrokerHealth stats={stats} />
         <BrokerInfo stats={stats} />
-        <div className="sm:col-span-2 lg:col-span-2">
-          <BrokerHealth stats={stats} />
-        </div>
-        <QoSPanel stats={stats} />
       </div>
 
       {/* ── Row 4: Topic topology + Top subscribed ── */}
