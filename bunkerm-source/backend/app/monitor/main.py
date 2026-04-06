@@ -138,6 +138,34 @@ _STRING_TOPICS = {
     "$SYS/broker/uptime",
 }
 
+_max_connections_cache: dict = {"value": 0, "ts": 0.0}
+
+def _read_max_connections() -> int:
+    """Read the smallest positive max_connections from mosquitto.conf (cached 30s).
+    Returns ALERT_CLIENT_MAX_DEFAULT env-var (default 10000) when no limit is configured."""
+    import time as _t
+    now = _t.time()
+    if _max_connections_cache["value"] and now - _max_connections_cache["ts"] < 30.0:
+        return _max_connections_cache["value"]
+    conf_path = os.getenv("MOSQUITTO_CONF_PATH", "/etc/mosquitto/mosquitto.conf")
+    limit = 0
+    try:
+        with open(conf_path) as _f:
+            for line in _f:
+                line = line.strip()
+                if line.startswith("max_connections "):
+                    val = int(line.split()[1])
+                    if val > 0 and (limit == 0 or val < limit):
+                        limit = val
+    except Exception:
+        pass
+    if limit <= 0:
+        limit = int(os.getenv("ALERT_CLIENT_MAX_DEFAULT", "10000"))
+    _max_connections_cache["value"] = limit
+    _max_connections_cache["ts"] = now
+    return limit
+
+
 class AlertEngine:
     """Evaluates broker metrics and emits in-memory alerts."""
 
@@ -373,34 +401,6 @@ class MQTTStats:
         self._clientlogs_count_cache: int = 0
         self._clientlogs_count_ts: float = 0.0
 
-
-_max_connections_cache: dict = {"value": 0, "ts": 0.0}
-
-def _read_max_connections() -> int:
-    """Read the smallest positive max_connections from mosquitto.conf (cached 30s).
-    Returns ALERT_CLIENT_MAX_DEFAULT env-var (default 10000) when no limit is configured."""
-    import time as _t
-    now = _t.time()
-    if _max_connections_cache["value"] and now - _max_connections_cache["ts"] < 30.0:
-        return _max_connections_cache["value"]
-    conf_path = os.getenv("MOSQUITTO_CONF_PATH", "/etc/mosquitto/mosquitto.conf")
-    limit = 0
-    try:
-        with open(conf_path) as _f:
-            for line in _f:
-                line = line.strip()
-                if line.startswith("max_connections "):
-                    val = int(line.split()[1])
-                    if val > 0 and (limit == 0 or val < limit):
-                        limit = val
-    except Exception:
-        pass
-    if limit <= 0:
-        limit = int(os.getenv("ALERT_CLIENT_MAX_DEFAULT", "10000"))
-    _max_connections_cache["value"] = limit
-    _max_connections_cache["ts"] = now
-    return limit
-        
         # Initialize message counter
         self.message_counter = MessageCounter()
         
