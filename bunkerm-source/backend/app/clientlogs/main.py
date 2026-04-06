@@ -163,6 +163,10 @@ class MQTTMonitor:
         )
 
         # Track username for ALL clients (admin + non-admin) before any early returns
+        if len(self._client_usernames) > 2000:
+            # Evict oldest 200 entries to cap memory under reconnect storms
+            for k in list(self._client_usernames.keys())[:200]:
+                del self._client_usernames[k]
         self._client_usernames[client_id] = username
         # Successful connection — remove from pending IP table
         self._pending_ip.pop(ts, None)
@@ -338,6 +342,17 @@ class MQTTMonitor:
         Publish deduplication is intentionally NOT pre-loaded from replay so
         the first live publish to each topic after a restart is always visible.
         """
+        # Fast early-exit for high-frequency lines that no parser handles.
+        # These dominate the log during normal operation and under connection storms.
+        if (': Sending PUBLISH to ' in line
+                or ': Denied PUBLISH from ' in line
+                or ': Sending SUBACK to ' in line
+                or ': Sending PUBACK to ' in line
+                or ': Received SUBSCRIBE from ' in line
+                or ': Received PINGREQ from ' in line
+                or ': Sending PINGRESP to ' in line):
+            return
+
         # Raw connection tracking (state only, no event)
         if self._parse_raw_new_connection(line):
             return

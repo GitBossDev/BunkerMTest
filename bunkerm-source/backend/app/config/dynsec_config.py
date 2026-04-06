@@ -80,6 +80,11 @@ DEFAULT_CONFIG = {
         "rolename": "admin",
         "acls": [{
             "acltype": "publishClientSend",
+            "topic": "#",
+            "priority": 0,
+            "allow": True
+        }, {
+            "acltype": "publishClientSend",
             "topic": "$CONTROL/dynamic-security/#",
             "priority": 0,
             "allow": True

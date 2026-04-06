@@ -369,6 +369,9 @@ class MQTTStats:
         self._ping_sent_at: float = 0.0
         # Real MQTT connection state (set by on_connect / on_disconnect callbacks)
         self._is_connected: bool = False
+        # Cache for clientlogs count (avoid HTTP call on every stats request)
+        self._clientlogs_count_cache: int = 0
+        self._clientlogs_count_ts: float = 0.0
         
         # Initialize message counter
         self.message_counter = MessageCounter()
@@ -455,17 +458,23 @@ class MQTTStats:
                 self.last_update = now
 
     def _get_clientlogs_count(self) -> int:
-        """Query clientlogs service for count of non-admin connected clients."""
+        """Query clientlogs service for count of non-admin connected clients (cached 5s)."""
+        now = time.time()
+        if now - self._clientlogs_count_ts < 5.0:
+            return self._clientlogs_count_cache
         try:
             import urllib.request
             with urllib.request.urlopen(
                 "http://127.0.0.1:1002/api/v1/connected-clients", timeout=2
             ) as resp:
                 data = json.loads(resp.read().decode())
-                return len(data.get("clients", []))
+                count = len(data.get("clients", []))
         except Exception:
             # Fall back to $SYS count minus self when clientlogs is unavailable
-            return max(0, self.connected_clients - 1)
+            count = max(0, self.connected_clients - 1)
+        self._clientlogs_count_cache = count
+        self._clientlogs_count_ts = now
+        return count
 
     def get_stats(self) -> Dict:
         """Get current MQTT statistics"""
@@ -793,8 +802,9 @@ def connect_mqtt():
                 }
                 logger.error(f"Error details: {error_codes.get(rc, 'Unknown error')}")
 
-        def on_disconnect(client, userdata, rc, properties=None):
+        def on_disconnect(client, userdata, disconnect_flags, reason_code=None, properties=None):
             mqtt_stats._is_connected = False
+            rc = reason_code if reason_code is not None else disconnect_flags
             if rc != 0:
                 logger.warning(f"Unexpected MQTT disconnect (rc={rc}), will auto-reconnect")
 
