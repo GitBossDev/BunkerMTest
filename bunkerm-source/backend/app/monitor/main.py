@@ -53,8 +53,8 @@ handler = RotatingFileHandler(
 logger.addHandler(handler)
 
 # MQTT Settings - Convert port to integer
-MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME")
-MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD")
+MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME") or os.getenv("MQTT_USERNAME", "bunker")
+MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD") or os.getenv("MQTT_PASSWORD", "bunker")
 MOSQUITTO_IP = os.getenv("MOSQUITTO_IP", "127.0.0.1")
 # Convert to int with a default value
 MOSQUITTO_PORT = int(os.getenv("MOSQUITTO_PORT", "1900"))

@@ -13,6 +13,7 @@ export default function DynSecJsonPage() {
   const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
   const [importMessage, setImportMessage] = useState('')
   const [isExporting, setIsExporting] = useState(false)
+  const [isRestarting, setIsRestarting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -42,8 +43,18 @@ export default function DynSecJsonPage() {
       formData.append('file', file)
       await configApi.importDynSecJson(formData)
       setImportStatus('success')
-      setImportMessage('DynSec configuration imported successfully')
-      toast.success('DynSec configuration imported successfully')
+      setImportMessage('Configuration imported — broker is restarting (~2s)')
+      toast.success('DynSec configuration imported')
+      // Restart broker so the new ACL takes effect immediately
+      setIsRestarting(true)
+      try {
+        await configApi.restartMosquitto()
+        toast.success('Broker restarted — configuration is now active')
+      } catch {
+        toast.error('Import succeeded but broker restart failed — please restart manually from the Config page')
+      } finally {
+        setIsRestarting(false)
+      }
     } catch (err) {
       const msg = err instanceof SyntaxError ? 'File is not valid JSON' : 'Failed to import configuration'
       setImportStatus('error')
@@ -84,7 +95,7 @@ export default function DynSecJsonPage() {
       <div className="flex items-start gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
         <ShieldCheck className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
         <span>
-          The <strong className="text-foreground">Dynamic Security plugin</strong> stores all clients, groups, roles, and ACLs in a single JSON file (<code className="text-xs bg-muted px-1 rounded">dynamic-security.json</code>). Use the export button to download a backup and the import button to restore or replace the configuration. Changes take effect immediately without a broker restart.
+          The <strong className="text-foreground">Dynamic Security plugin</strong> stores all clients, groups, roles, and ACLs in a single JSON file (<code className="text-xs bg-muted px-1 rounded">dynamic-security.json</code>). Use the export button to download a backup and the import button to restore or replace the configuration. Changes require a <strong className="text-foreground">broker restart</strong> to take effect — importing a configuration will restart the broker automatically.
         </span>
       </div>
 
@@ -172,7 +183,7 @@ export default function DynSecJsonPage() {
 
           <Button
             onClick={handleImport}
-            disabled={!file || importStatus === 'uploading'}
+            disabled={!file || importStatus === 'uploading' || isRestarting}
           >
             {importStatus === 'uploading'
               ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
