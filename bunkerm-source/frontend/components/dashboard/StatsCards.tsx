@@ -41,7 +41,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
         <div className="flex flex-col sm:flex-row items-center gap-6">
           {/* Gauge */}
           <div className="shrink-0">
-            <ClientGauge connected={connected} total={total} maximum={maximum} />
+            <ClientGauge connected={connected} maxAllowed={stats?.client_max_connections ?? 10000} />
           </div>
 
           {/* Stats — 2 columns */}

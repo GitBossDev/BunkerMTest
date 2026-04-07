@@ -638,6 +638,8 @@ class MQTTStats:
                 "latency_ms": self.latency_ms,
                 # Real MQTT connection flag for alert evaluation
                 "mqtt_connected": self._is_connected,
+                # Configured connection limit (for gauge scale)
+                "client_max_connections": _read_max_connections(),
             }
 
         # Evaluate alert conditions outside the lock

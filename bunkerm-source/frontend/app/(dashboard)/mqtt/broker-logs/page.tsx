@@ -1,13 +1,20 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCw, Download, ArrowDown } from 'lucide-react'
+import { ChevronDown, RefreshCw, ArrowDown } from 'lucide-react'
 import { toast } from 'sonner'
 import { monitorApi } from '@/lib/api'
+import { exportLogs, type ExportFormat } from '@/lib/export-logs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface LogLine {
   raw: string
@@ -63,15 +70,26 @@ export default function BrokerLogsPage() {
     if (autoScroll) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [logs, autoScroll])
 
-  const downloadLogs = () => {
-    const content = logs.map((l) => l.raw).join('\n')
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `broker-logs-${Date.now()}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
+  const downloadLogs = (format: ExportFormat) => {
+    if (format === 'txt') {
+      exportLogs(
+        logs,
+        'txt',
+        [{ header: 'Log', value: l => l.raw }],
+        'broker-logs'
+      )
+    } else {
+      exportLogs(
+        logs,
+        'csv',
+        [
+          { header: 'Timestamp', value: l => l.timestamp ?? '' },
+          { header: 'Level',     value: l => l.level ?? '' },
+          { header: 'Message',   value: l => l.message ?? l.raw },
+        ],
+        'broker-logs'
+      )
+    }
   }
 
   return (
@@ -86,10 +104,18 @@ export default function BrokerLogsPage() {
             <ArrowDown className={`h-4 w-4 ${autoScroll ? 'text-primary' : ''}`} />
             Auto-scroll {autoScroll ? 'On' : 'Off'}
           </Button>
-          <Button variant="outline" size="sm" onClick={downloadLogs} disabled={logs.length === 0}>
-            <Download className="h-4 w-4" />
-            Download
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={logs.length === 0}>
+                Export
+                <ChevronDown className="h-3 w-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => downloadLogs('csv')}>CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadLogs('txt')}>TXT</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh

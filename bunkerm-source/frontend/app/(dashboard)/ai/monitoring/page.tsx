@@ -9,7 +9,7 @@ import {
   Zap,
   Info,
   History,
-  Download,
+  ChevronDown,
   ShieldAlert,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -32,8 +32,15 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { monitorApi } from '@/lib/api'
+import { exportLogs, type ExportFormat } from '@/lib/export-logs'
 import { formatRelativeTime } from '@/lib/timeUtils'
 import type { BrokerAlert, BrokerAlertSeverity } from '@/types'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // ─── Severity config ──────────────────────────────────────────────────────────
 
@@ -57,22 +64,24 @@ const TYPE_LABELS: Record<string, string> = {
   auth_failure:     'Auth Failure',
 }
 
-// ─── Download helpers ─────────────────────────────────────────────────────────
+// ─── Export helper ────────────────────────────────────────────────────────────
 
-function downloadCsv(data: BrokerAlert[], filename: string) {
-  const cols = ['timestamp', 'type', 'severity', 'title', 'status', 'description', 'impact', 'resolved_at']
-  const header = cols.join(',')
-  const rows = data.map((a) =>
-    cols.map((c) => {
-      const v = (a as unknown as Record<string, unknown>)[c] ?? ''
-      return `"${String(v).replace(/"/g, '""')}"`
-    }).join(',')
+function downloadAlerts(data: BrokerAlert[], format: ExportFormat) {
+  exportLogs(
+    data,
+    format,
+    [
+      { header: 'Timestamp',   value: a => a.timestamp },
+      { header: 'Type',        value: a => a.type },
+      { header: 'Severity',    value: a => a.severity },
+      { header: 'Title',       value: a => a.title },
+      { header: 'Status',      value: a => a.status },
+      { header: 'Description', value: a => a.description },
+      { header: 'Impact',      value: a => a.impact ?? '' },
+      { header: 'Resolved At', value: a => (a as unknown as Record<string, unknown>)['resolved_at'] ?? '' },
+    ],
+    'bunkerm-alerts'
   )
-  const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = filename; a.click()
-  URL.revokeObjectURL(url)
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -300,17 +309,24 @@ export default function MonitoringPage() {
                   <SelectItem value="auth_failure">Auth Failure</SelectItem>
                 </SelectContent>
               </Select>
-              {/* Download */}
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs"
-                disabled={filteredHistory.length === 0}
-                onClick={() => downloadCsv(filteredHistory, `bunkerm-alerts-${new Date().toISOString().slice(0, 10)}.csv`)}
-              >
-                <Download className="h-3.5 w-3.5 mr-1.5" />
-                Export CSV
-              </Button>
+              {/* Export */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs"
+                    disabled={filteredHistory.length === 0}
+                  >
+                    Export
+                    <ChevronDown className="h-3 w-3 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => downloadAlerts(filteredHistory, 'csv')}>CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => downloadAlerts(filteredHistory, 'txt')}>TXT</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>

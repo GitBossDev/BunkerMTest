@@ -1,14 +1,21 @@
 'use client'
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { Download, Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
+import { ChevronDown, Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { clientlogsApi } from '@/lib/api'
+import { exportLogs, type ExportFormat } from '@/lib/export-logs'
 import { formatAbsoluteTime } from '@/lib/timeUtils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Table,
   TableBody,
@@ -106,21 +113,22 @@ export default function ClientLogsPage() {
     })
   }
 
-  const downloadEvents = () => {
-    const header = 'Timestamp,Event,Username,Client ID,Topic,IP Address,Protocol,Details'
-    const rows = filtered.map((e) =>
-      [e.timestamp, e.event_type, e.username, e.client_id, e.topic ?? '', `${e.ip_address}:${e.port}`, e.protocol_level, e.details ?? '']
-        .map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`)
-        .join(',')
+  const downloadEvents = (format: ExportFormat) => {
+    exportLogs(
+      filtered,
+      format,
+      [
+        { header: 'Timestamp',  value: e => e.timestamp },
+        { header: 'Event',      value: e => e.event_type },
+        { header: 'Username',   value: e => e.username },
+        { header: 'Client ID',  value: e => e.client_id },
+        { header: 'Topic',      value: e => e.topic ?? '' },
+        { header: 'IP Address', value: e => `${e.ip_address}:${e.port}` },
+        { header: 'Protocol',   value: e => e.protocol_level },
+        { header: 'Details',    value: e => e.details ?? '' },
+      ],
+      'client-logs'
     )
-    const content = [header, ...rows].join('\n')
-    const blob = new Blob([content], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `client-logs-${Date.now()}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   const filtered = events.filter((e) => {
@@ -144,10 +152,18 @@ export default function ClientLogsPage() {
           <p className="text-muted-foreground text-sm">MQTT client events: connections, subscriptions, publishes and auth failures</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={downloadEvents} disabled={filtered.length === 0}>
-            <Download className="h-4 w-4 mr-2" />
-            Download CSV
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={filtered.length === 0}>
+                Export
+                <ChevronDown className="h-3 w-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => downloadEvents('csv')}>CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => downloadEvents('txt')}>TXT</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" onClick={fetchEvents} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh

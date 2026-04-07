@@ -103,6 +103,8 @@ export interface MonitorStats {
   messages_store_bytes?: number
   // Latency
   latency_ms?: number
+  // Configured connection limit (for gauge scale)
+  client_max_connections?: number
 }
 
 export interface PeriodBytesData {

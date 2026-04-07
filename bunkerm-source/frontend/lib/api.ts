@@ -249,9 +249,9 @@ export const monitorApi = {
   acknowledgeAlert: (id: string) =>
     request(buildUrl(MONITOR_API_URL, `/alerts/broker/${encodeURIComponent(id)}/acknowledge`), { method: 'POST' }),
 
-  // Logs are read server-side by Next.js API routes
-  getBrokerLogs: () => request<{ logs: string[] }>('/api/logs/broker'),
-  getClientLogs: () => request<{ logs: string[] }>('/api/logs/clients'),
+  // Logs — routed through Next.js proxy so the API key is injected server-side
+  getBrokerLogs: () => request<{ logs: string[] }>(buildUrl(CONFIG_API_URL, '/broker')),
+  getClientLogs: () => request<{ logs: string[] }>(buildUrl(CLIENTLOGS_API_URL, '/events')),
 }
 
 // ─── Config API ──────────────────────────────────────────────────────────────

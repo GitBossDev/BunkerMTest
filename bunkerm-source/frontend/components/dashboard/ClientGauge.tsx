@@ -1,34 +1,37 @@
 'use client'
 
 /**
- * Semi-circular gauge with a non-linear scale:
- *   0 → 100 → 500 → 1 000 → 5 000 → 10 000
- * Each segment occupies an equal arc (36°) of the 180° half-circle.
+ * Semi-circular gauge with a non-linear scale.
+ * Breakpoints adapt to the configured maximum: proportions are always
+ * [0%, 1%, 5%, 10%, 50%, 100%] of `maxAllowed` (default 10 000).
+ * e.g. max=10000 → [0, 100, 500, 1000, 5000, 10000]
+ *      max=5000  → [0,  50, 250,  500, 2500,  5000]
  */
 
-const BREAKPOINTS = [0, 100, 500, 1000, 5000, 10000]
-const NUM_SEGMENTS = BREAKPOINTS.length - 1   // 5
-const SEGMENT_DEGREES = 180 / NUM_SEGMENTS    // 36° each
-
+const PROPORTIONS = [0, 0.01, 0.05, 0.10, 0.50, 1.0]
 const SEGMENT_COLORS = ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444']
 
+function computeBreakpoints(maxAllowed: number): number[] {
+  return PROPORTIONS.map(p => Math.round(p * maxAllowed))
+}
+
 // Map a client value to a 0-1 fraction along the arc
-function valueToFraction(value: number): number {
-  const clamped = Math.max(0, Math.min(value, BREAKPOINTS[BREAKPOINTS.length - 1]))
-  for (let i = 0; i < NUM_SEGMENTS; i++) {
-    const lo = BREAKPOINTS[i]
-    const hi = BREAKPOINTS[i + 1]
+function valueToFraction(value: number, breakpoints: number[]): number {
+  const numSegments = breakpoints.length - 1
+  const clamped = Math.max(0, Math.min(value, breakpoints[numSegments]))
+  for (let i = 0; i < numSegments; i++) {
+    const lo = breakpoints[i]
+    const hi = breakpoints[i + 1]
     if (clamped <= hi) {
       const segFraction = (clamped - lo) / (hi - lo)
-      return (i + segFraction) / NUM_SEGMENTS
+      return (i + segFraction) / numSegments
     }
   }
   return 1
 }
 
 // Convert a 0-1 fraction to SVG (x,y) on the arc
-// Arc goes from 180° (left) to 0° (right) counter-clockwise
-// fraction 0 → left end  (180°),  fraction 1 → right end (0°)
+// fraction 0 → left end (180°),  fraction 1 → right end (0°)
 function fractionToXY(fraction: number, r: number, cx: number, cy: number) {
   const angleDeg = 180 - fraction * 180
   const rad = (angleDeg * Math.PI) / 180
@@ -45,11 +48,13 @@ function formatLabel(val: number): string {
 
 interface Props {
   connected: number
-  total: number
-  maximum: number
+  maxAllowed?: number
 }
 
-export default function ClientGauge({ connected, total, maximum }: Props) {
+export default function ClientGauge({ connected, maxAllowed = 10000 }: Props) {
+  const breakpoints = computeBreakpoints(maxAllowed)
+  const numSegments = breakpoints.length - 1
+
   const W = 280
   const H = 160
   const cx = W / 2
@@ -61,13 +66,12 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
 
   // Build arc paths for each coloured segment
   const segments = SEGMENT_COLORS.map((color, i) => {
-    const startFrac = i / NUM_SEGMENTS
-    const endFrac = (i + 1) / NUM_SEGMENTS
+    const startFrac = i / numSegments
+    const endFrac = (i + 1) / numSegments
     const p1 = fractionToXY(startFrac, outerR, cx, cy)
     const p2 = fractionToXY(endFrac, outerR, cx, cy)
     const p3 = fractionToXY(endFrac, innerR, cx, cy)
     const p4 = fractionToXY(startFrac, innerR, cx, cy)
-    // large-arc-flag: 0 (each segment < 180°)
     return (
       <path
         key={i}
@@ -79,7 +83,7 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
   })
 
   // Needle pointing at `connected` value
-  const needleFrac = valueToFraction(connected)
+  const needleFrac = valueToFraction(connected, breakpoints)
   const np = fractionToXY(needleFrac, needleR, cx, cy)
   const baseL = fractionToXY(needleFrac - 0.04, innerR - 10, cx, cy)
   const baseR = fractionToXY(needleFrac + 0.04, innerR - 10, cx, cy)
@@ -100,8 +104,8 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
         {segments}
 
         {/* gap lines between segments */}
-        {BREAKPOINTS.slice(1, -1).map((_, i) => {
-          const frac = (i + 1) / NUM_SEGMENTS
+        {breakpoints.slice(1, -1).map((_, i) => {
+          const frac = (i + 1) / numSegments
           const outer = fractionToXY(frac, outerR + 2, cx, cy)
           const inner = fractionToXY(frac, innerR - 2, cx, cy)
           return (
@@ -126,8 +130,8 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
         <circle cx={cx} cy={cy} r={4} fill="white" className="dark:fill-slate-900" />
 
         {/* boundary labels */}
-        {BREAKPOINTS.map((bp, i) => {
-          const frac = i / NUM_SEGMENTS
+        {breakpoints.map((bp, i) => {
+          const frac = i / numSegments
           const lp = fractionToXY(frac, labelR, cx, cy)
           return (
             <text
@@ -144,17 +148,11 @@ export default function ClientGauge({ connected, total, maximum }: Props) {
           )
         })}
 
-        {/* centre reading — number only, no label */}
+        {/* centre reading */}
         <text x={cx} y={cy - 14} textAnchor="middle" fontSize={26} fontWeight="bold" fill="currentColor">
           {connected}
         </text>
       </svg>
-
-      {/* legend row */}
-      <div className="flex gap-4 text-xs text-muted-foreground">
-        <span>Total: <strong className="text-foreground">{total}</strong></span>
-        <span>Max ever: <strong className="text-foreground">{maximum}</strong></span>
-      </div>
 
       <p className="text-[10px] text-muted-foreground/60 italic">⚠ Non-linear scale</p>
     </div>
