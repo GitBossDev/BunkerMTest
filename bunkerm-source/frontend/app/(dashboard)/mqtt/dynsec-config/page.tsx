@@ -35,12 +35,30 @@ export default function DynSecJsonPage() {
   const handleImport = async () => {
     if (!file) return
     setImportStatus('uploading')
+
+    // Step 1: validate the file locally before uploading
     try {
       const text = await file.text()
-      JSON.parse(text) // validate JSON before sending
+      JSON.parse(text)
+    } catch {
+      setImportStatus('error')
+      setImportMessage('File is not valid JSON')
+      toast.error('File is not valid JSON')
+      return
+    }
+
+    // Step 2: upload and handle backend response
+    try {
       const formData = new FormData()
       formData.append('file', file)
       const res = await configApi.importDynSecJson(formData)
+
+      if (!res.ok) {
+        const errorText = await res.text()
+        const snippet = errorText.replace(/<[^>]+>/g, ' ').trim().slice(0, 200)
+        throw new Error(`Server error ${res.status}${snippet ? ': ' + snippet : ''}`)
+      }
+
       const result = await res.json()
       if (!result.success) {
         const msg = result.message || 'Import failed'
@@ -55,7 +73,7 @@ export default function DynSecJsonPage() {
       setImportMessage(`Configuration imported${statsMsg} — broker reloading`)
       toast.success(`DynSec configuration imported${statsMsg}`)
     } catch (err) {
-      const msg = err instanceof SyntaxError ? 'File is not valid JSON' : (err instanceof Error ? err.message : 'Failed to import configuration')
+      const msg = err instanceof Error ? err.message : 'Failed to import configuration'
       setImportStatus('error')
       setImportMessage(msg)
       toast.error(msg)
