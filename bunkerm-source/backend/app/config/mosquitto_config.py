@@ -497,20 +497,14 @@ _MOSQUITTO_PID_FILE = "/var/run/mosquitto.pid"
 
 @router.post("/restart-mosquitto")
 async def restart_mosquitto(api_key: str = Security(get_api_key)):
-    """Send SIGTERM to Mosquitto; supervisord will auto-restart it with the new config."""
-    import signal as _signal
+    """Signal the standalone mosquitto container to reload config via SIGHUP."""
     try:
-        import subprocess as _sp
-        result = _sp.run(["pgrep", "mosquitto"], capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip():
-            pid = int(result.stdout.strip().split()[0])
-            os.kill(pid, _signal.SIGTERM)
-            logger.info(f"Sent SIGTERM to Mosquitto PID {pid} — supervisord will restart it")
-            return {"success": True, "message": f"Broker restarting (PID {pid}). Clients will reconnect in ~2s."}
-        raise RuntimeError("Mosquitto process not found")
+        _signal_mosquitto_reload()
+        logger.info("Reload signal written — mosquitto will reload config without dropping connections")
+        return {"success": True, "message": "Broker reloading config. Connections are not dropped."}
     except Exception as e:
-        logger.error(f"Failed to restart Mosquitto: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to restart Mosquitto: {str(e)}")
+        logger.error(f"Failed to signal Mosquitto reload: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to signal Mosquitto reload: {str(e)}")
 
 
 @router.get("/broker")

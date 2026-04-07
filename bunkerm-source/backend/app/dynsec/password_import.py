@@ -10,7 +10,6 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import json
 import random
 import string
@@ -307,65 +306,15 @@ async def restart_mosquitto(
     """
     try:
         logger.info("Restart Mosquitto broker requested")
-        
-        # Execute restart command
-        restart_script = """#!/bin/bash
-# Kill existing mosquitto process
-pkill mosquitto
 
-# Wait for process to terminate
-sleep 1
-
-# Start mosquitto with config file
-/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf -d
-
-# Check if mosquitto started successfully
-sleep 2
-if pgrep mosquitto > /dev/null; then
-    echo "Mosquitto restarted successfully"
-    exit 0
-else
-    echo "Failed to restart Mosquitto"
-    exit 1
-fi
-"""
-        
-        # Write script to temp file
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        script_path = os.path.join(UPLOAD_DIR, f"restart_script_{timestamp}.sh")
-        with open(script_path, "w") as f:
-            f.write(restart_script)
-        
-        # Make executable
-        os.chmod(script_path, 0o755)
-        
-        # Execute script
-        try:
-            result = subprocess.run(
-                ["/bin/bash", script_path],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10  # Set a timeout for the restart process
-            )
-            logger.info(f"Restart output: {result.stdout}")
-            
-            if result.returncode == 0:
-                return {"success": True, "message": "Mosquitto broker restarted successfully"}
-            else:
-                logger.error(f"Restart stderr: {result.stderr}")
-                return {"success": False, "message": f"Failed to restart Mosquitto: {result.stderr}"}
-                
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Restart failed: {e.stderr}")
-            return {"success": False, "message": f"Failed to restart Mosquitto: {e.stderr}"}
-        except subprocess.TimeoutExpired:
-            logger.error("Restart timeout expired")
-            return {"success": False, "message": "Timeout while restarting Mosquitto"}
-        finally:
-            # Clean up script
-            if os.path.exists(script_path):
-                os.remove(script_path)
+        # Signal the standalone mosquitto container to reload via SIGHUP.
+        # Writing .reload to the shared volume triggers the entrypoint's signal
+        # relay which sends SIGHUP — mosquitto re-reads config + DynSec without
+        # dropping any existing client connections.
+        with open("/var/lib/mosquitto/.reload", "w") as _f:
+            _f.write("")
+        logger.info("Reload signal written for mosquitto standalone container")
+        return {"success": True, "message": "Mosquitto broker reloading configuration"}
     
     except Exception as e:
         logger.error(f"Error restarting Mosquitto: {str(e)}")

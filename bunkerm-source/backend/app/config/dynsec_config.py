@@ -382,7 +382,16 @@ async def import_dynsec_json(
             user_count = len(merged_config["clients"]) - 1  # Subtract admin user
             group_count = len(merged_config["groups"])
             role_count = len(merged_config["roles"]) - 1    # Subtract admin role
-            
+
+            # Signal the standalone mosquitto container to reload DynSec immediately.
+            # Writing .reload triggers the entrypoint's signal relay which sends
+            # SIGHUP — mosquitto re-reads dynamic-security.json without dropping connections.
+            try:
+                with open("/var/lib/mosquitto/.reload", "w") as _f:
+                    _f.write("")
+            except Exception as _e:
+                logger.warning(f"Could not write mosquitto reload signal: {_e}")
+
             logger.info(f"Successfully imported configuration with {user_count} users, {group_count} groups, {role_count} roles")
             return {
                 "success": True,
