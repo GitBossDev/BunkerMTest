@@ -13,7 +13,6 @@ export default function DynSecJsonPage() {
   const [importStatus, setImportStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle')
   const [importMessage, setImportMessage] = useState('')
   const [isExporting, setIsExporting] = useState(false)
-  const [isRestarting, setIsRestarting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -41,20 +40,20 @@ export default function DynSecJsonPage() {
       JSON.parse(text) // validate JSON before sending
       const formData = new FormData()
       formData.append('file', file)
-      await configApi.importDynSecJson(formData)
-      setImportStatus('success')
-      setImportMessage('Configuration imported — broker is restarting (~2s)')
-      toast.success('DynSec configuration imported')
-      // Restart broker so the new ACL takes effect immediately
-      setIsRestarting(true)
-      try {
-        await configApi.restartMosquitto()
-        toast.success('Broker restarted — configuration is now active')
-      } catch {
-        toast.error('Import succeeded but broker restart failed — please restart manually from the Config page')
-      } finally {
-        setIsRestarting(false)
+      const res = await configApi.importDynSecJson(formData)
+      const result = await res.json()
+      if (!result.success) {
+        const msg = result.message || 'Import failed'
+        setImportStatus('error')
+        setImportMessage(msg)
+        toast.error(msg)
+        return
       }
+      setImportStatus('success')
+      const stats = result.stats
+      const statsMsg = stats ? ` (${stats.users ?? stats.clients ?? 0} users, ${stats.roles ?? 0} roles)` : ''
+      setImportMessage(`Configuration imported${statsMsg} — broker reloading`)
+      toast.success(`DynSec configuration imported${statsMsg}`)
     } catch (err) {
       const msg = err instanceof SyntaxError ? 'File is not valid JSON' : 'Failed to import configuration'
       setImportStatus('error')
@@ -66,8 +65,9 @@ export default function DynSecJsonPage() {
   const handleExport = async () => {
     setIsExporting(true)
     try {
-      const data = await configApi.getDynSecJson()
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const res = await configApi.exportDynSecJson()
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -183,7 +183,7 @@ export default function DynSecJsonPage() {
 
           <Button
             onClick={handleImport}
-            disabled={!file || importStatus === 'uploading' || isRestarting}
+            disabled={!file || importStatus === 'uploading'}
           >
             {importStatus === 'uploading'
               ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />

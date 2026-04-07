@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Wifi, WifiOff, Ban, Search, Power, PowerOff, ChevronLeft, ChevronRight, Timer } from 'lucide-react'
+import { RefreshCw, Wifi, WifiOff, Ban, Search, Power, PowerOff, ChevronLeft, ChevronRight, Timer, MoreHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import { dynsecApi, clientlogsApi, monitorApi } from '@/lib/api'
 import { formatAbsoluteTime } from '@/lib/timeUtils'
@@ -30,6 +30,17 @@ interface ClientRow {
   protocol_level?: string
   keep_alive?: number
   connectedAt?: string
+}
+
+/** Returns a compact list of page numbers + '...' separators for ellipsis pagination. */
+function buildPageNumbers(current: number, total: number): (number | '...')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const pages: (number | '...')[] = [1]
+  if (current > 3) pages.push('...')
+  for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) pages.push(p)
+  if (current < total - 2) pages.push('...')
+  pages.push(total)
+  return pages
 }
 
 export default function ConnectedClientsPage() {
@@ -355,7 +366,23 @@ export default function ConnectedClientsPage() {
             <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}>
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-            <span className="px-2">Page {safePage} of {totalPages}</span>
+            {buildPageNumbers(safePage, totalPages).map((p, i) =>
+              p === '...' ? (
+                <span key={`ellipsis-${i}`} className="flex items-center justify-center h-7 w-7 text-muted-foreground">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </span>
+              ) : (
+                <Button
+                  key={p}
+                  variant={p === safePage ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 w-7 p-0 text-xs"
+                  onClick={() => setPage(p as number)}
+                >
+                  {p}
+                </Button>
+              )
+            )}
             <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}>
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
