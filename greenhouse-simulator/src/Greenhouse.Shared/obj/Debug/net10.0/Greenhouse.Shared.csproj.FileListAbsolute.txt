@@ -23,16 +23,3 @@ C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.
 C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Shared\obj\Debug\net10.0\refint\Greenhouse.Shared.dll
 C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.pdb
 C:\Users\rrevilla\Downloads\BunkerM\InvernaderoMQTT_EjemploFase1\src\Greenhouse.Shared\obj\Debug\net10.0\ref\Greenhouse.Shared.dll
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\bin\Debug\net10.0\Greenhouse.Shared.deps.json
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\bin\Debug\net10.0\Greenhouse.Shared.dll
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\bin\Debug\net10.0\Greenhouse.Shared.pdb
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.csproj.AssemblyReference.cache
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.GeneratedMSBuildEditorConfig.editorconfig
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.AssemblyInfoInputs.cache
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.AssemblyInfo.cs
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.csproj.CoreCompileInputs.cache
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.sourcelink.json
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.dll
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\refint\Greenhouse.Shared.dll
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\Greenhouse.Shared.pdb
-C:\Projects\BunkerMTest\BunkerMTest\greenhouse-simulator\src\Greenhouse.Shared\obj\Debug\net10.0\ref\Greenhouse.Shared.dll

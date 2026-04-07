@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Diagnostics;
 using System.IO;
+using System.Numerics;
 
 /**
     * GREENHOUSE SENSORS - PUBLISHER (FASE 1)
@@ -32,11 +33,11 @@ class Programa
     static int clients = 0;
     static int timeunit = 0;
     static int time = 0;
+    static int contadorEnvios = 0;
+    static int contadorSuscripciones = 0;
+    static int totalDatosEnviadosSubs = 0;
     static async Task Main(string[] args)
     {
-
-
-
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--host") host = args[++i];
@@ -98,210 +99,119 @@ class Programa
         // Esperar a que todos los publishers terminen su ciclo de mensajes
         await Task.WhenAll(tasks);
 
+        double porcentaje_subs = contadorSuscripciones / (double)totalDatosEnviadosSubs * 100;
+        double porcentaje_pubs = contadorEnvios / (double)totalDatosEnviadosSubs * 100;
+
         Console.WriteLine($"\nTodos los publishers han terminado. Total de errores: {cuenta_errores}");
+
+        Console.WriteLine($"\nTotal mensajes que se han intentado publicar: {contadorEnvios} ({porcentaje_pubs}%).\nTotal suscripciones que se han intentado realizar: {contadorSuscripciones} ({porcentaje_subs}%).");
+        Console.WriteLine($"\nTotal de relaciones simuladas: {contadorEnvios + contadorSuscripciones}");
+        Console.WriteLine($"\nErrores en alguna de las relaciones debido a la falta de autorización: {cuenta_errores}");
+        int c = 0;
+        while (c == 0)
+        {
+
+        }
     }
 
     static async Task MyFunctionAsync(int tiempo)
     {
-
         MqttClientHelper mqttHelper = await ComprobadorDeConexiones(); //Comprueba la conexion con la cuenta del cliente y espera que cada task termine
-
 
         //Intenta diversas opciones para el cliente.
         try
         {
             int messageCount = Random.Shared.Next(5, 20);
-            int id_sensor = Random.Shared.Next(100000000, 999999999);
+
+
+            var opcion_retain = new[] { true, false };
+            var sensores = new[] { "CO2", "Humedad", "Temperatura" };
+            var estados = new[] { "", "/status" };
+            var qosLevels = new[]
+            {
+                    MqttQualityOfServiceLevel.AtMostOnce,
+                    MqttQualityOfServiceLevel.AtLeastOnce,
+                    MqttQualityOfServiceLevel.ExactlyOnce
+            };
 
             //Manda cantidad aleatoria de mensajes entre 5 y 19.
             for (int i = 0; i < messageCount; i++)
             {
+                string[] id_partes = mqttHelper.ClientId.Split('-');
+                int id_sensor = int.Parse(id_partes[^1]) + 100000000;
+
+                Interlocked.Increment(ref totalDatosEnviadosSubs); //Interlocked para evitar problemas de concurrencia al actualizar el contador desde múltiples tareas
                 var sensores_co2 = new List<Sensor_c02> { new Sensor_c02 { Id = id_sensor, Nivel_c02 = Random.Shared.Next(300, 1000) } };
                 var sensores_humedad = new List<Sensor_humedad> { new Sensor_humedad { Id = id_sensor, Humedad = Random.Shared.Next(90, 100) } };
                 var sensores_temp = new List<Sensor_Temp> { new Sensor_Temp { Id = id_sensor, Temperatura = Random.Shared.Next(15, 35) } };
                 // Opciones para formatear el JSON
                 var opciones = new JsonSerializerOptions { WriteIndented = true };
 
-                //CASO 1: Cliente se subscribe. CASO 2: Cliente publica. CASO 3: Ambos casos
-                switch (Random.Shared.Next(1, 3))
+
+                //CASO 1: Cliente se subscribe. CASO 2: Cliente publica.
+                int tipo = Random.Shared.Next(1, 3); //Random entre 1 y 2
+
+                string sensor = sensores[Random.Shared.Next(sensores.Length)];
+                string estado = estados[Random.Shared.Next(estados.Length)];
+                var qos = qosLevels[Random.Shared.Next(qosLevels.Length)];
+                var retain = opcion_retain[Random.Shared.Next(opcion_retain.Length)];
+
+                string topic = $"lab/device/{id_sensor}/{sensor}{estado}";
+
+                // Si el tipo es 1, el cliente se suscribe al topic. Si es 2, publica un mensaje en el topic.
+                if (tipo == 1)
                 {
-                    case 1:
+                    Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: {topic}");
 
-                        switch (Random.Shared.Next(1, 10)) // de 1 a 9
-                        {
-                            // QOS 0
-                            case 1:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 2:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 3:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            // QOS 1
-                            case 4:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 5:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 6:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            // QOS 2
-                            case 7:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 8:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 9:
-                                Console.WriteLine($"Subscriber {mqttHelper.ClientId} suscrito a: lab/device/{id_sensor}/");
-                                await mqttHelper.SubscribeAsync(
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                        }
-                        break;
-                    case 2:
-                        Console.WriteLine($"Publisher {mqttHelper.ClientId} publicando {messageCount} mensajes cada {tiempo / 1000} segundos...");
-                        switch (Random.Shared.Next(1, 10)) // de 1 a 9
-                        {
-                            // QOS 0
-                            case 1:
-                                await mqttHelper.PublishAsync(
+                    await mqttHelper.SubscribeAsync(
+                        topic: topic,
+                        qos: qos
+                    );
 
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 2:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 3:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtMostOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            // QOS 1
-                            case 4:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 5:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 6:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
-                                    qos: MqttQualityOfServiceLevel.AtLeastOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            // QOS 2
-                            case 7:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/CO2",
-                                    payload: JsonSerializer.Serialize(sensores_co2, opciones),
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 8:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Humedad",
-                                    payload: JsonSerializer.Serialize(sensores_humedad, opciones),
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                            case 9:
-                                await mqttHelper.PublishAsync(
-
-                                    topic: $"lab/device/{id_sensor}/Temperatura",
-                                    payload: JsonSerializer.Serialize(sensores_temp, opciones),
-                                    qos: MqttQualityOfServiceLevel.ExactlyOnce
-                                );
-                                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
-                                break;
-                        }
-                        break;
+                    Interlocked.Increment(ref contadorSuscripciones);
                 }
+                else
+                {
+                    string payload = "";
+
+                    if (estado == "/status")
+                    {
+                        payload = Random.Shared.Next(2) == 0 ? "True" : "False";
+                    }
+                    else
+                    {
+                        switch (sensor)
+                        {
+                            case "CO2":
+                                payload = JsonSerializer.Serialize(sensores_co2, opciones);
+                                break;
+                            case "Humedad":
+                                payload = JsonSerializer.Serialize(sensores_humedad, opciones);
+                                break;
+                            case "Temperatura":
+                                payload = JsonSerializer.Serialize(sensores_temp, opciones);
+                                break;
+                        }
+                        ;
+                    }
+
+                    await mqttHelper.PublishAsync(
+                        topic: topic,
+                        payload: payload,
+                        qos: qos,
+                        retain: retain
+                    );
+
+                    Interlocked.Increment(ref contadorEnvios);
+                }
+
+                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+
                 await Task.Delay(tiempo);
                 // Evitar esperar después del último mensaje
 
-
             }
+            cuenta_errores = cuenta_errores + await mqttHelper.CompruebaFin();
         }
         catch (Exception ex)
         {
@@ -316,12 +226,15 @@ class Programa
         {
             // Importante: Siempre desconectar limpiamente antes de salir
             Console.WriteLine("\n\nDesconectando del broker...");
-            await mqttHelper.DisconnectAsync();
+            //await mqttHelper.DisconnectAsync();
             Console.WriteLine("Aplicación finalizada.");
         }
 
     }
-    // ? para nullable
+    /**
+    * Función para comprobar la conexión al broker MQTT con las credenciales del cliente.
+    * Devuelve un helper MQTT conectado o null si la conexión falla.
+    */
     static async Task<MqttClientHelper?> ComprobadorDeConexiones()
     {
         id_cliente = id_cliente + 1;

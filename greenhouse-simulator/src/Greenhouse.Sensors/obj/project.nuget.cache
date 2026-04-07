@@ -10,7 +10,7 @@
     {
       "code": "NU1603",
       "level": "Warning",
-      "message": "Greenhouse.Sensors depends on MQTTnet (>= 4.3.7) but MQTTnet 4.3.7 was not found. MQTTnet 4.3.7.1207 was resolved instead.",
+      "message": "Greenhouse.Sensors depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
       "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",
       "warningLevel": 1,
       "filePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Sensors\\Greenhouse.Sensors.csproj",

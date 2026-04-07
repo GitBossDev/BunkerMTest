@@ -49,6 +49,11 @@ class Programa
                 root = new JsonObject();
             }
 
+
+            if (root["groups"] == null || root["groups"] is not JsonArray)
+            {
+                root["groups"] = new JsonArray();
+            }
             if (root["clients"] == null)
             {
                 root["clients"] = new JsonArray();

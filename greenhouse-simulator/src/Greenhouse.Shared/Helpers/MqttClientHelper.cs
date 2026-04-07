@@ -14,6 +14,7 @@ namespace Greenhouse.Shared.Helpers;
 /// </summary>
 public class MqttClientHelper
 {
+    private int errores_mqttClient = 0;
     private readonly MqttSettings _settings;
     private IMqttClient? _mqttClient;
 
@@ -32,11 +33,15 @@ public class MqttClientHelper
     /// </summary>
     public string ClientId => _settings.ClientId;
 
-    /// <summary>
-    /// Crea y conecta un cliente MQTT al broker
-    /// Este es el primer paso en cualquier comunicación MQTT
-    /// </summary>
-    /// <returns>Cliente MQTT conectado</returns>
+
+    /**
+    * Conecta al broker MQTT utilizando las opciones configuradas
+    * MqttFactory es el punto de entrada de MQTTnet, nos permite crear clientes, servidores, etc.
+    * Configura opciones de conexión como host, puerto, client ID, keep alive, timeout y credenciales
+    * Se suscribe a eventos de desconexión para detectar pérdidas de conexión
+    * Intenta conectar al broker y verifica el resultado para asegurar que la conexión fue exitosa
+    * Si la conexión falla, se captura la excepción y se muestra un mensaje de error
+    */
     public async Task<IMqttClient> ConnectAsync()
     {
         // MqttFactory es el punto de entrada de MQTTnet
@@ -102,14 +107,16 @@ public class MqttClientHelper
         }
     }
 
-    /// <summary>
-    /// Publica un mensaje en un topic específico
-    /// PUBLISHER: Esta es la operación fundamental de un "publicador" en MQTT
-    /// </summary>
-    /// <param name="topic">Canal/dirección donde publicar (ej: "test/hello")</param>
-    /// <param name="payload">Contenido del mensaje (texto, JSON, etc.)</param>
-    /// <param name="qos">Calidad de Servicio (0=At most once, 1=At least once, 2=Exactly once)</param>
-    /// <param name="retain">Si true, el broker guarda el mensaje para nuevos suscriptores</param>
+    /**
+        * Publica un mensaje en un topic específico
+        * PUBLISHER: Esta es la operación fundamental de un "publicador" en MQTT
+        * Al publicar en un topic, el broker se encargará de distribuir ese mensaje a todos
+        * los suscriptores que estén suscritos a ese topic (o subtopics si se usan comodines)
+        * El argumento qos define la calidad de servicio deseada para la publicación (0, 1, o 2)
+        * El argumento retain indica si el mensaje debe ser retenido por el broker para futuros suscriptores
+        * El resultado de la publicación se verifica para asegurarnos de que el broker aceptó el mensaje
+        * Si la publicación falla, se incrementa el contador de errores para su posterior análisis
+        */
     public async Task PublishAsync(string topic, string payload, MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce, bool retain = false)
     {
         if (_mqttClient == null || !_mqttClient.IsConnected)
@@ -128,28 +135,37 @@ public class MqttClientHelper
         // Enviar mensaje al broker
         var result = await _mqttClient.PublishAsync(message);
 
+
         // QoS 0: No hay confirmación, el mensaje "se lanza y se olvida"
         // QoS 1: El broker confirma que recibió el mensaje
         // QoS 2: Confirmación de dos pasos, garantiza entrega única
 
-        if (qos > MqttQualityOfServiceLevel.AtMostOnce)
+        if (result.ReasonCode == MqttClientPublishReasonCode.NoMatchingSubscribers)
+        {
+            Console.WriteLine("[MQTT] Error: Sin permisos para publicar en este topic (ACL).");
+        }
+        else if (qos > MqttQualityOfServiceLevel.AtMostOnce)
         {
             // Solo para QoS 1 y 2 tenemos confirmación del broker
-            Console.WriteLine($"[MQTT] Mensaje publicado en '{topic}' | QoS: {qos} | Resultado: {result.ReasonCode}");
+            Console.WriteLine($"[MQTT] Mensaje publicado en '{topic}' | QoS: {qos} | Retain: {retain} | Resultado: {result.ReasonCode}");
         }
-        else
+        else if (qos == MqttQualityOfServiceLevel.AtMostOnce)
         {
-            // QoS 0 no tiene confirmación
-            Console.WriteLine($"[MQTT] Mensaje publicado en '{topic}' | QoS: {qos} (sin confirmación)");
+            Console.WriteLine($"[MQTT] Error al publicar en '{topic}'. ReasonCode: {result.ReasonCode} (sin confirmación en QoS 0)");
+            errores_mqttClient = errores_mqttClient + 1;
         }
+
     }
 
-    /// <summary>
-    /// Se suscribe a un topic para recibir mensajes
-    /// SUBSCRIBER: Esta es la operación fundamental de un "suscriptor" en MQTT
-    /// </summary>
-    /// <param name="topic">Topic al cual suscribirse (puede usar wildcards + y #)</param>
-    /// <param name="qos">Calidad de servicio deseada</param>
+    /**
+        * Suscribe a un topic específico para recibir mensajes
+        * SUBSCRIBER: Esta es la operación fundamental de un "suscriptor" en MQTT
+        * Al suscribirse a un topic, el broker enviará todos los mensajes publicados en ese topic (y subtopics si se usan comodines)
+        * El argumento qos define la calidad de servicio deseada para la suscripción (0, 1, o 2)
+        * El resultado de la suscripción se verifica para asegurarnos de que el broker aceptó la suscripción y con qué QoS se concedió
+        * Si la suscripción falla, se incrementa el contador de errores para su posterior análisis
+        */
+
     public async Task SubscribeAsync(string topic, MqttQualityOfServiceLevel qos = MqttQualityOfServiceLevel.AtMostOnce)
     {
         if (_mqttClient == null || !_mqttClient.IsConnected)
@@ -181,15 +197,21 @@ public class MqttClientHelper
             else
             {
                 Console.WriteLine($"[MQTT] Error al suscribirse a '{topic}': {subscription.ResultCode}");
+                errores_mqttClient = errores_mqttClient + 1;
             }
         }
     }
+    public async Task<int> CompruebaFin()
+    {
+        return errores_mqttClient;
+    }
 
-    /// <summary>
-    /// Registra un manejador de mensajes recibidos
-    /// Este callback se ejecutará cada vez que llegue un mensaje a un topic suscrito
-    /// </summary>
-    /// <param name="handler">Función que procesa cada mensaje recibido</param>
+    /**
+    * Establece un manejador para recibir mensajes entrantes
+    * Este método permite al usuario definir cómo procesar los mensajes recibidos
+    * El handler se ejecutará cada vez que llegue un mensaje a cualquier topic al que estemos suscritos
+    * El argumento MqttApplicationMessageReceivedEventArgs contiene toda la información del mensaje (topic, payload, QoS, etc.)
+    */
     public void SetMessageHandler(Func<MqttApplicationMessageReceivedEventArgs, Task> handler)
     {
         if (_mqttClient == null)

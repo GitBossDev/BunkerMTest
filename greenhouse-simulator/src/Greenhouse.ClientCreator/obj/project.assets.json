@@ -79,19 +79,19 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\mdchuchon\\.nuget\\packages\\": {}
+    "C:\\Users\\rrevilla\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\Greenhouse.ClientCreator.csproj",
+      "projectUniqueName": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\greenhouse.clientcreator\\Greenhouse.ClientCreator.csproj",
       "projectName": "Greenhouse.ClientCreator",
-      "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\Greenhouse.ClientCreator.csproj",
-      "packagesPath": "C:\\Users\\mdchuchon\\.nuget\\packages\\",
-      "outputPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.ClientCreator\\obj\\",
+      "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\greenhouse.clientcreator\\Greenhouse.ClientCreator.csproj",
+      "packagesPath": "C:\\Users\\rrevilla\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\greenhouse.clientcreator\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\mdchuchon\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\rrevilla\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
@@ -103,8 +103,8 @@
         "net10.0": {
           "targetAlias": "net10.0",
           "projectReferences": {
-            "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
-              "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
+            "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj": {
+              "projectPath": "C:\\Users\\rrevilla\\Downloads\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj"
             }
           }
         }
