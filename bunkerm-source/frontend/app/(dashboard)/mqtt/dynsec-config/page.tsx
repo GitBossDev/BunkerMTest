@@ -55,7 +55,7 @@ export default function DynSecJsonPage() {
       setImportMessage(`Configuration imported${statsMsg} — broker reloading`)
       toast.success(`DynSec configuration imported${statsMsg}`)
     } catch (err) {
-      const msg = err instanceof SyntaxError ? 'File is not valid JSON' : 'Failed to import configuration'
+      const msg = err instanceof SyntaxError ? 'File is not valid JSON' : (err instanceof Error ? err.message : 'Failed to import configuration')
       setImportStatus('error')
       setImportMessage(msg)
       toast.error(msg)

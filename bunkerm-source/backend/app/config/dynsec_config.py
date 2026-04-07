@@ -351,6 +351,11 @@ async def import_dynsec_json(
             # Parse the JSON content
             imported_data = json.loads(content)
             logger.info(f"Successfully parsed JSON from uploaded file: {file.filename}")
+            # Auto-unwrap if exported via the old getDynSecJson endpoint
+            # which wraps the config in {"success": true, "data": {...}}
+            if "data" in imported_data and "defaultACLAccess" not in imported_data:
+                logger.info("Detected wrapped export format — unwrapping 'data' key")
+                imported_data = imported_data["data"]
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON format in uploaded file: {file.filename}")
             return {
