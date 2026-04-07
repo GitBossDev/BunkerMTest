@@ -244,7 +244,7 @@ class Programa
         MqttSettings settings = new MqttSettings
         {
             BrokerHost = host,  // Mosquitto está corriendo en Docker en nuestra máquina
-            BrokerPort = 1901,          // Puerto estándar MQTT
+            BrokerPort = 1900,          // Puerto estándar MQTT
             ClientId = $"greenhouse-publisher-{id_cliente}",  // ID único para este cliente
             Username = id_cliente.ToString(),  // Usuario que acabamos de añadir a dynamic-security.json
             Password = "123456",  // Contraseña en texto plano
