@@ -219,25 +219,21 @@ def generate_bridge_config(
     return "\n".join(config_lines)
 
 def restart_mosquitto() -> bool:
-    """
-    Restart the Mosquitto broker service.
-    Returns True if successful, False otherwise.
+    """Signal the standalone mosquitto container to reload its configuration.
+
+    Writes a trigger file to the shared /var/lib/mosquitto volume. The
+    mosquitto container's entrypoint script (signal relay) picks this up
+    and sends SIGHUP to mosquitto, which reloads config + bridge settings
+    without dropping existing client connections.
     """
     try:
-        # Try systemctl first
-        result = subprocess.run(
-            ['rc-service', 'mosquitto', 'restart'],
-            capture_output=True,
-            text=True
-        )
-        
-        if result.returncode == 0:
-            return True
-            
-        return result.returncode == 0
-        
+        with open("/var/lib/mosquitto/.reload", "w") as f:
+            f.write("")
+        logger.info("Sent reload signal to mosquitto standalone container")
+        return True
     except Exception as e:
-        logger.error(f"Error restarting Mosquitto: {str(e)}")
+        logger.error(f"Failed to signal mosquitto reload: {str(e)}")
+        return False
         return False
 
 

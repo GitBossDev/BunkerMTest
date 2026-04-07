@@ -1,15 +1,27 @@
 # version obsoleta eliminada (Compose v2 no la requiere)
 #
-# ARQUITECTURA: Monolito modificado
-#   - bunkerm: app principal (Next.js + FastAPI + Mosquitto + SQLite),
-#               todo en un contenedor, accesible en http://localhost:2000
-#   - postgres: reservado para Fase 3-4 (nuevos microservicios propios)
-#   - mosquitto standalone: DESACTIVADO, BunkerM ya incluye su propio broker
+# ARQUITECTURA: Broker standalone + BunkerM
+#
+#   ┌──────────────────────────────────────────────────────────────────┐
+#   │  bunkerm-network                                                 │
+#   │                                                                  │
+#   │  ┌─────────────────────────┐    ┌───────────────────────────┐   │
+#   │  │   bunkerm-platform      │───▶│   bunkerm-mosquitto        │   │◀── Dispositivos / App procesamiento
+#   │  │   (UI + APIs + Next.js) │    │   (broker MQTT standalone) │   │    (puerto 1900)
+#   │  └─────────────────────────┘    └───────────────────────────┘   │
+#   └──────────────────────────────────────────────────────────────────┘
+#
+# El broker sobrevive reinicios del monolito BunkerM (ciclos de vida independientes).
+# Volúmenes compartidos (mismas rutas en ambos contenedores):
+#   mosquitto-data  → /var/lib/mosquitto  (DynSec JSON, persistencia)
+#   mosquitto-conf  → /etc/mosquitto      (mosquitto.conf + conf.d/)
+#   mosquitto-log   → /var/log/mosquitto  (logs leídos por clientlogs)
 #
 # Para desarrollar nuevas funcionalidades:
 #   - Backend: editar bunkerm-source/backend/app/
 #   - Frontend: editar bunkerm-source/frontend/
-#   - Rebuild: .\deploy.ps1 -Action build
+#   - Rebuild BunkerM:  .\deploy.ps1 -Action build
+#   - Rebuild mosquitto: .\deploy.ps1 -Action build-mosquitto
 
 services:
   # ==========================================
@@ -45,20 +57,36 @@ services:
       - tools  # Solo inicia con: .\deploy.ps1 -Action start -WithTools
 
   # ==========================================
-  # Mosquitto standalone - DESACTIVADO
-  # BunkerM ya incluye su propio broker MQTT interno (puerto 1901 externo).
-  # Este servicio se activara solo si se necesita un broker externo dedicado.
+  # Mosquitto Standalone - Broker MQTT Independiente
+  #
+  # Ciclo de vida separado del monolito BunkerM. Los dispositivos y la
+  # app de procesamiento conectan aquí directamente (puerto 1900).
+  # BunkerM también conecta a este broker para monitorización y DynSec.
   # ==========================================
-  # mosquitto:
-  #   image: eclipse-mosquitto:latest
-  #   container_name: bunkerm-mosquitto
-  #   ...
-
-  # (Servicios bunkerm-backend y bunkerm-frontend eliminados:
-  #  BunkerM es monolitico, todo esta en el servicio 'bunkerm')
+  mosquitto:
+    build:
+      context: .
+      dockerfile: Dockerfile.mosquitto
+    container_name: bunkerm-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1900:1900"   # MQTT (TCP) — dispositivos, clientes externos y app procesamiento
+      - "9001:9001"   # MQTT sobre WebSockets (opcional)
+    volumes:
+      - mosquitto-data:/var/lib/mosquitto   # DynSec JSON + persistencia
+      - mosquitto-conf:/etc/mosquitto       # mosquitto.conf + conf.d/
+      - mosquitto-log:/var/log/mosquitto    # logs (leídos también por BunkerM/clientlogs)
+    networks:
+      - bunkerm-network
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 1900 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
 
   # ==========================================
-  # BunkerM - Plataforma IoT Completa
+  # BunkerM - Plataforma IoT Completa (monolito sin broker propio)
   # ==========================================
   bunkerm:
     build:
@@ -69,16 +97,19 @@ services:
         - NEXT_PUBLIC_API_KEY=${API_KEY:-default_api_key_replace_in_production}
     container_name: bunkerm-platform
     restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
     environment:
-      # MQTT interno (BunkerM gestiona su propio mosquitto)
-      - MQTT_BROKER=localhost
+      # MQTT — apunta al contenedor mosquitto standalone en la red interna
+      - MQTT_BROKER=mosquitto
       - MQTT_PORT=1900
       - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
-      # Variables que usan los backends Python para conectarse al broker interno
+      # Variables que usan los backends Python para conectarse al broker
       - MOSQUITTO_ADMIN_USERNAME=${MQTT_USERNAME:-bunker}
       - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-bunker}
-      - MOSQUITTO_IP=127.0.0.1
+      - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
       # Seguridad (secrets generados por generate-secrets.py)
       - JWT_SECRET=${JWT_SECRET}
@@ -89,14 +120,14 @@ services:
       - ALLOWED_ORIGINS=*
       - ALLOWED_HOSTS=*
       - RATE_LIMIT_PER_MINUTE=100
-      # Timezone (change this single variable to update all service timestamps)
+      # Timezone
       - TZ=${TZ:-Europe/Madrid}
       # Logging
       - LOG_LEVEL=INFO
       - API_LOG_FILE=/var/log/api/api_activity.log
       - BROKER_LOG_PATH=/var/log/mosquitto/mosquitto.log
       - CLIENT_LOG_PATH=/var/log/api/api_activity.log
-      # Paths internos de BunkerM
+      # Paths internos de BunkerM (compartidos con mosquitto via volúmenes)
       - DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
       - MAX_UPLOAD_SIZE=10485760
       - SSL_CERT_PATH=/app/certs/cert.pem
@@ -104,8 +135,6 @@ services:
     ports:
       # UI accesible en http://localhost:2000
       - "2000:2000"
-      # MQTT interno (1901 para no colisionar con bunkerm-mosquitto en 1900)
-      - "1901:1900"
       # APIs Backend
       - "1000:1000"  # Dynsec API
       - "1001:1001"  # Monitor API
@@ -115,12 +144,14 @@ services:
       - "1005:1005"  # Config API
       - "8100:8100"  # Smart Anomaly
     volumes:
-      # Named volumes para datos de BunkerM
+      # Datos exclusivos de BunkerM
       - bunkerm-nextjs:/nextjs/data
-      - bunkerm-mosquitto:/var/lib/mosquitto
       - bunkerm-logs-api:/var/log/api
-      - bunkerm-logs-mosquitto:/var/log/mosquitto
       - bunkerm-logs-nginx:/var/log/nginx
+      # Volúmenes compartidos con el contenedor mosquitto (mismas rutas)
+      - mosquitto-data:/var/lib/mosquitto   # DynSec JSON (config-api lo lee/escribe)
+      - mosquitto-conf:/etc/mosquitto       # mosquitto.conf (config-api lo edita)
+      - mosquitto-log:/var/log/mosquitto    # logs del broker (clientlogs los parsea)
     networks:
       - bunkerm-network
     healthcheck:
@@ -175,9 +206,11 @@ volumes:
   # Datos de postgres (Fase 3-4)
   postgres-data:
   pgadmin-data:
-  # Datos de BunkerM platform
+  # Datos exclusivos de BunkerM platform
   bunkerm-nextjs:
-  bunkerm-mosquitto:
   bunkerm-logs-api:
-  bunkerm-logs-mosquitto:
   bunkerm-logs-nginx:
+  # Volúmenes compartidos entre BunkerM y mosquitto standalone
+  mosquitto-data:    # /var/lib/mosquitto — DynSec JSON, persistencia MQTT
+  mosquitto-conf:    # /etc/mosquitto     — mosquitto.conf + conf.d/
+  mosquitto-log:     # /var/log/mosquitto — logs del broker

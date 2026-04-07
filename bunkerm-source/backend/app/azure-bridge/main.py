@@ -198,12 +198,20 @@ bridge_attempt_unsubscribe true
     return config
 
 def restart_mosquitto() -> bool:
-    """Restart Mosquitto broker"""
+    """Signal the standalone mosquitto container to reload its configuration.
+
+    Writes a trigger file to the shared /var/lib/mosquitto volume. The
+    mosquitto container's entrypoint script (signal relay) picks this up
+    and sends SIGHUP to mosquitto, which reloads config + bridge settings
+    without dropping existing client connections.
+    """
     try:
-        subprocess.run(["supervisorctl", "restart", "mosquitto"], check=True)
+        with open("/var/lib/mosquitto/.reload", "w") as f:
+            f.write("")
+        logger.info("Sent reload signal to mosquitto standalone container")
         return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to restart Mosquitto: {str(e)}")
+    except Exception as e:
+        logger.error(f"Failed to signal mosquitto reload: {str(e)}")
         return False
 
 @app.post("/api/v1/azure-bridge")

@@ -83,25 +83,44 @@ class MosquittoConfig(BaseModel):
     max_queued_messages: Optional[int] = None      # global Mosquitto setting
 
 
-# Default configuration based on the provided mosquitto.conf
+# Default configuration written when user resets mosquitto settings.
+# Paths must match the standalone container's view (same as the shared volume paths).
 DEFAULT_CONFIG = """# MQTT listener on port 1900
 listener 1900
 per_listener_settings false
 allow_anonymous false
 
-# HTTP listener for Dynamic Security Plugin on port 8080
-listener 8080
-password_file /etc/mosquitto/mosquitto_passwd
+# WebSocket listener
+listener 9001
+protocol websockets
+
 # Dynamic Security Plugin configuration
 plugin /usr/lib/mosquitto_dynamic_security.so
 plugin_opt_config_file /var/lib/mosquitto/dynamic-security.json
+
+# Custom bridge configs (written by aws-bridge / azure-bridge APIs)
+include_dir /etc/mosquitto/conf.d
+
+# Logging
 log_dest file /var/log/mosquitto/mosquitto.log
 log_type all
 log_timestamp true
+
+# Persistence
 persistence true
 persistence_location /var/lib/mosquitto/
 persistence_file mosquitto.db
 """
+
+
+def _signal_mosquitto_reload() -> None:
+    """Write the reload trigger file so the mosquitto entrypoint sends SIGHUP."""
+    try:
+        with open("/var/lib/mosquitto/.reload", "w") as _f:
+            _f.write("")
+        logger.info("Reload signal written for mosquitto standalone container")
+    except Exception as e:
+        logger.warning(f"Could not write mosquitto reload signal: {e}")
 
 
 def parse_mosquitto_conf() -> Dict[str, Any]:
@@ -324,6 +343,7 @@ async def save_mosquitto_config(
         os.chmod(MOSQUITTO_CONF_PATH, 0o644)
 
         logger.info(f"Mosquitto configuration saved successfully")
+        _signal_mosquitto_reload()
         return {
             "success": True,
             "message": "Mosquitto configuration saved successfully",
@@ -360,6 +380,7 @@ async def reset_mosquitto_config(api_key: str = Security(get_api_key)):
         os.chmod(MOSQUITTO_CONF_PATH, 0o644)
 
         logger.info(f"Mosquitto configuration reset to default")
+        _signal_mosquitto_reload()
         return {
             "success": True,
             "message": "Mosquitto configuration reset to default",

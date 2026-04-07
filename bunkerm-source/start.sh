@@ -1,16 +1,11 @@
 #!/bin/sh
 
 # Create required directories and files
-mkdir -p /var/log/mosquitto /var/log/supervisor /var/log/nginx /var/log/api /nextjs/data
-touch /var/log/mosquitto/mosquitto.log
-touch /var/log/mosquitto/mosquitto.err.log
+# Note: /var/lib/mosquitto, /etc/mosquitto, and /var/log/mosquitto are shared
+# Docker volumes managed by the bunkerm-mosquitto standalone container. BunkerM
+# mounts them read/write to access DynSec JSON, mosquitto.conf, and broker logs.
+mkdir -p /var/log/supervisor /var/log/nginx /var/log/api /nextjs/data
 touch /var/log/api/api_activity.log
-touch /etc/mosquitto/mosquitto_passwd
-chown mosquitto:mosquitto /etc/mosquitto/mosquitto_passwd
-chmod 664 /etc/mosquitto/mosquitto_passwd
-chown -R mosquitto:root /var/log/mosquitto
-chmod -R 644 /var/log/mosquitto
-chmod 755 /var/log/mosquitto
 chmod -R 755 /var/log/supervisor
 chmod -R 755 /var/log/api
 mkdir -p /nextjs/data && chmod 755 /nextjs/data

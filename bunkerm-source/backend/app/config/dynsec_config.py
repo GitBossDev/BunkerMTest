@@ -440,10 +440,16 @@ async def import_acl(request: Request, api_key: str = Security(get_api_key)):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to write ACL configuration")
 
-        # '-x' (exact match) is unreliable on some procps builds; omit it.
-        subprocess.run(['pkill', '-9', 'mosquitto'], check=False)
-        # supervisord (autorestart=true) will restart Mosquitto, which will
-        # read the freshly written dynamic-security.json.
+        # Signal the standalone mosquitto container to reload via SIGHUP.
+        # The signal relay in the mosquitto entrypoint picks up .reload,
+        # removes it, and sends SIGHUP so mosquitto re-reads dynamic-security.json.
+        # SIGHUP is safe: it reloads config without dropping client connections
+        # (unlike SIGKILL which we were using before the broker-standalone split).
+        try:
+            with open("/var/lib/mosquitto/.reload", "w") as _f:
+                _f.write("")
+        except Exception as _e:
+            logger.warning(f"Could not write reload signal: {_e}")
 
         user_count = len(merged_config["clients"]) - 1
         group_count = len(merged_config["groups"])

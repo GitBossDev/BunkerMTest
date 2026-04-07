@@ -1,0 +1,41 @@
+# =============================================================================
+# BunkerM Extended - Mosquitto Standalone Container
+#
+# Based on eclipse-mosquitto:2 (Alpine) — includes mosquitto + dynamic security
+# plugin + mosquitto-clients out of the box. No extra apk installs needed.
+#
+# Shared volumes with BunkerM container (same mount paths in both):
+#   mosquitto-data  → /var/lib/mosquitto  (DynSec JSON, persistence)
+#   mosquitto-conf  → /etc/mosquitto      (mosquitto.conf + conf.d/)
+#   mosquitto-log   → /var/log/mosquitto  (log file read by clientlogs)
+# =============================================================================
+FROM eclipse-mosquitto:2
+
+# Install only what is needed for the signal relay (sh is already present)
+# eclipse-mosquitto is Alpine-based so we can add packages if required
+USER root
+
+# Create required directories with the same paths BunkerM expects.
+# Eclipse-mosquitto defaults to /mosquitto/{config,data,log} — we override these
+# via our custom config file pointing to /var/lib/mosquitto etc.
+RUN mkdir -p \
+    /var/lib/mosquitto \
+    /var/log/mosquitto \
+    /etc/mosquitto/conf.d \
+    /tmp/mosquitto_backups && \
+    chown -R mosquitto:mosquitto /var/lib/mosquitto /var/log/mosquitto /etc/mosquitto
+
+# Copy seed files to a non-volume path so they are never hidden by volume mounts.
+# The entrypoint will read from here and copy to the shared volumes on first start.
+RUN mkdir -p /mosquitto-seeds
+COPY config/mosquitto/mosquitto.conf /mosquitto-seeds/mosquitto.conf
+COPY bunkerm-source/backend/mosquitto/dynsec/dynamic-security.json \
+     /mosquitto-seeds/dynamic-security.json
+
+# Entrypoint: seeds volumes, starts signal relay, execs mosquitto
+COPY mosquitto-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 1900 9001
+
+ENTRYPOINT ["/entrypoint.sh"]

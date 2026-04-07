@@ -5,7 +5,7 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend')]
+    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'build-mosquitto', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend', 'reload-mosquitto')]
     [string]$Action = 'setup',
     
     [Parameter(Mandatory=$false)]
@@ -280,7 +280,7 @@ function Invoke-Start {
     Write-Host ""
     Write-Info "Service URLs:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
-    Write-Host "  - MQTT:      localhost:1901" -ForegroundColor Cyan
+    Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
     
     if ($WithTools) {
         Write-Host "  - pgAdmin:   http://localhost:5050" -ForegroundColor Cyan
@@ -338,13 +338,13 @@ function Invoke-Status {
     Write-Host "Health Checks:" -ForegroundColor Yellow
     Write-Host ""
 
-    # BunkerM broker MQTT interno (puerto 1901)
-    Write-Host -NoNewline "  BunkerM MQTT (localhost:1901)... "
+    # BunkerM broker MQTT standalone (puerto 1900)
+    Write-Host -NoNewline "  Mosquitto MQTT standalone (localhost:1900)... "
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     $tcpClient = New-Object System.Net.Sockets.TcpClient
     try {
-        $tcpClient.Connect('localhost', 1901)
-        Write-Success "[OK] puerto 1901 accesible"
+        $tcpClient.Connect('localhost', 1900)
+        Write-Success "[OK] puerto 1900 accesible"
         $tcpClient.Close()
     } catch {
         Write-Host "[NO DISPONIBLE]" -ForegroundColor Red
@@ -471,12 +471,60 @@ function Invoke-Build {
     $ErrorActionPreference = $savedPref
 
     if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen construida correctamente: bunkermtest-bunkerm:latest"
+        Write-Success "[OK] Imagen BunkerM construida correctamente: bunkermtest-bunkerm:latest"
         Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
     } else {
         Write-Host "[ERROR] Fallo en el build. Revisa los logs de arriba." -ForegroundColor Red
         exit 1
     }
+    Write-Host ""
+}
+
+function Invoke-BuildMosquitto {
+    Write-Info "Construyendo imagen de Mosquitto standalone..."
+    Write-Host ""
+
+    if (-not (Test-Path "Dockerfile.mosquitto")) {
+        Write-Host "[ERROR] Dockerfile.mosquitto no encontrado en el directorio raiz." -ForegroundColor Red
+        exit 1
+    }
+
+    # Normalizar line endings en el entrypoint script
+    $entrypoint = Join-Path $PSScriptRoot "mosquitto-entrypoint.sh"
+    if (Test-Path $entrypoint) {
+        $content = [System.IO.File]::ReadAllText($entrypoint)
+        if ($content -match "`r`n") {
+            $fixed = $content -replace "`r`n", "`n"
+            [System.IO.File]::WriteAllText($entrypoint, $fixed, [System.Text.UTF8Encoding]::new($false))
+            Write-Info "  Normalizado: mosquitto-entrypoint.sh"
+        }
+    }
+
+    & $script:CE build `
+        -t bunkermtest-mosquitto:latest `
+        -f Dockerfile.mosquitto `
+        .
+    $buildExit = $LASTEXITCODE
+
+    if ($buildExit -eq 0) {
+        Write-Success "[OK] Imagen Mosquitto construida: bunkermtest-mosquitto:latest"
+    } else {
+        Write-Host "[ERROR] Fallo en el build de Mosquitto." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
+function Invoke-ReloadMosquitto {
+    Write-Info "Enviando señal de recarga a Mosquitto standalone..."
+    $mqContainer = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-mosquitto"
+    if (-not $mqContainer) {
+        Write-Host "[ERROR] El contenedor bunkerm-mosquitto no esta corriendo." -ForegroundColor Red
+        exit 1
+    }
+    # Write the reload trigger file directly in the mosquitto container
+    & $script:CE exec bunkerm-mosquitto sh -c "touch /var/lib/mosquitto/.reload"
+    Write-Success "[OK] Señal enviada. Mosquitto recargara su configuracion en ~2 segundos."
     Write-Host ""
 }
 
@@ -498,6 +546,13 @@ function Invoke-StartBunkerM {
         Write-Success "[OK] Red creada"
     }
 
+    # Iniciar mosquitto standalone primero (BunkerM depende de el)
+    Write-Info "Iniciando Mosquitto standalone..."
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d mosquitto"
+    
+    Write-Info "Esperando a que Mosquitto este listo (15 segundos)..."
+    Start-Sleep -Seconds 15
+
     # Iniciar solo el servicio bunkerm (BunkerM usa SQLite internamente, postgres no es necesario)
     Write-Info "Iniciando BunkerM..."
     Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d bunkerm"
@@ -511,7 +566,7 @@ function Invoke-StartBunkerM {
     Write-Host ""
     Write-Info "URLs de acceso:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
-    Write-Host "  - MQTT:      localhost:1901" -ForegroundColor Cyan
+    Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
     Write-Host "  - Dynsec API: http://localhost:1000" -ForegroundColor Cyan
     Write-Host "  - Monitor API: http://localhost:1001" -ForegroundColor Cyan
     Write-Host "  - Config API: http://localhost:1005" -ForegroundColor Cyan
@@ -525,10 +580,10 @@ function Invoke-StopBunkerM {
     Write-Info "Deteniendo BunkerM platform..."
     Write-Host ""
     
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop bunkerm"
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop bunkerm mosquitto"
 
     Write-Host ""
-    Write-Success "[OK] BunkerM detenido!"
+    Write-Success "[OK] BunkerM y Mosquitto detenidos!"
     Write-Host ""
 }
 
@@ -644,22 +699,23 @@ Show-Banner
 Test-Prerequisites
 
 switch ($Action) {
-    'setup' { Invoke-Setup }
-    'start' { Invoke-Start }
-    'stop' { Invoke-Stop }
-    'restart' { Invoke-Restart }
-    'status' { Invoke-Status }
-    'logs' { Invoke-Logs }
-    'clean' { Invoke-Clean }
-    'build' { Invoke-Build }
-    'start-bunkerm' { Invoke-StartBunkerM }
-    'stop-bunkerm'  { Invoke-StopBunkerM }
-    'patch-frontend'{ Invoke-PatchFrontend }
-    'patch-backend' { Invoke-PatchBackend }
-    'stop-bunkerm' { Invoke-StopBunkerM }
+    'setup'            { Invoke-Setup }
+    'start'            { Invoke-Start }
+    'stop'             { Invoke-Stop }
+    'restart'          { Invoke-Restart }
+    'status'           { Invoke-Status }
+    'logs'             { Invoke-Logs }
+    'clean'            { Invoke-Clean }
+    'build'            { Invoke-Build }
+    'build-mosquitto'  { Invoke-BuildMosquitto }
+    'start-bunkerm'    { Invoke-StartBunkerM }
+    'stop-bunkerm'     { Invoke-StopBunkerM }
+    'patch-frontend'   { Invoke-PatchFrontend }
+    'patch-backend'    { Invoke-PatchBackend }
+    'reload-mosquitto' { Invoke-ReloadMosquitto }
     default {
         Write-Error "Unknown action: $Action"
-        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, start-bunkerm, stop-bunkerm"
+        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, build-mosquitto, start-bunkerm, stop-bunkerm, patch-frontend, patch-backend, reload-mosquitto"
     }
 }
 

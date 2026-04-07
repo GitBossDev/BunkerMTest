@@ -127,12 +127,12 @@ COPY default-next.conf /etc/nginx/conf.d/default.conf
 # Configure supervisord
 COPY supervisord-next.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Copy backend config and source
-COPY backend/mosquitto/config/mosquitto.conf /etc/mosquitto/mosquitto.conf
-COPY backend/etc/mosquitto/conf.d/ /etc/mosquitto/conf.d/
+# Copy backend source
+# Note: mosquitto.conf, conf.d/, and dynamic-security.json are NOT copied here.
+# They live on shared Docker volumes (mosquitto-conf, mosquitto-data) managed by
+# the bunkerm-mosquitto standalone container. BunkerM mounts those same volumes.
 COPY backend/app /app
 RUN touch /app/monitor/__init__.py
-COPY backend/mosquitto/dynsec/dynamic-security.json /var/lib/mosquitto/dynamic-security.json
 
 # Copy config-env script
 COPY config-env.sh /docker-entrypoint.d/
@@ -143,18 +143,11 @@ COPY --from=nextjs-build /frontend/.next/standalone /nextjs/
 COPY --from=nextjs-build /frontend/.next/static /nextjs/.next/static
 
 # Set permissions
-RUN chown -R mosquitto:mosquitto /var/lib/mosquitto && \
-    chmod -R 775 /var/lib/mosquitto && \
-    chown -R root:root /app && \
+# Note: /var/lib/mosquitto, /etc/mosquitto, /var/log/mosquitto are shared volumes
+# managed by the mosquitto standalone container. BunkerM only needs the directories
+# to exist as mount points; the mosquitto container handles their permissions.
+RUN chown -R root:root /app && \
     chmod -R 755 /app && \
-    chown mosquitto:mosquitto /etc/mosquitto/mosquitto_passwd && \
-    chmod 664 /etc/mosquitto/mosquitto_passwd && \
-    chown -R mosquitto:root /var/log/mosquitto && \
-    chmod -R 644 /var/log/mosquitto && \
-    chmod 755 /var/log/mosquitto && \
-    chown -R mosquitto:mosquitto /etc/mosquitto && \
-    chmod -R 755 /etc/mosquitto && \
-    chmod 644 /etc/mosquitto/mosquitto.conf && \
     chmod -R 755 /var/log/supervisor && \
     chmod -R 755 /var/log/api && \
     chmod -R 755 /nextjs && \
@@ -162,7 +155,9 @@ RUN chown -R mosquitto:mosquitto /var/lib/mosquitto && \
     chmod 755 /tmp/dynsec_backups
 
 # Environment defaults
-ENV MQTT_BROKER=localhost \
+# MQTT_BROKER / MOSQUITTO_IP point to the standalone container name.
+# These are overridden by docker-compose.dev.yml at runtime.
+ENV MQTT_BROKER=mosquitto \
     MQTT_PORT=1900 \
     MQTT_USERNAME=bunker \
     MQTT_PASSWORD=bunker \
