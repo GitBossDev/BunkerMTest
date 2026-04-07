@@ -70,8 +70,8 @@ export default function DynSecJsonPage() {
       setImportStatus('success')
       const stats = result.stats
       const statsMsg = stats ? ` (${stats.users ?? stats.clients ?? 0} users, ${stats.roles ?? 0} roles)` : ''
-      setImportMessage(`Configuration imported${statsMsg} — broker reloading`)
-      toast.success(`DynSec configuration imported${statsMsg}`)
+      setImportMessage(`Configuration imported${statsMsg} — broker restarting, please wait ~10 seconds`)
+      toast.success(`DynSec configuration imported${statsMsg}. Broker is restarting.`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to import configuration'
       setImportStatus('error')

@@ -388,14 +388,17 @@ async def import_dynsec_json(
             group_count = len(merged_config["groups"])
             role_count = len(merged_config["roles"]) - 1    # Subtract admin role
 
-            # Signal the standalone mosquitto container to reload DynSec immediately.
-            # Writing .reload triggers the entrypoint's signal relay which sends
-            # SIGHUP — mosquitto re-reads dynamic-security.json without dropping connections.
+            # El plugin DynSec de Mosquitto solo relee su JSON en el arranque;
+            # SIGHUP (via .reload) NO actualiza el estado en memoria de DynSec.
+            # Por eso escribimos .dynsec-reload: el signal relay enviara SIGKILL
+            # al proceso mosquitto (sin que guarde su estado antiguo en disco) y
+            # el contenedor se reinicia automaticamente gracias a restart:unless-stopped.
+            # Asi mosquitto arranca leyendo el JSON recien importado.
             try:
-                with open("/var/lib/mosquitto/.reload", "w") as _f:
+                with open("/var/lib/mosquitto/.dynsec-reload", "w") as _f:
                     _f.write("")
             except Exception as _e:
-                logger.warning(f"Could not write mosquitto reload signal: {_e}")
+                logger.warning(f"Could not write dynsec reload signal: {_e}")
 
             logger.info(f"Successfully imported configuration with {user_count} users, {group_count} groups, {role_count} roles")
             return {
@@ -454,16 +457,17 @@ async def import_acl(request: Request, api_key: str = Security(get_api_key)):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to write ACL configuration")
 
-        # Signal the standalone mosquitto container to reload via SIGHUP.
-        # The signal relay in the mosquitto entrypoint picks up .reload,
-        # removes it, and sends SIGHUP so mosquitto re-reads dynamic-security.json.
-        # SIGHUP is safe: it reloads config without dropping client connections
-        # (unlike SIGKILL which we were using before the broker-standalone split).
+        # El plugin DynSec de Mosquitto solo relee su JSON en el arranque;
+        # SIGHUP (via .reload) NO actualiza el estado en memoria de DynSec.
+        # Por eso escribimos .dynsec-reload: el signal relay enviara SIGKILL
+        # al proceso mosquitto (sin que guarde su estado antiguo en disco) y
+        # el contenedor se reinicia automaticamente gracias a restart:unless-stopped.
+        # Asi mosquitto arranca leyendo el JSON recien importado.
         try:
-            with open("/var/lib/mosquitto/.reload", "w") as _f:
+            with open("/var/lib/mosquitto/.dynsec-reload", "w") as _f:
                 _f.write("")
         except Exception as _e:
-            logger.warning(f"Could not write reload signal: {_e}")
+            logger.warning(f"Could not write dynsec reload signal: {_e}")
 
         user_count = len(merged_config["clients"]) - 1
         group_count = len(merged_config["groups"])

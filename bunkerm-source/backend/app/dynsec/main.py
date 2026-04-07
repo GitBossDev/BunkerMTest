@@ -422,77 +422,64 @@ async def get_clients_disabled_map(
 
 
 # Get Single Client Endpoint
+# Get Single Client Endpoint — lee dynamic-security.json directamente
+# (consistente con list_clients). Evita mosquitto_ctrl que refleja el estado
+# en memoria de Mosquitto, que puede estar desincronizado tras una importacion.
 @app.get("/api/v1/clients/{username}")
 async def get_client(
     username: str,
     request: Request,
     api_key: str = Security(get_api_key),
 ):
-    """Get details for a specific client"""
+    """Get details for a specific client, reading from dynamic-security.json."""
     await log_request(request)
     logger.info(f"Fetching details for client: {username}")
 
     try:
-        command = ["getClient", username]
-        success, result = execute_mosquitto_command(command)
+        dynsec_path = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+        with open(dynsec_path, "r") as f:
+            data = json.load(f)
 
-        if not success:
-            logger.error(f"Client not found: {username}")
+        clients = data.get("clients", [])
+        client_data = next((c for c in clients if c.get("username") == username), None)
+
+        if client_data is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Client {username} not found",
             )
 
-        # Parse the output
-        try:
-            lines = result.split("\n")
-            client_info = {"username": "", "clientid": "", "disabled": False, "roles": [], "groups": []}
+        client_info = {
+            "username": client_data.get("username", ""),
+            "clientid": client_data.get("clientid", ""),
+            "disabled": client_data.get("disabled", False),
+            "roles": [
+                {
+                    "name": r["rolename"] if isinstance(r, dict) else r,
+                    "priority": str(r.get("priority", 1)) if isinstance(r, dict) else "1",
+                }
+                for r in client_data.get("roles", [])
+            ],
+            "groups": [
+                {
+                    "name": g["groupname"] if isinstance(g, dict) else g,
+                    "priority": str(g.get("priority", 1)) if isinstance(g, dict) else "1",
+                }
+                for g in client_data.get("groups", [])
+            ],
+        }
 
-            for line in lines:
-                line = line.strip()
-                if line.startswith("Username:"):
-                    client_info["username"] = line.split("Username:")[1].strip()
-                elif line.startswith("Clientid:"):
-                    client_info["clientid"] = line.split("Clientid:")[1].strip()
-                elif line.startswith("Disabled:"):
-                    client_info["disabled"] = line.split("Disabled:")[1].strip().lower() == "true"
-                elif line.startswith("Roles:"):
-                    role_info = line.split("Roles:")[1].strip()
-                    if role_info:
-                        role_parts = role_info.split("(")
-                        role_name = role_parts[0].strip()
-                        priority = (
-                            role_parts[1].split(")")[0].replace("priority:", "").strip()
-                        )
-                        client_info["roles"].append(
-                            {"name": role_name, "priority": priority}
-                        )
-                elif "priority:" in line:
-                    if "(" in line and ")" in line:
-                        parts = line.strip().split("(")
-                        name = parts[0].strip()
-                        priority = (
-                            parts[1].split(")")[0].replace("priority:", "").strip()
-                        )
-                        if name:
-                            if "Groups:" in line:
-                                client_info["groups"] = []
-                            client_info["groups"].append(
-                                {"name": name, "priority": priority}
-                            )
-
-            logger.info(f"Successfully retrieved details for client: {username}")
-            return {"client": client_info}
-
-        except Exception as parse_error:
-            logger.error(f"Error parsing client details: {str(parse_error)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Error parsing client details: {str(parse_error)}",
-            )
+        logger.info(f"Successfully retrieved details for client: {username}")
+        return {"client": client_info}
 
     except HTTPException:
         raise
+    except FileNotFoundError:
+        logger.error(f"dynamic-security.json not found")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Dynamic security config not found",
+        )
     except Exception as e:
         logger.error(f"Unexpected error getting client {username}: {str(e)}")
         raise HTTPException(
