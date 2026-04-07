@@ -52,16 +52,29 @@ _MOSQUITTO_LOG_KEYWORDS = frozenset([
     'New', 'Sending', 'Received', 'Client', 'Warning', 'Config',
     'Loading', 'Opening', 'No', 'mosquitto', 'Error', 'Notice',
     'Socket', 'Timeout', 'Plugin', 'Saving', 'Using', 'Log',
+    'Restored', 'Bridge', 'Persistence', 'TLS', 'Websockets', 'Info:',
 ])
 
 
-def _ts_to_iso(unix_ts: str) -> str:
-    """Convert a Unix timestamp string to a UTC ISO 8601 string.
+# Captures both Unix timestamps (digits) and Mosquitto 2.1.2 ISO 8601 timestamps.
+_TS_CAPTURE = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)'
+# Pre-compiled for use in parse_subscription_log (no group needed there)
+_TS_RE = re.compile(r'^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)$')
+
+
+def _ts_to_iso(ts: str) -> str:
+    """Convert a Unix or ISO 8601 timestamp string to a UTC ISO 8601 string.
 
     Always produces UTC+00:00 output so the browser can convert to the
     user's local timezone correctly via new Date(...).
     """
-    return datetime.fromtimestamp(int(unix_ts), tz=timezone.utc).isoformat()
+    if ts.isdigit():
+        return datetime.fromtimestamp(int(ts), tz=timezone.utc).isoformat()
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        return ts
 
 
 class MQTTEvent(BaseModel):
@@ -128,7 +141,7 @@ class MQTTMonitor:
 
     def _parse_raw_new_connection(self, log_line: str) -> bool:
         """Track 'New connection from IP:PORT' for auth-failure attribution."""
-        m = re.match(r"(\d+): New connection from (\d+\.\d+\.\d+\.\d+):(\d+) on port", log_line)
+        m = re.match(_TS_CAPTURE + r": New connection from (\d+\.\d+\.\d+\.\d+):(\d+) on port", log_line)
         if not m:
             return False
         ts, ip, port = m.groups()
@@ -138,13 +151,16 @@ class MQTTMonitor:
         return True
 
     def parse_connection_log(self, log_line: str) -> Optional[MQTTEvent]:
-        pattern = (r"(\d+): New client connected from (\d+\.\d+\.\d+\.\d+):(\d+)"
-                   r" as (\S+) \(p(\d+), c(\d+), k(\d+), u'([^']+)'\)")
+        # Username is optional in Mosquitto 2.1.2 for clients without credentials
+        pattern = (_TS_CAPTURE + r": New client connected from (\d+\.\d+\.\d+\.\d+):(\d+)"
+                   r" as (\S+) \(p(\d+), c(\d+), k(\d+)(?:, u'([^']+)')?\)")
         m = re.match(pattern, log_line)
         if not m:
             return None
 
         ts, ip, port, client_id, protocol, clean, keep_alive, username = m.groups()
+        if username is None:
+            username = client_id
         protocol_versions = {"3": "3.1", "4": "3.1.1", "5": "5.0"}
 
         event = MQTTEvent(
@@ -194,7 +210,8 @@ class MQTTMonitor:
         if "not authorised" in log_line:
             return None
 
-        m = re.match(r"(\d+): Client (\S+) (?:disconnected|closed its connection)", log_line)
+        # Mosquitto 2.1.2 format: "Client X [IP:PORT] disconnected: reason."
+        m = re.match(_TS_CAPTURE + r": Client (\S+)(?: \[[^\]]+\])? (?:disconnected|closed its connection)", log_line)
         if not m:
             return None
 
@@ -223,7 +240,8 @@ class MQTTMonitor:
 
     def parse_auth_failure_log(self, log_line: str) -> Optional[MQTTEvent]:
         """Parse 'Client X disconnected, not authorised.' lines."""
-        m = re.match(r"(\d+): Client (\S+) disconnected, not authorised\.", log_line)
+        # Mosquitto 2.1.2 may include [IP:PORT] before "disconnected"
+        m = re.match(_TS_CAPTURE + r": Client (\S+)(?: \[[^\]]+\])? disconnected, not authorised\.", log_line)
         if not m:
             return None
 
@@ -257,7 +275,7 @@ class MQTTMonitor:
         if ": " not in log_line:
             return None
         ts_str, content = log_line.split(": ", 1)
-        if not ts_str.isdigit():
+        if not _TS_RE.match(ts_str):
             return None
 
         parts = content.split()
@@ -269,9 +287,7 @@ class MQTTMonitor:
             return None
         if client_id in _MOSQUITTO_LOG_KEYWORDS:
             return None
-        # Topic must look like an MQTT topic (contains / or starts with $)
-        if "/" not in topic and not topic.startswith("$"):
-            return None
+        # Accept any non-empty topic (bare names, wildcards # / +, and $SYS topics are all valid)
 
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
@@ -299,7 +315,7 @@ class MQTTMonitor:
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
         """Parse PUBLISH log entries, deduplicated by (client_id, topic)."""
-        pattern = (r"(\d+): Received PUBLISH from (\S+)"
+        pattern = (_TS_CAPTURE + r": Received PUBLISH from (\S+)"
                    r" \(d\d, q(\d), r\d, m\d+, '([^']+)', \.\.\. \((\d+) bytes\)\)")
         m = re.match(pattern, log_line)
         if not m:
@@ -483,6 +499,24 @@ def monitor_mosquitto_logs():
         )
     except Exception as exc:
         print(f"Startup replay failed: {exc}")
+
+    # Replay subscribe events so _subscription_counts is pre-populated.
+    # Subscribe log format: "<timestamp>: <client_id> <qos> <topic>"
+    # Exactly 3 tokens after the ": " separator; topic can't contain spaces.
+    try:
+        result_sub = subprocess.run(
+            ["grep", "-E", r": [^ ]+ [012] [^ ]+$", log_file],
+            capture_output=True, text=True,
+        )
+        for replay_line in result_sub.stdout.splitlines():
+            replay_line = replay_line.strip()
+            if replay_line:
+                mqtt_monitor.process_line(replay_line, replay=True)
+        print(
+            f"Startup replay: {len(mqtt_monitor._subscription_counts)} distinct subscribed topics."
+        )
+    except Exception as exc:
+        print(f"Startup subscribe replay failed: {exc}")
 
     process = subprocess.Popen(
         ["tail", "-f", log_file],

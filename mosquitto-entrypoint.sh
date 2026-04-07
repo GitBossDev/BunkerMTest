@@ -53,7 +53,10 @@ MOSQUITTO_PID=""
 
 start_mosquitto() {
     echo "[supervisor] Iniciando mosquitto..."
-    mosquitto -c /etc/mosquitto/mosquitto.conf &
+    # Redirect stdout (log_dest stdout) to the shared log file so clientlogs
+    # can tail it. Shell redirect is more reliable than log_dest file after
+    # container restarts. Supervisor messages still go to container stdout.
+    mosquitto -c /etc/mosquitto/mosquitto.conf >> /var/log/mosquitto/mosquitto.log 2>&1 &
     MOSQUITTO_PID=$!
     echo "[supervisor] Mosquitto iniciado (PID $MOSQUITTO_PID)"
 }

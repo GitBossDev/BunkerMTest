@@ -121,6 +121,9 @@ MONITORED_TOPICS = {
     # Broker info (string)
     "$SYS/broker/version":                    "broker_version",
     "$SYS/broker/uptime":                     "broker_uptime",
+    # Heap memory (bytes) — available cross-container via MQTT
+    "$SYS/broker/heap/current":               "heap_current",
+    "$SYS/broker/heap/maximum":               "heap_maximum",
 }
 
 # Topics whose payload is a float rate value
@@ -475,6 +478,9 @@ class MQTTStats:
         # Broker info
         self.broker_version = ""
         self.broker_uptime = ""
+        # Heap memory from $SYS (available cross-container; replaces psutil)
+        self.heap_current = 0
+        self.heap_maximum = 0
         # Latency round-trip
         self.latency_ms: float = -1.0
         self._ping_sent_at: float = 0.0
@@ -1148,24 +1154,27 @@ async def get_health_stats(request: Request):
 
 @app.get("/api/v1/stats/resources", dependencies=[Depends(get_api_key)])
 async def get_resource_stats(request: Request):
-    """Mosquitto process resource usage: CPU%, RSS memory."""
+    """Mosquitto process resource usage. CPU% is only available when Mosquitto
+    runs in the same container; heap memory is always available via $SYS topics."""
     await log_request(request)
+    cpu_pct = None
     try:
         import psutil
         procs = [p for p in psutil.process_iter(['name', 'pid', 'cpu_percent', 'memory_info'])
                  if 'mosquitto' in (p.info.get('name') or '')]
         if procs:
             proc = procs[0]
-            cpu = proc.cpu_percent(interval=0.1)
-            mem = proc.memory_info()
-            return {
-                "mosquitto_cpu_pct": round(cpu, 1),
-                "mosquitto_rss_bytes": mem.rss,
-                "mosquitto_vms_bytes": mem.vms,
-            }
+            cpu_pct = round(proc.cpu_percent(interval=0.1), 1)
     except Exception as _e:
         logger.warning("Resource stats error: %s", _e)
-    return {"mosquitto_cpu_pct": None, "mosquitto_rss_bytes": None, "mosquitto_vms_bytes": None}
+    with mqtt_stats._lock:
+        heap_cur = mqtt_stats.heap_current
+        heap_max = mqtt_stats.heap_maximum
+    return {
+        "mosquitto_cpu_pct": cpu_pct,
+        "mosquitto_rss_bytes": heap_cur if heap_cur > 0 else None,
+        "mosquitto_vms_bytes": heap_max if heap_max > 0 else None,
+    }
 
 @app.get("/api/v1/stats/qos", dependencies=[Depends(get_api_key)])
 async def get_qos_stats(request: Request):

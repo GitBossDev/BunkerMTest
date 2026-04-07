@@ -74,8 +74,8 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
               <p className="font-semibold text-foreground mb-1">Broker Information</p>
               <TipRow label="Version" text="Eclipse Mosquitto version installed in the container." />
               <TipRow label="Uptime" text="How long the Mosquitto process has been running without a restart. An unexpected restart may indicate an error." />
-              <TipRow label="CPU" text="Mosquitto process CPU usage, sampled every 10 s. Shows effort needed to route messages." />
-              <TipRow label="RAM (RSS)" text="Resident set size — physical memory held by Mosquitto right now. Grows with retained messages and large session stores." />
+              <TipRow label="CPU" text="Mosquitto process CPU usage, sampled every 10 s. Only available when broker runs in the same container." />
+              <TipRow label="Heap" text="Mosquitto heap memory allocation reported by the broker via $SYS/broker/heap/current. Grows with retained messages and large session stores." />
               <TipRow label="Status icon" text="Green = monitor connected to the broker · Red = no connection (the broker may be restarting)." />
             </>
           } />
@@ -91,8 +91,8 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
         <div className="grid grid-cols-2 gap-x-6 gap-y-3">
           <Stat icon={<Server className="h-3.5 w-3.5 text-slate-400" />}       label="Version"   value={version} />
           <Stat icon={<Clock className="h-3.5 w-3.5 text-slate-400" />}        label="Uptime"    value={uptime} />
-          <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}          label="CPU"       value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
-          <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />}  label="RAM (RSS)" value={fmtBytes(rss)} />
+          <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}          label="CPU"   value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
+          <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />}  label="Heap"  value={fmtBytes(rss)} />
         </div>
       </CardContent>
     </Card>
