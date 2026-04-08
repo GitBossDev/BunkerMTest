@@ -249,6 +249,22 @@ export const monitorApi = {
   acknowledgeAlert: (id: string) =>
     request(buildUrl(MONITOR_API_URL, `/alerts/broker/${encodeURIComponent(id)}/acknowledge`), { method: 'POST' }),
 
+  getAlertConfig: () =>
+    request<{
+      broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+      reconnect_loop_count: number; reconnect_loop_window_s: number;
+      auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
+    }>(buildUrl(MONITOR_API_URL, '/alerts/config')),
+  saveAlertConfig: (cfg: {
+    broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+    reconnect_loop_count: number; reconnect_loop_window_s: number;
+    auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
+  }) =>
+    request<{ status: string }>(buildUrl(MONITOR_API_URL, '/alerts/config'), {
+      method: 'PUT',
+      body: JSON.stringify(cfg),
+    }),
+
   // Logs — routed through Next.js proxy so the API key is injected server-side
   getBrokerLogs: () => request<{ logs: string[] }>(buildUrl(CONFIG_API_URL, '/broker')),
   getClientLogs: () => request<{ logs: string[] }>(buildUrl(CLIENTLOGS_API_URL, '/events')),

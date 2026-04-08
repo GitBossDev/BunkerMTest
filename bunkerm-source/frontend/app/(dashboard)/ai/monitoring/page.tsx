@@ -11,11 +11,17 @@ import {
   History,
   ChevronDown,
   ShieldAlert,
+  SlidersHorizontal,
+  Save,
+  Loader2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 import {
   Select,
   SelectContent,
@@ -99,7 +105,65 @@ export default function MonitoringPage() {
   const [severityFilter, setSeverityFilter] = useState<string>('all')
   const [typeFilter, setTypeFilter] = useState<string>('all')
 
+  // ── Alert thresholds config ───────────────────────────────────────────────
+
+  type AlertCfg = {
+    broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+    reconnect_loop_count: number; reconnect_loop_window_s: number;
+    auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
+  }
+  const [alertCfg, setAlertCfg] = useState<AlertCfg | null>(null)
+  const [cfgDraft, setCfgDraft] = useState<AlertCfg | null>(null)
+  const [cfgLoading, setCfgLoading] = useState(true)
+  const [cfgSaving, setCfgSaving] = useState(false)
+
   // ── Fetch active alerts ───────────────────────────────────────────────────
+
+  const fetchAlertConfig = useCallback(async () => {
+    try {
+      const cfg = await monitorApi.getAlertConfig()
+      setAlertCfg(cfg)
+      setCfgDraft(cfg)
+    } catch {
+      // silently ignore — thresholds section will show loading state
+    } finally {
+      setCfgLoading(false)
+    }
+  }, [])
+
+  const handleSaveConfig = async () => {
+    if (!cfgDraft) return
+    setCfgSaving(true)
+    try {
+      await monitorApi.saveAlertConfig(cfgDraft)
+      setAlertCfg(cfgDraft)
+      toast.success('Alert thresholds saved')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save thresholds')
+    } finally {
+      setCfgSaving(false)
+    }
+  }
+
+  const cfgField = (key: keyof AlertCfg, label: string, unit?: string, hint?: string) => (
+    <div className="flex flex-col gap-1">
+      <Label htmlFor={key} className="text-xs font-medium">{label}</Label>
+      <div className="flex items-center gap-1.5">
+        <Input
+          id={key}
+          type="number"
+          min={1}
+          className="h-8 w-28 text-sm"
+          value={cfgDraft?.[key] ?? ''}
+          onChange={(e) => setCfgDraft((d) => d ? { ...d, [key]: Number(e.target.value) } : d)}
+        />
+        {unit && <span className="text-xs text-muted-foreground">{unit}</span>}
+      </div>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  )
+
+  const cfgIsDirty = JSON.stringify(alertCfg) !== JSON.stringify(cfgDraft)
 
   const fetchAlerts = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setAlertsRefreshing(true)
@@ -130,12 +194,13 @@ export default function MonitoringPage() {
   useEffect(() => {
     fetchAlerts(true)
     fetchHistory()
+    fetchAlertConfig()
     const interval = setInterval(() => {
       fetchAlerts()
       fetchHistory()
     }, 30_000)
     return () => clearInterval(interval)
-  }, [fetchAlerts, fetchHistory])
+  }, [fetchAlerts, fetchHistory, fetchAlertConfig])
 
   // ── Acknowledge ───────────────────────────────────────────────────────────
 
@@ -185,6 +250,90 @@ export default function MonitoringPage() {
           Refresh
         </Button>
       </div>
+
+      {/* ── Alert thresholds ─────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+              Alert Thresholds
+            </CardTitle>
+            <Button
+              size="sm"
+              onClick={handleSaveConfig}
+              disabled={!cfgIsDirty || cfgSaving || cfgLoading}
+            >
+              {cfgSaving
+                ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving…</>
+                : <><Save className="h-3.5 w-3.5 mr-1.5" />Save</>}
+            </Button>
+          </div>
+          <CardDescription className="text-xs">
+            Thresholds persist across restarts and take effect within 30 s. Env-var values are used as defaults until saved here.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {cfgLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {/* Broker down */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Broker Down</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {cfgField('broker_down_grace_polls', 'Grace polls', 'polls',
+                    'Consecutive missed $SYS polls before triggering the Broker Down alert.')}
+                </div>
+              </div>
+              <Separator />
+              {/* Capacity */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Connection Capacity</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {cfgField('client_capacity_pct', 'Capacity threshold', '%',
+                    'Alert when connected clients reach this % of max_connections.')}
+                  {cfgField('client_max_default', 'Max clients (fallback)', 'clients',
+                    'Used when max_connections is unlimited (-1) in mosquitto.conf.')}
+                </div>
+              </div>
+              <Separator />
+              {/* Reconnect loop */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Reconnect Loop</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {cfgField('reconnect_loop_count', 'Reconnects', 'times',
+                    'Number of reconnects from the same client within the window.')}
+                  {cfgField('reconnect_loop_window_s', 'Window', 'seconds',
+                    'Sliding time window to count reconnect events.')}
+                </div>
+              </div>
+              <Separator />
+              {/* Auth failures */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Auth Failures</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {cfgField('auth_fail_count', 'Failures', 'attempts',
+                    'Failed authentication attempts within the window before alerting.')}
+                  {cfgField('auth_fail_window_s', 'Window', 'seconds',
+                    'Sliding time window to count auth failures.')}
+                </div>
+              </div>
+              <Separator />
+              {/* Cooldown */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">General</p>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
+                  {cfgField('cooldown_minutes', 'Alert cooldown', 'minutes',
+                    'Minimum time before the same alert type can fire again after being acknowledged.')}
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── Active alerts ────────────────────────────────────────────────── */}
       <Card>

@@ -142,6 +142,54 @@ _STRING_TOPICS = {
     "$SYS/broker/uptime",
 }
 
+# ── Alert configuration (persisted to JSON, env vars are fallback defaults) ────
+
+_ALERT_CONFIG_PATH = "/nextjs/data/alert_config.json"
+_alert_config_cache: dict = {}
+_alert_config_ts: float = 0.0
+
+
+def _default_alert_config() -> dict:
+    """Build the default config from env vars (backwards-compatible fallback)."""
+    return {
+        "broker_down_grace_polls":  int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3")),
+        "client_capacity_pct":      float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80")),
+        "client_max_default":       int(os.getenv("ALERT_CLIENT_MAX_DEFAULT", "10000")),
+        "reconnect_loop_count":     int(os.getenv("ALERT_RECONNECT_LOOP_COUNT", "5")),
+        "reconnect_loop_window_s":  int(os.getenv("ALERT_RECONNECT_LOOP_WINDOW_S", "60")),
+        "auth_fail_count":          int(os.getenv("ALERT_AUTH_FAIL_COUNT", "5")),
+        "auth_fail_window_s":       int(os.getenv("ALERT_AUTH_FAIL_WINDOW_S", "60")),
+        "cooldown_minutes":         int(os.getenv("ALERT_COOLDOWN_MINUTES", "15")),
+    }
+
+
+def _read_alert_config() -> dict:
+    """Read alert thresholds from JSON file, cached for 30 s. Falls back to env vars."""
+    global _alert_config_cache, _alert_config_ts
+    now = time.time()
+    if _alert_config_cache and now - _alert_config_ts < 30.0:
+        return _alert_config_cache
+    try:
+        with open(_ALERT_CONFIG_PATH) as _f:
+            data = json.load(_f)
+        cfg = {**_default_alert_config(), **data}
+    except (FileNotFoundError, json.JSONDecodeError):
+        cfg = _default_alert_config()
+    _alert_config_cache = cfg
+    _alert_config_ts = now
+    return cfg
+
+
+def _save_alert_config(cfg: dict) -> None:
+    """Persist alert thresholds to JSON file and invalidate cache."""
+    global _alert_config_cache, _alert_config_ts
+    os.makedirs(os.path.dirname(_ALERT_CONFIG_PATH), exist_ok=True)
+    with open(_ALERT_CONFIG_PATH, "w") as _f:
+        json.dump(cfg, _f, indent=2)
+    _alert_config_cache = cfg
+    _alert_config_ts = time.time()
+
+
 _max_connections_cache: dict = {"value": 0, "ts": 0.0}
 
 def _read_max_connections() -> int:
@@ -235,7 +283,7 @@ class AlertEngine:
             return list(self._alert_history)
 
     def acknowledge(self, alert_id: str) -> bool:
-        cooldown_secs = int(os.getenv("ALERT_COOLDOWN_MINUTES", "15")) * 60
+        cooldown_secs = _read_alert_config()["cooldown_minutes"] * 60
         with self._lock:
             for key, alert in list(self._active.items()):
                 if alert["id"] == alert_id:
@@ -253,9 +301,10 @@ class AlertEngine:
 
     def evaluate(self, stats: dict, topics: Optional[List[dict]] = None):
         """Called periodically with the latest stats snapshot."""
-        grace_polls   = int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3"))
-        cap_pct       = float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80"))
-        max_clients   = float(_read_max_connections())
+        cfg           = _read_alert_config()
+        grace_polls   = cfg["broker_down_grace_polls"]
+        cap_pct       = cfg["client_capacity_pct"]
+        max_clients   = float(_read_max_connections() or cfg["client_max_default"])
         # Load watchlist before taking the lock (involves file I/O)
         watchlist = self._load_watchlist() if topics is not None else []
 
@@ -293,8 +342,9 @@ class AlertEngine:
 
     def record_connect_event(self, client_id: str):
         """Called whenever a client connect event is observed."""
-        loop_count  = int(os.getenv("ALERT_RECONNECT_LOOP_COUNT", "5"))
-        window_secs = int(os.getenv("ALERT_RECONNECT_LOOP_WINDOW_S", "60"))
+        cfg         = _read_alert_config()
+        loop_count  = cfg["reconnect_loop_count"]
+        window_secs = cfg["reconnect_loop_window_s"]
         now = time.time()
         with self._lock:
             if client_id not in self._reconnect_events:
@@ -314,8 +364,9 @@ class AlertEngine:
 
     def record_auth_failure(self):
         """Called whenever an authentication failure is detected in Mosquitto logs."""
-        fail_count  = int(os.getenv("ALERT_AUTH_FAIL_COUNT", "5"))
-        window_secs = int(os.getenv("ALERT_AUTH_FAIL_WINDOW_S", "60"))
+        cfg         = _read_alert_config()
+        fail_count  = cfg["auth_fail_count"]
+        window_secs = cfg["auth_fail_window_s"]
         now = time.time()
         with self._lock:
             self._auth_fail_events.append(now)
@@ -1228,6 +1279,44 @@ class PublishRequest(BaseModel):
     payload: str = ""
     qos: int = 0
     retain: bool = False
+
+
+class AlertConfigModel(BaseModel):
+    broker_down_grace_polls: int
+    client_capacity_pct: float
+    client_max_default: int
+    reconnect_loop_count: int
+    reconnect_loop_window_s: int
+    auth_fail_count: int
+    auth_fail_window_s: int
+    cooldown_minutes: int
+
+
+@app.get("/api/v1/alerts/config", dependencies=[Depends(get_api_key)])
+async def get_alert_config(request: Request):
+    """Return current alert thresholds (file-persisted, env-var defaults)."""
+    await log_request(request)
+    global _alert_config_ts
+    _alert_config_ts = 0.0  # force cache reload
+    return _read_alert_config()
+
+
+@app.put("/api/v1/alerts/config", dependencies=[Depends(get_api_key)])
+async def save_alert_config(request: Request, body: AlertConfigModel):
+    """Persist alert thresholds to disk. Takes effect on the next evaluation cycle (~30s)."""
+    await log_request(request)
+    cfg = body.model_dump()
+    # Basic sanity guards
+    if cfg["broker_down_grace_polls"] < 1:
+        cfg["broker_down_grace_polls"] = 1
+    if not (1.0 <= cfg["client_capacity_pct"] <= 100.0):
+        raise HTTPException(status_code=422, detail="client_capacity_pct must be between 1 and 100")
+    if cfg["reconnect_loop_count"] < 2:
+        cfg["reconnect_loop_count"] = 2
+    if cfg["auth_fail_count"] < 2:
+        cfg["auth_fail_count"] = 2
+    _save_alert_config(cfg)
+    return {"status": "saved", "config": cfg}
 
 @app.post("/api/v1/publish", dependencies=[Depends(get_api_key)])
 async def publish_message(request: Request, body: PublishRequest):
