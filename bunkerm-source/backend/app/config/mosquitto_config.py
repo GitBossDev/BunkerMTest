@@ -14,7 +14,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Depends, Security, status
+from fastapi import APIRouter, File, HTTPException, Depends, Security, UploadFile, status
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
@@ -76,18 +76,35 @@ class Listener(BaseModel):
     protocol: Optional[str] = None   # None = MQTT/TCP (default); "websockets" = WebSocket
 
 
+class TLSListenerConfig(BaseModel):
+    enabled: bool = False
+    port: int = 8883
+    cafile: Optional[str] = None       # path inside container, e.g. /etc/mosquitto/certs/ca.crt
+    certfile: Optional[str] = None
+    keyfile: Optional[str] = None
+    require_certificate: bool = False  # force mutual TLS (client certs)
+    tls_version: Optional[str] = None  # e.g. 'tlsv1.3'; None = auto
+
+
 class MosquittoConfig(BaseModel):
     config: Dict[str, Any]
     listeners: List[Listener] = []
     max_inflight_messages: Optional[int] = None   # global Mosquitto setting
     max_queued_messages: Optional[int] = None      # global Mosquitto setting
+    tls: Optional[TLSListenerConfig] = None        # TLS listener (port 8883)
 
+
+# Cert directory inside the container (shared volume)
+CERTS_DIR = os.getenv("MOSQUITTO_CERTS_DIR", "/etc/mosquitto/certs")
+# Required log types — always written regardless of user config
+_REQUIRED_LOG_TYPES = ["error", "warning", "notice", "information", "subscribe"]
 
 # Default configuration written when user resets mosquitto settings.
 # Paths must match the standalone container's view (same as the shared volume paths).
 DEFAULT_CONFIG = """# MQTT listener on port 1900
 listener 1900
 per_listener_settings false
+max_connections -1
 allow_anonymous false
 
 # WebSocket listener
@@ -102,14 +119,21 @@ plugin_opt_config_file /var/lib/mosquitto/dynamic-security.json
 include_dir /etc/mosquitto/conf.d
 
 # Logging
-log_dest file /var/log/mosquitto/mosquitto.log
-log_type all
+log_dest stdout
+log_type error
+log_type warning
+log_type notice
+log_type information
+log_type subscribe
 log_timestamp true
+log_timestamp_format %Y-%m-%dT%H:%M:%S
+connection_messages true
 
 # Persistence
 persistence true
-persistence_location /var/lib/mosquitto/
+persistence_location /var/lib/mosquitto
 persistence_file mosquitto.db
+autosave_interval 300
 """
 
 
@@ -125,9 +149,10 @@ def _signal_mosquitto_reload() -> None:
 
 def parse_mosquitto_conf() -> Dict[str, Any]:
     """
-    Parse the mosquitto.conf file into a dictionary
+    Parse the mosquitto.conf file into a dictionary.
+    Keys that appear multiple times (e.g. log_type) are stored as lists.
     """
-    config = {}
+    config: Dict[str, Any] = {}
     listeners = []
     current_listener = None
 
@@ -170,7 +195,16 @@ def parse_mosquitto_conf() -> Dict[str, Any]:
                 # Regular configuration line
                 if " " in line:
                     key, value = line.split(" ", 1)
-                    config[key] = value
+                    # Keys that can appear multiple times are stored as lists
+                    if key == "log_type":
+                        existing = config.get("log_type", [])
+                        if isinstance(existing, list):
+                            existing.append(value)
+                        else:
+                            existing = [existing, value]
+                        config["log_type"] = existing
+                    else:
+                        config[key] = value
 
         # Add the last listener if there is one
         if current_listener:
@@ -208,17 +242,21 @@ def generate_mosquitto_conf(
     lines.append("# Generated on " + datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     lines.append("")
 
-    # Add main configuration
+    # Add main configuration — skip keys handled separately
+    _SKIP_KEYS = {"plugin", "plugin_opt_config_file", "log_type"}
     for key, value in config_data.items():
-        # Skip some keys that are handled separately
-        if key in ["plugin", "plugin_opt_config_file"]:
+        if key in _SKIP_KEYS:
             continue
-
-        # Convert Python booleans to lowercase strings for mosquitto config
         if isinstance(value, bool):
             value = str(value).lower()
-
         lines.append(f"{key} {value}")
+
+    # Always write the full required set of log_type lines so connection
+    # messages are never silently dropped when the config is saved from the UI.
+    lines.append("")
+    lines.append("# Required log types — managed by BunkerM; do not reduce")
+    for lt in _REQUIRED_LOG_TYPES:
+        lines.append(f"log_type {lt}")
 
     # Add plugins configuration
     if "plugin" in config_data:
@@ -259,10 +297,31 @@ def generate_mosquitto_conf(
     return "\n".join(lines)
 
 
+def _generate_tls_listener_block(tls: "TLSListenerConfig") -> str:
+    """Return the mosquitto config block for a TLS listener."""
+    lines = [
+        "",
+        "# TLS/SSL Listener",
+        f"listener {tls.port}",
+        "per_listener_settings false",
+        "protocol mqtt",
+    ]
+    if tls.cafile:
+        lines.append(f"cafile {tls.cafile}")
+    if tls.certfile:
+        lines.append(f"certfile {tls.certfile}")
+    if tls.keyfile:
+        lines.append(f"keyfile {tls.keyfile}")
+    lines.append(f"require_certificate {'true' if tls.require_certificate else 'false'}")
+    if tls.tls_version:
+        lines.append(f"tls_version {tls.tls_version}")
+    return "\n".join(lines)
+
+
 @router.get("/mosquitto-config")
 async def get_mosquitto_config(api_key: str = Security(get_api_key)):
     """
-    Get the current Mosquitto configuration
+    Get the current Mosquitto configuration, including parsed TLS listener if present.
     """
     try:
         config_data = parse_mosquitto_conf()
@@ -273,12 +332,43 @@ async def get_mosquitto_config(api_key: str = Security(get_api_key)):
                 "message": "Failed to parse Mosquitto configuration",
             }
 
+        # Detect TLS listener (port != 1900, 9001, and has cafile/certfile)
+        listeners = config_data.get("listeners", [])
+        tls_info: Optional[dict] = None
+        for lst in listeners:
+            raw = lst.get("_raw", {})
+            if raw.get("cafile") or raw.get("certfile"):
+                tls_info = {
+                    "enabled": True,
+                    "port": lst["port"],
+                    "cafile": raw.get("cafile"),
+                    "certfile": raw.get("certfile"),
+                    "keyfile": raw.get("keyfile"),
+                    "require_certificate": raw.get("require_certificate", "false") == "true",
+                    "tls_version": raw.get("tls_version"),
+                }
+                break
+
+        # List available cert files
+        certs: list = []
+        try:
+            os.makedirs(CERTS_DIR, exist_ok=True)
+            certs = [
+                f for f in os.listdir(CERTS_DIR)
+                if os.path.isfile(os.path.join(CERTS_DIR, f))
+            ]
+        except Exception:
+            pass
+
         return {
             "success": True,
             "config": config_data["config"],
             "listeners": config_data["listeners"],
             "max_inflight_messages": config_data.get("max_inflight_messages"),
             "max_queued_messages": config_data.get("max_queued_messages"),
+            "tls": tls_info,
+            "available_certs": certs,
+            "certs_dir": CERTS_DIR,
         }
 
     except Exception as e:
@@ -334,6 +424,10 @@ async def save_mosquitto_config(
             max_inflight_messages=config.max_inflight_messages,
             max_queued_messages=config.max_queued_messages,
         )
+
+        # Append TLS listener block if requested
+        if config.tls and config.tls.enabled:
+            new_config_content += _generate_tls_listener_block(config.tls)
 
         # Write new configuration
         with open(MOSQUITTO_CONF_PATH, "w") as f:
@@ -393,6 +487,75 @@ async def reset_mosquitto_config(api_key: str = Security(get_api_key)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset Mosquitto configuration: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# TLS Certificate Management
+# ---------------------------------------------------------------------------
+
+_ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
+
+@router.get("/tls-certs")
+async def list_tls_certs(api_key: str = Security(get_api_key)):
+    """List TLS certificate files available in the certs directory."""
+    try:
+        os.makedirs(CERTS_DIR, exist_ok=True)
+        files = [
+            f for f in os.listdir(CERTS_DIR)
+            if os.path.isfile(os.path.join(CERTS_DIR, f))
+            and os.path.splitext(f)[1].lower() in _ALLOWED_CERT_EXTENSIONS
+        ]
+        return {"success": True, "certs": files, "certs_dir": CERTS_DIR}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tls-certs/upload")
+async def upload_tls_cert(
+    file: UploadFile = File(...),
+    api_key: str = Security(get_api_key),
+):
+    """Upload a PEM/CRT/KEY file to the certs directory."""
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _ALLOWED_CERT_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only {', '.join(_ALLOWED_CERT_EXTENSIONS)} files are accepted",
+        )
+
+    # Sanitize filename — only allow alphanumeric, dash, underscore, dot
+    import re as _re
+    safe_name = _re.sub(r"[^a-zA-Z0-9._-]", "_", os.path.basename(file.filename or "unknown"))
+    if not safe_name:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    try:
+        os.makedirs(CERTS_DIR, exist_ok=True)
+        dest = os.path.join(CERTS_DIR, safe_name)
+        content = await file.read()
+        with open(dest, "wb") as fh:
+            fh.write(content)
+        os.chmod(dest, 0o640)
+        logger.info(f"TLS cert uploaded: {safe_name}")
+        return {"success": True, "filename": safe_name, "path": dest}
+    except Exception as e:
+        logger.error(f"Error uploading cert: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/tls-certs/{filename}")
+async def delete_tls_cert(filename: str, api_key: str = Security(get_api_key)):
+    """Delete a certificate file from the certs directory."""
+    import re as _re
+    safe_name = _re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+    dest = os.path.join(CERTS_DIR, safe_name)
+    # Prevent path traversal
+    if not os.path.abspath(dest).startswith(os.path.abspath(CERTS_DIR)):
+        raise HTTPException(status_code=400, detail="Invalid path")
+    if not os.path.isfile(dest):
+        raise HTTPException(status_code=404, detail="File not found")
+    os.remove(dest)
+    return {"success": True, "filename": safe_name}
 
 
 @router.post("/remove-mosquitto-listener")

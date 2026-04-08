@@ -290,6 +290,17 @@ export const configApi = {
     request<{ success: boolean; message: string }>(`/api/proxy/config/restart-mosquitto?nonce=${generateNonce()}&t=${Date.now()}`, {
       method: 'POST',
     }),
+  listTlsCerts: () =>
+    request<{ success: boolean; certs: string[]; certs_dir: string }>(`/api/proxy/config/tls-certs?nonce=${generateNonce()}&t=${Date.now()}`),
+  uploadTlsCert: (formData: FormData) =>
+    fetch(`/api/proxy/config/tls-certs/upload?nonce=${generateNonce()}&t=${Date.now()}`, {
+      method: 'POST',
+      body: formData,
+    }),
+  deleteTlsCert: (filename: string) =>
+    request<{ success: boolean }>(`/api/proxy/config/tls-certs/${encodeURIComponent(filename)}?nonce=${generateNonce()}&t=${Date.now()}`, {
+      method: 'DELETE',
+    }),
 
   getDynSecJson: () =>
     request(`/api/proxy/config/dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`),

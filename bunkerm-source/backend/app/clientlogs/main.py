@@ -7,6 +7,7 @@
 #
 import re
 import json
+import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from collections import deque
@@ -100,6 +101,10 @@ class MQTTMonitor:
         self.events: deque = deque(maxlen=1000)
         # cumulative subscription count per topic pattern (resets on service restart)
         self._subscription_counts: Dict[str, int] = {}
+
+        # Track last subscribe/publish timestamp per client_id.
+        # Used as fallback to infer connectivity when connection log events are missing.
+        self._last_seen: Dict[str, float] = {}
 
         # Track "New connection from IP:PORT" lines so auth failures
         # can be attributed to an IP address. Key = unix timestamp string.
@@ -311,6 +316,8 @@ class MQTTMonitor:
         )
         # Track cumulative subscription count per topic pattern
         self._subscription_counts[topic] = self._subscription_counts.get(topic, 0) + 1
+        # Record last activity timestamp for this client (for connectivity inference)
+        self._last_seen[client_id] = time.time()
         return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -454,7 +461,46 @@ async def get_mqtt_events(limit: int = 1000):
 
 @app.get("/api/v1/connected-clients")
 async def get_connected_clients():
-    return {"clients": [client.dict() for client in mqtt_monitor.connected_clients.values()]}
+    """Return connected clients.
+
+    Primary source: clients tracked as connected via log-parsed CONNECT events.
+    Fallback: clients seen via subscribe events in the last 10 minutes that are
+    not marked as disconnected.  This handles the common case where the broker
+    config only had 'log_type subscribe' (no notice/information) so connection
+    events were never logged.
+    """
+    # Start with log-tracked clients (authoritative when present)
+    result: Dict[str, MQTTEvent] = dict(mqtt_monitor.connected_clients)
+
+    # Supplement with clients seen recently via subscribe events
+    cutoff = time.time() - 600  # 10 minutes
+    for cid, last_ts in mqtt_monitor._last_seen.items():
+        if last_ts < cutoff:
+            continue
+        if cid in result:
+            continue  # already tracked as connected
+        username, protocol_level, ip, port, clean, keep_alive = mqtt_monitor._get_client_info(cid)
+        if mqtt_monitor._is_admin(username):
+            continue
+        # Build a synthetic event using last known connection info when available
+        last_conn = mqtt_monitor._last_connection_info.get(username, {})
+        synthetic = MQTTEvent(
+            id=str(uuid.uuid4()),
+            timestamp=datetime.fromtimestamp(last_ts, tz=timezone.utc).isoformat(),
+            event_type="Client Connection",
+            client_id=cid,
+            details="Active (inferred from subscribe activity)",
+            status="success",
+            protocol_level=protocol_level,
+            clean_session=clean,
+            keep_alive=keep_alive,
+            username=username,
+            ip_address=last_conn.get("ip_address", ip),
+            port=last_conn.get("port", port),
+        )
+        result[cid] = synthetic
+
+    return {"clients": [client.dict() for client in result.values()]}
 
 @app.get("/api/v1/last-connection")
 async def get_last_connection():

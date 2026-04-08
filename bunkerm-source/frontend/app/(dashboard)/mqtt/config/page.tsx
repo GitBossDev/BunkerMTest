@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
-import { Save, RefreshCw, Loader2, AlertTriangle, Info, RotateCcw } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Save, RefreshCw, Loader2, AlertTriangle, Info, RotateCcw, Lock, Trash2, Upload, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { configApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,14 @@ interface ConfigState {
   wsPort: number
   maxInflight: number           // 0 = use default (20)
   maxQueued: number             // 0 = unlimited
+  // TLS
+  tlsEnabled: boolean
+  tlsPort: number
+  tlsCafile: string
+  tlsCertfile: string
+  tlsKeyfile: string
+  tlsRequireCert: boolean
+  availableCerts: string[]
   // kept for round-trip — untouched keys go back as-is
   rawConfig: Record<string, unknown>
   dyncSecListeners: ListenerData[]  // port 8080 and any other non-editable listeners
@@ -39,6 +47,13 @@ const DEFAULT_STATE: ConfigState = {
   wsPort: 9001,
   maxInflight: 0,
   maxQueued: 0,
+  tlsEnabled: false,
+  tlsPort: 8883,
+  tlsCafile: '',
+  tlsCertfile: '',
+  tlsKeyfile: '',
+  tlsRequireCert: false,
+  availableCerts: [],
   rawConfig: {},
   dyncSecListeners: [],
 }
@@ -59,6 +74,8 @@ function parseApiResponse(data: Record<string, unknown>): ConfigState {
     (l) => l.port === 8080 || (l.protocol && l.protocol !== 'websockets' && l.port !== mqttListener?.port)
   )
 
+  const tlsData = data.tls as { enabled?: boolean; port?: number; cafile?: string; certfile?: string; keyfile?: string; require_certificate?: boolean } | null
+
   return {
     mqttPort: mqttListener?.port ?? 1900,
     maxConnections: mqttListener?.max_connections ?? -1,
@@ -66,6 +83,13 @@ function parseApiResponse(data: Record<string, unknown>): ConfigState {
     wsPort: wsListener?.port ?? 9001,
     maxInflight: (data.max_inflight_messages as number | null) ?? 0,
     maxQueued: (data.max_queued_messages as number | null) ?? 0,
+    tlsEnabled: tlsData?.enabled ?? false,
+    tlsPort: tlsData?.port ?? 8883,
+    tlsCafile: tlsData?.cafile ?? '',
+    tlsCertfile: tlsData?.certfile ?? '',
+    tlsKeyfile: tlsData?.keyfile ?? '',
+    tlsRequireCert: tlsData?.require_certificate ?? false,
+    availableCerts: (data.available_certs as string[]) ?? [],
     rawConfig: (data.config as Record<string, unknown>) ?? {},
     dyncSecListeners,
   }
@@ -98,6 +122,15 @@ function buildSavePayload(state: ConfigState) {
     listeners,
     max_inflight_messages: state.maxInflight > 0 ? state.maxInflight : null,
     max_queued_messages: state.maxQueued > 0 ? state.maxQueued : null,
+    tls: {
+      enabled: state.tlsEnabled,
+      port: state.tlsPort,
+      cafile: state.tlsCafile || null,
+      certfile: state.tlsCertfile || null,
+      keyfile: state.tlsKeyfile || null,
+      require_certificate: state.tlsRequireCert,
+      tls_version: null,
+    },
   }
 }
 
@@ -147,6 +180,8 @@ export default function MosquittoConfigPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isRestarting, setIsRestarting] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
+  const certInputRef = useRef<HTMLInputElement>(null)
 
   const fetchConfig = useCallback(async () => {
     setIsLoading(true)
@@ -159,6 +194,18 @@ export default function MosquittoConfigPage() {
       toast.error('Failed to load broker configuration')
     } finally {
       setIsLoading(false)
+    }
+  }, [])
+
+  const refreshCerts = useCallback(async () => {
+    try {
+      const result = await configApi.listTlsCerts()
+      if (result.success) {
+        setState((s) => ({ ...s, availableCerts: result.certs }))
+        setSaved((s) => ({ ...s, availableCerts: result.certs }))
+      }
+    } catch {
+      // non-fatal
     }
   }, [])
 
@@ -190,6 +237,37 @@ export default function MosquittoConfigPage() {
       toast.error('Failed to restart broker')
     } finally {
       setIsRestarting(false)
+    }
+  }
+
+  const handleCertUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIsUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const resp = await configApi.uploadTlsCert(formData)
+      const result = await resp.json()
+      if (!result.success) throw new Error(result.message ?? 'Upload failed')
+      toast.success(`Certificate "${result.filename}" uploaded`)
+      await refreshCerts()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed')
+    } finally {
+      setIsUploading(false)
+      if (certInputRef.current) certInputRef.current.value = ''
+    }
+  }
+
+  const handleCertDelete = async (filename: string) => {
+    try {
+      const result = await configApi.deleteTlsCert(filename)
+      if (!result.success) throw new Error('Delete failed')
+      toast.success(`"${filename}" deleted`)
+      await refreshCerts()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed')
     }
   }
 
@@ -342,6 +420,135 @@ export default function MosquittoConfigPage() {
                 placeholder="unlimited"
                 onChange={(v) => set('maxQueued', Math.max(0, v))}
               />
+            </CardContent>
+          </Card>
+
+          {/* TLS / SSL */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Lock className="h-4 w-4" /> TLS / SSL
+                </CardTitle>
+                <Badge variant="outline" className="text-xs">Requires restart</Badge>
+              </div>
+              <CardDescription>Encrypt MQTT transport with TLS on port 8883 (MQTT+TLS standard)</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label>Enable TLS Listener</Label>
+                  <p className="text-xs text-muted-foreground mt-0.5">Adds a secure encrypted listener on the configured port</p>
+                </div>
+                <Switch checked={state.tlsEnabled} onCheckedChange={(v) => set('tlsEnabled', v)} />
+              </div>
+
+              {state.tlsEnabled && (
+                <>
+                  <NumberField
+                    id="tlsPort"
+                    label="TLS Port"
+                    description="Default: 8883 (MQTT over TLS standard port)"
+                    value={state.tlsPort}
+                    min={1}
+                    placeholder="8883"
+                    onChange={(v) => set('tlsPort', v)}
+                  />
+
+                  <Separator />
+
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium">Certificate Files</p>
+                    <p className="text-xs text-muted-foreground">
+                      Files must be uploaded to the broker&apos;s cert store first, then referenced by filename below.
+                      Leave empty to skip that cert field.
+                    </p>
+
+                    {(['tlsCafile', 'tlsCertfile', 'tlsKeyfile'] as const).map((field) => (
+                      <div key={field} className="space-y-1.5">
+                        <Label htmlFor={field}>
+                          {field === 'tlsCafile' ? 'CA Certificate (cafile)' : field === 'tlsCertfile' ? 'Server Certificate (certfile)' : 'Server Key (keyfile)'}
+                        </Label>
+                        <div className="flex gap-2">
+                          <Input
+                            id={field}
+                            value={state[field]}
+                            placeholder="e.g. ca.crt"
+                            onChange={(e) => set(field, e.target.value)}
+                            className="flex-1"
+                            list={`${field}-list`}
+                          />
+                          {state.availableCerts.length > 0 && (
+                            <datalist id={`${field}-list`}>
+                              {state.availableCerts.map((c) => <option key={c} value={c} />)}
+                            </datalist>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <Separator />
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Require Client Certificate</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Mutual TLS — clients must present a valid certificate signed by the CA</p>
+                    </div>
+                    <Switch checked={state.tlsRequireCert} onCheckedChange={(v) => set('tlsRequireCert', v)} />
+                  </div>
+
+                  <Separator />
+
+                  {/* Cert store manager */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">Certificate Store</p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => certInputRef.current?.click()}
+                        disabled={isUploading}
+                      >
+                        {isUploading
+                          ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          : <Upload className="h-3.5 w-3.5 mr-1" />}
+                        Upload
+                      </Button>
+                      <input
+                        ref={certInputRef}
+                        type="file"
+                        accept=".pem,.crt,.cer,.key"
+                        className="hidden"
+                        onChange={handleCertUpload}
+                      />
+                    </div>
+
+                    {state.availableCerts.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic">No certificates uploaded yet.</p>
+                    ) : (
+                      <div className="rounded-md border divide-y text-sm">
+                        {state.availableCerts.map((cert) => (
+                          <div key={cert} className="flex items-center justify-between px-3 py-2">
+                            <span className="flex items-center gap-2">
+                              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                              {cert}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                              onClick={() => handleCertDelete(cert)}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </>
