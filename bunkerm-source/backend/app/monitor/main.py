@@ -154,7 +154,6 @@ def _default_alert_config() -> dict:
     return {
         "broker_down_grace_polls":  int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3")),
         "client_capacity_pct":      float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80")),
-        "client_max_default":       int(os.getenv("ALERT_CLIENT_MAX_DEFAULT", "10000")),
         "reconnect_loop_count":     int(os.getenv("ALERT_RECONNECT_LOOP_COUNT", "5")),
         "reconnect_loop_window_s":  int(os.getenv("ALERT_RECONNECT_LOOP_WINDOW_S", "60")),
         "auth_fail_count":          int(os.getenv("ALERT_AUTH_FAIL_COUNT", "5")),
@@ -304,7 +303,7 @@ class AlertEngine:
         cfg           = _read_alert_config()
         grace_polls   = cfg["broker_down_grace_polls"]
         cap_pct       = cfg["client_capacity_pct"]
-        max_clients   = float(_read_max_connections() or cfg["client_max_default"])
+        max_clients   = float(_read_max_connections())
         # Load watchlist before taking the lock (involves file I/O)
         watchlist = self._load_watchlist() if topics is not None else []
 
@@ -1262,7 +1261,6 @@ class PublishRequest(BaseModel):
 class AlertConfigModel(BaseModel):
     broker_down_grace_polls: int
     client_capacity_pct: float
-    client_max_default: int
     reconnect_loop_count: int
     reconnect_loop_window_s: int
     auth_fail_count: int

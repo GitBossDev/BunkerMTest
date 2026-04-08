@@ -82,7 +82,7 @@ const SOURCE_LABEL: Record<KeySource, { label: string; variant: 'secondary' | 'o
 }
 
 type AlertCfg = {
-  broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+  broker_down_grace_polls: number; client_capacity_pct: number;
   reconnect_loop_count: number; reconnect_loop_window_s: number;
   auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
 }
@@ -302,9 +302,7 @@ export default function SettingsPage() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Connection Capacity</p>
                 <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
                   {cfgField('client_capacity_pct', 'Capacity threshold', '%',
-                    'Alert when connected clients reach this % of max_connections.')}
-                  {cfgField('client_max_default', 'Max clients (fallback)', 'clients',
-                    'Used when max_connections is unlimited (-1) in mosquitto.conf.')}
+                    'Alert when connected clients reach this % of max_connections configured in Broker Config.')}
                 </div>
               </div>
               <Separator />

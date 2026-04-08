@@ -246,6 +246,10 @@ class MQTTMonitor:
             port=conn.port,
         )
         del self.connected_clients[client_id]
+        # Remove from _last_seen so the fallback in get_connected_clients() doesn't
+        # re-surface a disconnected client as still-online during the 10-minute window.
+        # If the client reconnects and sends a subscribe, _last_seen will be updated again.
+        self._last_seen.pop(client_id, None)
         # Keep _client_usernames entry so auth failures on reconnect can show the last known username.
         return event
 

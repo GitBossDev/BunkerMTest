@@ -78,7 +78,7 @@ function parseApiResponse(data: Record<string, unknown>): ConfigState {
 
   return {
     mqttPort: mqttListener?.port ?? 1900,
-    maxConnections: mqttListener?.max_connections ?? 10000,
+    maxConnections: (mqttListener?.max_connections == null || mqttListener?.max_connections < 0) ? 10000 : mqttListener.max_connections,
     wsEnabled: !!wsListener,
     wsPort: wsListener?.port ?? 9001,
     maxInflight: (data.max_inflight_messages as number | null) ?? 0,
