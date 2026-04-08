@@ -251,12 +251,12 @@ export const monitorApi = {
 
   getAlertConfig: () =>
     request<{
-      broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+      broker_down_grace_polls: number; client_capacity_pct: number;
       reconnect_loop_count: number; reconnect_loop_window_s: number;
       auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
     }>(buildUrl(MONITOR_API_URL, '/alerts/config')),
   saveAlertConfig: (cfg: {
-    broker_down_grace_polls: number; client_capacity_pct: number; client_max_default: number;
+    broker_down_grace_polls: number; client_capacity_pct: number;
     reconnect_loop_count: number; reconnect_loop_window_s: number;
     auth_fail_count: number; auth_fail_window_s: number; cooldown_minutes: number;
   }) =>
