@@ -64,6 +64,64 @@ function buildTopicSuggestions(topics: string[]): string[] {
   return Array.from(set).sort()
 }
 
+/**
+ * Topic input with inline completion hint — no dropdown.
+ * Shows a grayed suggestion below the field as you type.
+ * Press Tab or click the hint to accept; keep typing to override.
+ */
+function TopicInput({
+  value,
+  suggestions,
+  onChange,
+  onKeyDown: extKeyDown,
+  placeholder,
+  className,
+  disabled,
+}: {
+  value: string
+  suggestions: string[]
+  onChange: (v: string) => void
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>
+  placeholder?: string
+  className?: string
+  disabled?: boolean
+}) {
+  const completion = useMemo(() => {
+    if (!value) return ''
+    const lower = value.toLowerCase()
+    return suggestions.find((s) => s.toLowerCase().startsWith(lower) && s.length > value.length) ?? ''
+  }, [value, suggestions])
+
+  return (
+    <div className="space-y-0.5">
+      <Input
+        value={value}
+        placeholder={placeholder}
+        className={className}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (completion && e.key === 'Tab') {
+            e.preventDefault()
+            onChange(completion)
+          }
+          extKeyDown?.(e)
+        }}
+      />
+      {completion && (
+        <p
+          className="cursor-pointer truncate px-1 font-mono text-[11px] text-muted-foreground/50 transition-colors hover:text-muted-foreground/80 select-none"
+          onClick={() => onChange(completion)}
+          title="Tab or click to complete"
+        >
+          <span className="opacity-50">{value}</span>
+          <span className="text-primary/70 font-medium">{completion.slice(value.length)}</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
 // All ACL types supported by Mosquitto dynamic security
 const ACL_TYPES = [
   { value: 'publishClientSend', label: 'Publish (Client Send)' },
@@ -103,6 +161,12 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
   const [rawTopics, setRawTopics] = useState<string[]>([])
 
   const topicSuggestions = useMemo(() => buildTopicSuggestions(rawTopics), [rawTopics])
+
+  const editingCompletion = useMemo(() => {
+    if (!editingTopic) return ''
+    const lower = editingTopic.toLowerCase()
+    return topicSuggestions.find((s) => s.toLowerCase().startsWith(lower) && s.length > editingTopic.length) ?? ''
+  }, [editingTopic, topicSuggestions])
 
   useEffect(() => {
     if (open && role) {
@@ -281,20 +345,30 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
                           <TableCell className="text-xs font-mono">{typeLabel}</TableCell>
                           <TableCell className="font-mono text-xs max-w-[180px]">
                             {isEditing ? (
-                              <>
+                              <div className="space-y-0.5">
                                 <input
                                   className="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
                                   value={editingTopic}
                                   onChange={(e) => setEditingTopic(e.target.value)}
                                   onKeyDown={(e) => {
+                                    if (editingCompletion && e.key === 'Tab') { e.preventDefault(); setEditingTopic(editingCompletion) }
                                     if (e.key === 'Enter') handleSaveEdit()
                                     if (e.key === 'Escape') handleCancelEdit()
                                   }}
                                   autoFocus
                                   disabled={savingEdit}
-                                  list="acl-topic-suggestions"
                                 />
-                              </>
+                                {editingCompletion && (
+                                  <p
+                                    className="cursor-pointer truncate font-mono text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground/80 select-none"
+                                    onClick={() => setEditingTopic(editingCompletion)}
+                                    title="Tab or click to complete"
+                                  >
+                                    <span className="opacity-50">{editingTopic}</span>
+                                    <span className="text-primary/70 font-medium">{editingCompletion.slice(editingTopic.length)}</span>
+                                  </p>
+                                )}
+                              </div>
                             ) : (
                               <span className="truncate block">{acl.topic}</span>
                             )}
@@ -388,19 +462,12 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
 
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Topic</Label>
-                <Input
+                <TopicInput
                   placeholder="e.g. sensors/#"
                   value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  list="acl-topic-suggestions"
+                  suggestions={topicSuggestions}
+                  onChange={setTopic}
                 />
-                {topicSuggestions.length > 0 && (
-                  <datalist id="acl-topic-suggestions">
-                    {topicSuggestions.map((s) => (
-                      <option key={s} value={s} />
-                    ))}
-                  </datalist>
-                )}
               </div>
 
               <div className="space-y-1">
@@ -446,12 +513,12 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
               </div>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Topic</Label>
-                <Input
+                <TopicInput
                   placeholder="e.g. plant/water-plant-1/sensors/#"
                   value={testTopic}
-                  onChange={(e) => { setTestTopic(e.target.value); setTestResult(null) }}
+                  suggestions={topicSuggestions}
+                  onChange={(v) => { setTestTopic(v); setTestResult(null) }}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleTestACL() }}
-                  list="acl-topic-suggestions"
                 />
               </div>
             </div>

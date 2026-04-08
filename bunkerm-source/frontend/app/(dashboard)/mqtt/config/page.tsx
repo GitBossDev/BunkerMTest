@@ -42,7 +42,7 @@ interface ConfigState {
 
 const DEFAULT_STATE: ConfigState = {
   mqttPort: 1900,
-  maxConnections: -1,
+  maxConnections: 10000,
   wsEnabled: false,
   wsPort: 9001,
   maxInflight: 0,
@@ -78,7 +78,7 @@ function parseApiResponse(data: Record<string, unknown>): ConfigState {
 
   return {
     mqttPort: mqttListener?.port ?? 1900,
-    maxConnections: mqttListener?.max_connections ?? -1,
+    maxConnections: mqttListener?.max_connections ?? 10000,
     wsEnabled: !!wsListener,
     wsPort: wsListener?.port ?? 9001,
     maxInflight: (data.max_inflight_messages as number | null) ?? 0,
@@ -336,7 +336,7 @@ export default function MosquittoConfigPage() {
               />
               <div className="flex items-start gap-2 rounded-md bg-blue-500/10 px-3 py-2 text-xs text-blue-700 dark:text-blue-400">
                 <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-                <span>This is the <strong>internal</strong> container port. Your docker-compose maps it to a different host port (e.g. <strong>1901:1900</strong>). External clients connect to the host port.</span>
+                <span>This is the port the MQTT broker listens on <strong>within the container network</strong>. The application&apos;s internal services (client monitoring, bridges) connect to the broker on this port. External clients connect via the host-mapped port configured in docker-compose (e.g. <strong>1901:1900</strong>).</span>
               </div>
 
               <Separator />

@@ -66,6 +66,11 @@ _TS_RE = re.compile(r'^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)$')
 # Keeps the event stream readable when clients publish at high frequency.
 _PUBLISH_DEDUP_SECONDS = 60
 
+# Topic prefixes that are internal to the BunkerM platform.
+# These are never shown in the client events view — they are system/infrastructure
+# traffic, not end-user MQTT data.
+_INTERNAL_TOPIC_PREFIXES = ('$', 'bunkerm/monitor/')
+
 
 def _ts_to_iso(ts: str) -> str:
     """Convert a Unix or ISO 8601 timestamp string to a UTC ISO 8601 string.
@@ -337,6 +342,9 @@ class MQTTMonitor:
             return None
 
         ts, client_id, qos_str, topic, size_str = m.groups()
+        # Skip internal platform topics (same rule as the paho monitor)
+        if any(topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
+            return None
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
             return None
@@ -611,8 +619,14 @@ def monitor_mqtt_publishes() -> None:
             print(f"MQTT publish monitor: connect failed rc={rc}")
 
     def _on_message(client, userdata, message):
-        # Skip internal broker topics ($SYS/…, $CONTROL/…, etc.)
-        if message.topic.startswith('$'):
+        # Skip internal broker topics ($SYS/...) and platform-internal topics.
+        # NOTE: The paho subscription gives us topic/payload/QoS only — the MQTT
+        # protocol does not expose the publisher's client ID or username to
+        # subscribers. To get real publisher identity, enable log_type debug in
+        # mosquitto.conf: the log-based parse_publish_log() parser handles those
+        # lines and will populate client_id/username/ip correctly. The 60-second
+        # dedup window prevents duplicate events when both paths are active.
+        if any(message.topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
             return
 
         now_ts = time.time()
