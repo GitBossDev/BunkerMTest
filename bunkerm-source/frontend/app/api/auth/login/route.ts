@@ -9,6 +9,11 @@ export async function POST(request: NextRequest) {
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
     }
+    // Prevent bcrypt DoS: bcrypt only hashes the first 72 bytes; a very long
+    // input wastes CPU and can be used as a denial-of-service vector.
+    if (typeof password !== 'string' || password.length > 128) {
+      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+    }
 
     const user = findUserByEmail(email)
     if (!user) {

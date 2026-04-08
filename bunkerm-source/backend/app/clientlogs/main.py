@@ -62,6 +62,10 @@ _TS_CAPTURE = r'(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)'
 # Pre-compiled for use in parse_subscription_log (no group needed there)
 _TS_RE = re.compile(r'^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)$')
 
+# How long (seconds) to suppress duplicate Publish events for the same topic.
+# Keeps the event stream readable when clients publish at high frequency.
+_PUBLISH_DEDUP_SECONDS = 60
+
 
 def _ts_to_iso(ts: str) -> str:
     """Convert a Unix or ISO 8601 timestamp string to a UTC ISO 8601 string.
@@ -114,9 +118,9 @@ class MQTTMonitor:
         # Updated on every successful connection, never cleared on disconnect.
         self._last_connection_info: Dict[str, dict] = {}
 
-        # Track (client_id, topic) pairs for publish deduplication.
-        # Reset per client on new connection.
-        self._seen_publishes: set = set()
+        # Time-based publish deduplication: topic → last-event unix timestamp.
+        # Each unique topic is shown at most once per _PUBLISH_DEDUP_SECONDS.
+        self._last_publish_ts: Dict[str, float] = {}
 
         # Username lookup for ALL clients (admin + non-admin), so subscribe/publish
         # parsers can correctly filter out admin-owned connections even when those
@@ -205,9 +209,6 @@ class MQTTMonitor:
 
         # All other clients (non-admin OR external admin like MQTT Explorer) → track
         self.connected_clients[client_id] = event
-        # Reset seen-publishes so first publish after reconnect is always recorded
-        self._seen_publishes = {k for k in self._seen_publishes
-                                if not k.startswith(f"{client_id}:")}
         return event
 
     def parse_disconnection_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -244,14 +245,21 @@ class MQTTMonitor:
         return event
 
     def parse_auth_failure_log(self, log_line: str) -> Optional[MQTTEvent]:
-        """Parse 'Client X disconnected, not authorised.' lines."""
-        # Mosquitto 2.1.2 may include [IP:PORT] before "disconnected"
-        m = re.match(_TS_CAPTURE + r": Client (\S+)(?: \[[^\]]+\])? disconnected, not authorised\.", log_line)
+        """Parse 'Client X [IP:PORT] disconnected: not authorised.' lines."""
+        m = re.match(
+            _TS_CAPTURE + r": Client (\S+)(?: \[(\d+\.\d+\.\d+\.\d+):(\d+)\])? disconnected: not authorised\.",
+            log_line
+        )
         if not m:
             return None
 
-        ts, client_id = m.groups()
-        ip, port = self._pending_ip.pop(ts, ("unknown", 0))
+        ts, client_id, ip_bracket, port_bracket = m.groups()
+        # Use IP embedded in the log line when present (Mosquitto 2.x format).
+        # Fall back to _pending_ip keyed by timestamp for older formats.
+        if ip_bracket:
+            ip, port = ip_bracket, int(port_bracket)
+        else:
+            ip, port = self._pending_ip.pop(ts, ("unknown", 0))
         # Mosquitto does NOT log the attempted username on auth failure.
         # Showing any previously-known username would be misleading (e.g. the user
         # deliberately tried a different credential). Leave it as "unknown".
@@ -333,10 +341,11 @@ class MQTTMonitor:
         if self._is_admin(username):
             return None
 
-        key = f"{client_id}:{topic}"
-        if key in self._seen_publishes:
+        key = topic
+        now_ts = time.time()
+        if key in self._last_publish_ts and now_ts - self._last_publish_ts[key] < _PUBLISH_DEDUP_SECONDS:
             return None
-        self._seen_publishes.add(key)
+        self._last_publish_ts[key] = now_ts
 
         return MQTTEvent(
             id=str(uuid.uuid4()),
@@ -577,12 +586,84 @@ def monitor_mosquitto_logs():
         if line:
             mqtt_monitor.process_line(line.strip())
 
+
+def monitor_mqtt_publishes() -> None:
+    """Subscribe to '#' as admin to capture PUBLISH events.
+
+    This runs in a background thread and appends Publish events to
+    mqtt_monitor.events.  Deduplication is time-based: at most one event
+    per topic per _PUBLISH_DEDUP_SECONDS seconds.
+
+    The admin client is excluded from appearing in publish events just as
+    it is in log-based parsers.
+    """
+    try:
+        import paho.mqtt.client as paho_mqtt
+    except ImportError:
+        print("paho-mqtt not available; publish monitoring disabled.")
+        return
+
+    def _on_connect(client, userdata, flags, rc, properties=None):
+        if rc == 0:
+            client.subscribe('#', 0)
+            print("MQTT publish monitor: subscribed to #")
+        else:
+            print(f"MQTT publish monitor: connect failed rc={rc}")
+
+    def _on_message(client, userdata, message):
+        # Skip internal broker topics ($SYS/…, $CONTROL/…, etc.)
+        if message.topic.startswith('$'):
+            return
+
+        now_ts = time.time()
+        key = message.topic
+        if now_ts - mqtt_monitor._last_publish_ts.get(key, 0) < _PUBLISH_DEDUP_SECONDS:
+            return
+        mqtt_monitor._last_publish_ts[key] = now_ts
+
+        event = MQTTEvent(
+            id=str(uuid.uuid4()),
+            timestamp=datetime.now(tz=timezone.utc).isoformat(),
+            event_type="Publish",
+            client_id="(broker-observed)",
+            details=f"Published to {message.topic} ({len(message.payload)} B, QoS {message.qos})",
+            status="info",
+            protocol_level="MQTT v3.1.1",
+            clean_session=True,
+            keep_alive=0,
+            username="(broker-observed)",
+            ip_address="",
+            port=0,
+            topic=message.topic,
+            qos=message.qos,
+        )
+        mqtt_monitor.events.append(event)
+
+    mqtt_client = paho_mqtt.Client(
+        client_id="bunkerm-publish-monitor",
+        protocol=paho_mqtt.MQTTv311,
+    )
+    mqtt_client.username_pw_set(MOSQUITTO_ADMIN_USERNAME, MOSQUITTO_ADMIN_PASSWORD)
+    mqtt_client.on_connect = _on_connect
+    mqtt_client.on_message = _on_message
+
+    while True:
+        try:
+            mqtt_client.connect(MOSQUITTO_IP, int(MOSQUITTO_PORT), keepalive=60)
+            mqtt_client.loop_forever()
+        except Exception as exc:
+            print(f"MQTT publish monitor error: {exc}. Reconnecting in 10 s…")
+            time.sleep(10)
+
+
 if __name__ == "__main__":
-    # Start log monitoring in a separate thread
     import threading
     log_thread = threading.Thread(target=monitor_mosquitto_logs, daemon=True)
     log_thread.start()
-    
+
+    publish_thread = threading.Thread(target=monitor_mqtt_publishes, daemon=True)
+    publish_thread.start()
+
     # Start the FastAPI server without SSL
     uvicorn.run(
         app,

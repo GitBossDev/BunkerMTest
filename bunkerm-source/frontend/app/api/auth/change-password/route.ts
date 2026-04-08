@@ -14,8 +14,12 @@ export async function POST(request: NextRequest) {
   if (!currentPassword || !newPassword) {
     return NextResponse.json({ error: 'All fields required' }, { status: 400 })
   }
-  if (newPassword.length < 6) {
-    return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+  // Prevent bcrypt DoS
+  if (typeof currentPassword !== 'string' || currentPassword.length > 128) {
+    return NextResponse.json({ error: 'Current password is incorrect' }, { status: 401 })
+  }
+  if (newPassword.length < 8 || newPassword.length > 128) {
+    return NextResponse.json({ error: 'Password must be between 8 and 128 characters' }, { status: 400 })
   }
 
   const users = readUsers()

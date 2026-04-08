@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
 import { Trash2, Pencil, Check, X } from 'lucide-react'
 import {
@@ -30,8 +30,39 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { dynsecApi } from '@/lib/api'
+import { dynsecApi, clientlogsApi } from '@/lib/api'
 import type { Role, ACL } from '@/types'
+
+/**
+ * Given a set of concrete topics (e.g. "lab/device/X/Temp"), generate
+ * all useful wildcard variants:
+ *   lab/device/X/Temp          (exact)
+ *   lab/device/X/+             (last level single-wildcard)
+ *   lab/device/+/Temp          (penultimate level)
+ *   lab/device/X/#             (subtree from second-to-last)
+ *   lab/device/#
+ *   lab/#
+ *   #
+ */
+function buildTopicSuggestions(topics: string[]): string[] {
+  const set = new Set<string>()
+  for (const t of topics) {
+    set.add(t)
+    const parts = t.split('/')
+    // Single-level wildcards: replace each level with +
+    for (let i = 0; i < parts.length; i++) {
+      const variant = [...parts.slice(0, i), '+', ...parts.slice(i + 1)].join('/')
+      set.add(variant)
+    }
+    // Multi-level wildcards: replace suffix with #
+    for (let i = 1; i <= parts.length; i++) {
+      const prefix = parts.slice(0, i).join('/')
+      set.add(prefix + '/#')
+    }
+    set.add('#')
+  }
+  return Array.from(set).sort()
+}
 
 // All ACL types supported by Mosquitto dynamic security
 const ACL_TYPES = [
@@ -69,6 +100,9 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
     matchedRule: { topic: string; aclType: string; allow: boolean; priority: number } | null
   } | null>(null)
   const [testing, setTesting] = useState(false)
+  const [rawTopics, setRawTopics] = useState<string[]>([])
+
+  const topicSuggestions = useMemo(() => buildTopicSuggestions(rawTopics), [rawTopics])
 
   useEffect(() => {
     if (open && role) {
@@ -77,6 +111,13 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, role?.rolename])
+
+  useEffect(() => {
+    if (!open) return
+    clientlogsApi.getTopSubscribed(200)
+      .then((res) => setRawTopics((res as { top_subscribed: { topic: string }[] }).top_subscribed.map((t) => t.topic)))
+      .catch(() => { /* silently ignore — autocomplete is best-effort */ })
+  }, [open])
 
   const refreshRole = async (rolename: string) => {
     setLoadingRole(true)
@@ -240,17 +281,20 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
                           <TableCell className="text-xs font-mono">{typeLabel}</TableCell>
                           <TableCell className="font-mono text-xs max-w-[180px]">
                             {isEditing ? (
-                              <input
-                                className="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
-                                value={editingTopic}
-                                onChange={(e) => setEditingTopic(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') handleSaveEdit()
-                                  if (e.key === 'Escape') handleCancelEdit()
-                                }}
-                                autoFocus
-                                disabled={savingEdit}
-                              />
+                              <>
+                                <input
+                                  className="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+                                  value={editingTopic}
+                                  onChange={(e) => setEditingTopic(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') handleSaveEdit()
+                                    if (e.key === 'Escape') handleCancelEdit()
+                                  }}
+                                  autoFocus
+                                  disabled={savingEdit}
+                                  list="acl-topic-suggestions"
+                                />
+                              </>
                             ) : (
                               <span className="truncate block">{acl.topic}</span>
                             )}
@@ -348,7 +392,15 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
                   placeholder="e.g. sensors/#"
                   value={topic}
                   onChange={(e) => setTopic(e.target.value)}
+                  list="acl-topic-suggestions"
                 />
+                {topicSuggestions.length > 0 && (
+                  <datalist id="acl-topic-suggestions">
+                    {topicSuggestions.map((s) => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                )}
               </div>
 
               <div className="space-y-1">
@@ -399,6 +451,7 @@ export function ACLDialog({ role, open, onOpenChange, onSuccess }: ACLDialogProp
                   value={testTopic}
                   onChange={(e) => { setTestTopic(e.target.value); setTestResult(null) }}
                   onKeyDown={(e) => { if (e.key === 'Enter') handleTestACL() }}
+                  list="acl-topic-suggestions"
                 />
               </div>
             </div>

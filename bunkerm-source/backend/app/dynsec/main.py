@@ -16,18 +16,18 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi.responses import JSONResponse """
-from pydantic import BaseModel
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, field_validator
+import re as _re
 import subprocess
 import os
 import json
 import ssl
 from dotenv import load_dotenv
+from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import datetime, timedelta
 import secrets
 from logging.handlers import RotatingFileHandler
-from pydantic import BaseModel, Field
 from password_import import router as password_import_router
 import uvicorn
 # Load environment variables from .env file
@@ -148,8 +148,19 @@ async def add_security_headers(request: Request, call_next):
 
 # Models
 class ClientCreate(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator('username')
+    @classmethod
+    def username_safe(cls, v: str) -> str:
+        # Allow alphanumeric, hyphens, underscores, and dots only.
+        # This prevents shell metacharacters from reaching mosquitto_ctrl.
+        if not _re.fullmatch(r'[A-Za-z0-9_.\-]+', v):
+            raise ValueError(
+                'Username may only contain letters, numbers, hyphens, underscores, and dots'
+            )
+        return v
 
 
 class ClientResponse(BaseModel):
@@ -159,17 +170,35 @@ class ClientResponse(BaseModel):
 
 
 class RoleCreate(BaseModel):
-    name: str
-    textname: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=64)
+    textname: Optional[str] = Field(default=None, max_length=128)
     acls: Optional[List[Dict[str, Any]]] = None
     nonce: Optional[str] = None
     timestamp: Optional[int] = None
 
+    @field_validator('name')
+    @classmethod
+    def name_safe(cls, v: str) -> str:
+        if not _re.fullmatch(r'[A-Za-z0-9_.\-]+', v):
+            raise ValueError(
+                'Role name may only contain letters, numbers, hyphens, underscores, and dots'
+            )
+        return v
+
 
 class GroupCreate(BaseModel):
-    name: str
-    textname: Optional[str] = None
+    name: str = Field(..., min_length=1, max_length=64)
+    textname: Optional[str] = Field(default=None, max_length=128)
     roles: Optional[List[str]] = None
+
+    @field_validator('name')
+    @classmethod
+    def name_safe(cls, v: str) -> str:
+        if not _re.fullmatch(r'[A-Za-z0-9_.\-]+', v):
+            raise ValueError(
+                'Group name may only contain letters, numbers, hyphens, underscores, and dots'
+            )
+        return v
 
 
 class RoleAssignment(BaseModel):
@@ -207,11 +236,35 @@ class Permission(str, Enum):
 
 # Model for ACL request
 class ACLRequest(BaseModel):
-    topic: str = Field(..., description="MQTT topic")
-    aclType: str = Field(
-        ..., description="ACL type (publishClientSend or subscribeLiteral)"
-    )
+    topic: str = Field(..., min_length=1, max_length=256)
+    aclType: str = Field(..., description="ACL type (publishClientSend or subscribeLiteral)")
     permission: str = Field(..., description="Permission (allow or deny)")
+
+    @field_validator('topic')
+    @classmethod
+    def topic_safe(cls, v: str) -> str:
+        # MQTT topics allow printable UTF-8 except NUL (\x00).
+        # Also reject consecutive slashes and leading/trailing spaces
+        # which are almost certainly mistakes.
+        if '\x00' in v:
+            raise ValueError('Topic must not contain NUL characters')
+        if v != v.strip():
+            raise ValueError('Topic must not have leading or trailing spaces')
+        return v
+
+    @field_validator('aclType')
+    @classmethod
+    def acl_type_valid(cls, v: str) -> str:
+        if v not in VALID_ACL_TYPES:
+            raise ValueError(f'Invalid aclType. Must be one of: {VALID_ACL_TYPES}')
+        return v
+
+    @field_validator('permission')
+    @classmethod
+    def permission_valid(cls, v: str) -> str:
+        if v not in ('allow', 'deny'):
+            raise ValueError('Permission must be "allow" or "deny"')
+        return v
 
 
 # Mosquitto command execution with logging

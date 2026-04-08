@@ -38,17 +38,17 @@ interface PanelUser extends Omit<User, 'createdAt'> {
 }
 
 const newUserSchema = z.object({
-  firstName: z.string().min(1, 'First name is required'),
-  lastName:  z.string().min(1, 'Last name is required'),
+  firstName: z.string().min(1, 'First name is required').max(64),
+  lastName:  z.string().min(1, 'Last name is required').max(64),
   email:     z.string().email('Invalid email address'),
-  password:  z.string().min(6, 'Password must be at least 6 characters'),
+  password:  z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password too long'),
   role:      z.enum(['admin', 'user']),
 })
 
 type NewUserForm = z.infer<typeof newUserSchema>
 
 const resetPasswordSchema = z.object({
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password too long'),
 })
 type ResetPasswordForm = z.infer<typeof resetPasswordSchema>
 

@@ -31,8 +31,18 @@ export async function POST(request: NextRequest) {
     if (!email || !password || !firstName || !lastName) {
       return NextResponse.json({ error: 'All fields are required' }, { status: 400 })
     }
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'Password must be at least 6 characters' }, { status: 400 })
+    // Validate email format server-side
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return NextResponse.json({ error: 'Invalid email address' }, { status: 400 })
+    }
+    // Enforce password length to prevent bcrypt DoS (>72 bytes = wasted CPU)
+    if (password.length < 8 || password.length > 128) {
+      return NextResponse.json({ error: 'Password must be between 8 and 128 characters' }, { status: 400 })
+    }
+    // Sanitize name fields: reject if they contain control characters
+    if (/[\x00-\x1F\x7F]/.test(firstName) || /[\x00-\x1F\x7F]/.test(lastName)) {
+      return NextResponse.json({ error: 'Name contains invalid characters' }, { status: 400 })
     }
     const validRoles: UserRole[] = ['admin', 'user']
     if (role && !validRoles.includes(role)) {
