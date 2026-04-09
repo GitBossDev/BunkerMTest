@@ -7,6 +7,7 @@
 #
 # app/dynsec/main.py
 import logging
+import threading
 from fastapi import FastAPI, HTTPException, Security, Depends, Request, status, UploadFile, File, Form
 from fastapi.security.api_key import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
@@ -79,6 +80,32 @@ def _get_current_api_key() -> str:
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
 
+# Path to the live DynSec JSON (same volume as mosquitto)
+DYNSEC_PATH = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
+
+_dynsec_lock = threading.Lock()
+
+def _read_dynsec() -> Dict[str, Any]:
+    """Read and return the DynSec JSON. Raises on error."""
+    with open(DYNSEC_PATH, "r") as f:
+        return json.load(f)
+
+def _write_dynsec(data: Dict[str, Any]) -> None:
+    """Atomic write to DynSec JSON (temp + rename) to prevent corruption."""
+    import tempfile
+    dir_path = os.path.dirname(DYNSEC_PATH)
+    fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".dynsec-tmp-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent="\t")
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    os.replace(tmp_path, DYNSEC_PATH)
+
 # Base command for mosquitto_ctrl
 DYNSEC_BASE_COMMAND = [
     "mosquitto_ctrl",
@@ -149,7 +176,7 @@ async def add_security_headers(request: Request, call_next):
 # Models
 class ClientCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
-    password: str = Field(..., min_length=8, max_length=128)
+    password: str = Field(..., min_length=6, max_length=128)
 
     @field_validator('username')
     @classmethod
@@ -338,6 +365,25 @@ async def create_client(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Error setting password: {result}",
             )
+
+        # --- Dual-write: persist to JSON so changes survive a mosquitto SIGKILL ---
+        try:
+            import hashlib, base64, secrets as _sec
+            _salt = _sec.token_bytes(12)
+            _dk   = hashlib.pbkdf2_hmac('sha512', client.password.encode(), _salt, 101)
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                _d["clients"].append({
+                    "username":   client.username,
+                    "textname":   "",
+                    "roles":      [],
+                    "password":   base64.b64encode(_dk).decode(),
+                    "salt":       base64.b64encode(_salt).decode(),
+                    "iterations": 101,
+                })
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for create_client {client.username}: {_je}")
 
         logger.info(f"Successfully created client: {client.username}")
         return ClientResponse(
@@ -560,6 +606,18 @@ async def enable_client(
             logger.error(f"Failed to enable client {username}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _c in _d.get("clients", []):
+                    if _c.get("username") == username:
+                        _c["disabled"] = False
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for enable_client {username}: {_je}")
+
         logger.info(f"Successfully enabled client: {username}")
         return {"message": f"Client {username} enabled successfully"}
 
@@ -592,6 +650,18 @@ async def disable_client(
             logger.error(f"Failed to disable client {username}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _c in _d.get("clients", []):
+                    if _c.get("username") == username:
+                        _c["disabled"] = True
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for disable_client {username}: {_je}")
+
         logger.info(f"Successfully disabled client: {username}")
         return {"message": f"Client {username} disabled successfully"}
 
@@ -623,6 +693,15 @@ async def remove_client(
         if not success:
             logger.error(f"Failed to remove client {username}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                _d["clients"] = [_c for _c in _d.get("clients", []) if _c.get("username") != username]
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for remove_client {username}: {_je}")
 
         logger.info(f"Successfully removed client: {username}")
         return {"message": f"Client {username} removed successfully"}
@@ -659,6 +738,16 @@ async def create_role(
         if not success:
             logger.error(f"Failed to create role {role.name}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                if not any(r.get("rolename") == role.name for r in _d.get("roles", [])):
+                    _d.setdefault("roles", []).append({"rolename": role.name, "acls": []})
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for create_role {role.name}: {_je}")
 
         logger.info(f"Successfully created role: {role.name}")
         return {"message": f"Role {role.name} created successfully"}
@@ -769,6 +858,20 @@ async def add_client_role(
             )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _c in _d.get("clients", []):
+                    if _c.get("username") == username:
+                        _roles = _c.setdefault("roles", [])
+                        if not any(r.get("rolename") == role.role_name for r in _roles):
+                            _roles.append({"rolename": role.role_name, "priority": role.priority or 1})
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for add_client_role {username}/{role.role_name}: {_je}")
+
         logger.info(f"Successfully assigned role {role.role_name} to client {username}")
         return {"message": f"Role {role.role_name} assigned to client {username}"}
 
@@ -803,6 +906,18 @@ async def remove_client_role(
                 f"Failed to remove role {role_name} from client {username}: {result}"
             )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _c in _d.get("clients", []):
+                    if _c.get("username") == username:
+                        _c["roles"] = [r for r in _c.get("roles", []) if r.get("rolename") != role_name]
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for remove_client_role {username}/{role_name}: {_je}")
 
         logger.info(f"Successfully removed role {role_name} from client {username}")
         return {"message": f"Role {role_name} removed from client {username}"}
@@ -876,6 +991,18 @@ async def remove_group_role(
             )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _g in _d.get("groups", []):
+                    if _g.get("groupname") == group_name:
+                        _g["roles"] = [r for r in _g.get("roles", []) if r.get("rolename") != role_name]
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for remove_group_role {group_name}/{role_name}: {_je}")
+
         logger.info(f"Successfully removed role {role_name} from group {group_name}")
         return {"message": f"Role {role_name} removed from group {group_name}"}
 
@@ -907,6 +1034,16 @@ async def create_group(
         if not success:
             logger.error(f"Failed to create group {group.name}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                if not any(g.get("groupname") == group.name for g in _d.get("groups", [])):
+                    _d.setdefault("groups", []).append({"groupname": group.name, "roles": [], "clients": []})
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for create_group {group.name}: {_je}")
 
         logger.info(f"Successfully created group: {group.name}")
         return {"message": f"Group {group.name} created successfully"}
@@ -1012,6 +1149,15 @@ async def delete_group(
             logger.error(f"Failed to delete group {group_name}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                _d["groups"] = [g for g in _d.get("groups", []) if g.get("groupname") != group_name]
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for delete_group {group_name}: {_je}")
+
         logger.info(f"Successfully deleted group: {group_name}")
         return {"message": f"Group {group_name} deleted successfully"}
 
@@ -1060,6 +1206,23 @@ async def add_client_to_group(
             )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _g in _d.get("groups", []):
+                    if _g.get("groupname") == group_name:
+                        _gclients = _g.setdefault("clients", [])
+                        if not any(
+                            (c.get("username") if isinstance(c, dict) else c) == username
+                            for c in _gclients
+                        ):
+                            _gclients.append({"username": username})
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for add_client_to_group {group_name}/{username}: {_je}")
+
         logger.info(f"Successfully added client {username} to group {group_name}")
         return {
             "message": f"Client {username} added to group {group_name} successfully"
@@ -1095,6 +1258,21 @@ async def remove_client_from_group(
                 f"Failed to remove client {username} from group {group_name}: {result}"
             )
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _g in _d.get("groups", []):
+                    if _g.get("groupname") == group_name:
+                        _g["clients"] = [
+                            c for c in _g.get("clients", [])
+                            if (c.get("username") if isinstance(c, dict) else c) != username
+                        ]
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for remove_client_from_group {group_name}/{username}: {_je}")
 
         logger.info(f"Successfully removed client {username} from group {group_name}")
         return {
@@ -1147,6 +1325,28 @@ async def add_role_acl(
             logger.error(f"Failed to add ACL to role {role_name}: {result}")
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result)
 
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _r in _d.get("roles", []):
+                    if _r.get("rolename") == role_name:
+                        _acls = _r.setdefault("acls", [])
+                        if not any(
+                            a.get("acltype") == acl.aclType and a.get("topic") == acl.topic
+                            for a in _acls
+                        ):
+                            _acls.append({
+                                "acltype": acl.aclType,
+                                "topic": acl.topic,
+                                "allow": acl.permission == "allow",
+                                "priority": -1,
+                            })
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for add_role_acl {role_name}: {_je}")
+
         logger.info(f"Successfully added ACL to role {role_name}")
         return {
             "message": f"ACL added successfully to role {role_name}",
@@ -1175,6 +1375,14 @@ async def delete_role(role_name: str, api_key: str = Security(get_api_key)):
     success, result = execute_mosquitto_command(command)
     if not success:
         raise HTTPException(status_code=400, detail=result)
+    # Dual-write
+    try:
+        with _dynsec_lock:
+            _d = _read_dynsec()
+            _d["roles"] = [r for r in _d.get("roles", []) if r.get("rolename") != role_name]
+            _write_dynsec(_d)
+    except Exception as _je:
+        logger.warning(f"JSON dual-write failed for delete_role {role_name}: {_je}")
     return {"message": f"Role {role_name} deleted successfully"}
 
 
@@ -1193,6 +1401,21 @@ async def remove_role_acl(
         if not success:
             logger.error(f"Command failed: {result}")
             raise HTTPException(status_code=400, detail=result)
+
+        # Dual-write
+        try:
+            with _dynsec_lock:
+                _d = _read_dynsec()
+                for _r in _d.get("roles", []):
+                    if _r.get("rolename") == role_name:
+                        _r["acls"] = [
+                            a for a in _r.get("acls", [])
+                            if not (a.get("acltype") == str(acl_type.value) and a.get("topic") == topic)
+                        ]
+                        break
+                _write_dynsec(_d)
+        except Exception as _je:
+            logger.warning(f"JSON dual-write failed for remove_role_acl {role_name}: {_je}")
 
         return {"message": f"ACL removed from role {role_name} successfully"}
 

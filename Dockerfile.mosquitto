@@ -15,6 +15,10 @@ FROM eclipse-mosquitto:2
 # eclipse-mosquitto is Alpine-based so we can add packages if required
 USER root
 
+# python3 is needed by mosquitto-entrypoint.sh to patch dynamic-security.json
+# before mosquitto starts (credential sync without needing an MQTT connection).
+RUN apk add --no-cache python3
+
 # Create required directories with the same paths BunkerM expects.
 # Eclipse-mosquitto defaults to /mosquitto/{config,data,log} — we override these
 # via our custom config file pointing to /var/lib/mosquitto etc.

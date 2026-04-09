@@ -50,6 +50,7 @@ def _get_current_api_key() -> str:
 
 DYNSEC_JSON_PATH = os.getenv("DYNSEC_JSON_PATH", "/var/lib/mosquitto/dynamic-security.json")
 BACKUP_DIR = os.getenv("DYNSEC_BACKUP_DIR", "/tmp/dynsec_backups")
+MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME", "admin")
 
 # Security
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
@@ -66,13 +67,13 @@ DEFAULT_CONFIG = {
         "unsubscribe": True
     },
     "clients": [{
-        "username": "bunker",
+        "username": "admin",
         "textname": "Dynsec admin user",
         "roles": [{
             "rolename": "admin"
         }],
-        "password": "bZDAuypZzNug9z7yoB3vmEwGIx1COCRaN8m16bEbnAoVJxBYxz1x9fMR7cB7ToC2Kj+txYEq2bWrl1H3GtnRlg==",
-        "salt": "MfMHo5wStiQVCpnt",
+        "password": "Q/H+scYSXErJ8YgAnd8TGNpIbJmNVQelnNwGpWir/MuSWS1KvhRCB894bdvHiBahVpLH03lZkZtJB0inO7HJ+Q==",
+        "salt": "YWRtbjIwMjV4S205",
         "iterations": 101
     }],
     "groups": [],
@@ -151,11 +152,24 @@ def read_dynsec_json() -> Dict[str, Any]:
 
 def write_dynsec_json(data: Dict[str, Any]) -> bool:
     """
-    Write to the dynamic security JSON file
+    Write to the dynamic security JSON file using an atomic temp-file rename to
+    prevent corruption when writing large configs (25K+ clients).
     """
     try:
-        with open(DYNSEC_JSON_PATH, "w") as f:
-            json.dump(data, f, indent=4)
+        import tempfile
+        dir_path = os.path.dirname(DYNSEC_JSON_PATH)
+        # Write to a temp file in the same directory so rename is atomic on POSIX.
+        fd, tmp_path = tempfile.mkstemp(dir=dir_path, prefix=".dynsec-tmp-")
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, indent=4)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        os.replace(tmp_path, DYNSEC_JSON_PATH)
         return True
     except Exception as e:
         logger.error(f"Error writing dynamic security JSON: {str(e)}")
@@ -193,37 +207,45 @@ def validate_dynsec_json(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def merge_dynsec_configs(imported_config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Merge imported config with default config to preserve critical components
+    Merge imported config with default config to preserve critical components.
+    The admin user and admin role are taken from the LIVE dynamic-security.json
+    (not from the hardcoded DEFAULT_CONFIG) so that any password rotation done
+    by sync_admin_credentials in the entrypoint is preserved.
     """
-    # Start with a deep copy of the default config
-    merged_config = DEFAULT_CONFIG.copy()
-    
-    # Copy defaultACLAccess from default config (must be preserved)
-    # merged_config["defaultACLAccess"] = DEFAULT_CONFIG["defaultACLAccess"]
-    
-    # Keep admin user and add other users from imported config
-    admin_user = DEFAULT_CONFIG["clients"][0]
-    
-    # Get all non-admin users from imported config
-    non_admin_users = [user for user in imported_config.get("clients", []) 
-                       if "username" in user and user["username"] != "bunker"]
-    
-    # Combine admin user with non-admin users
+    import copy
+    merged_config = copy.deepcopy(DEFAULT_CONFIG)
+
+    # --- Admin user: prefer the live file so password hash is always current ---
+    live_admin_user = None
+    try:
+        live_data = read_dynsec_json()
+        for c in live_data.get("clients", []):
+            if c.get("username") == MOSQUITTO_ADMIN_USERNAME:
+                live_admin_user = c
+                break
+    except Exception as _e:
+        logger.warning(f"merge_dynsec_configs: could not read live admin user: {_e}")
+
+    admin_user = live_admin_user if live_admin_user else DEFAULT_CONFIG["clients"][0]
+
+    # Non-admin users from the imported config
+    non_admin_users = [
+        user for user in imported_config.get("clients", [])
+        if "username" in user and user["username"] != MOSQUITTO_ADMIN_USERNAME
+    ]
     merged_config["clients"] = [admin_user] + non_admin_users
-    
-    # Keep admin role and add other roles from imported config
+
+    # --- Admin role: always keep the full admin role from DEFAULT_CONFIG ---
     admin_role = DEFAULT_CONFIG["roles"][0]
-    
-    # Get all non-admin roles from imported config
-    non_admin_roles = [role for role in imported_config.get("roles", []) 
-                       if "rolename" in role and role["rolename"] != "admin"]
-    
-    # Combine admin role with non-admin roles
+    non_admin_roles = [
+        role for role in imported_config.get("roles", [])
+        if "rolename" in role and role["rolename"] != "admin"
+    ]
     merged_config["roles"] = [admin_role] + non_admin_roles
-    
+
     # Import groups from imported config
     merged_config["groups"] = imported_config.get("groups", [])
-    
+
     return merged_config
 
 
@@ -292,11 +314,11 @@ async def export_dynsec_json(api_key: str = Security(get_api_key)):
         # Create a copy of the data for modification
         export_data = data.copy()
         
-        # Remove the default "bunker" admin user from the exported data
+        # Remove the default admin user from the exported data
         if "clients" in export_data:
             export_data["clients"] = [
                 client for client in export_data["clients"] 
-                if "username" not in client or client["username"] != "bunker"
+                if "username" not in client or client["username"] != MOSQUITTO_ADMIN_USERNAME
             ]
         
         # Remove the default "admin" role from the exported data

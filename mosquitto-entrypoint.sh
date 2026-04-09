@@ -30,6 +30,77 @@ if [ ! -f /var/lib/mosquitto/dynamic-security.json ]; then
     cp /mosquitto-seeds/dynamic-security.json /var/lib/mosquitto/dynamic-security.json
 fi
 
+# ── 3b. Sync admin credentials directly in JSON (before mosquitto starts) ────
+# Patches /var/lib/mosquitto/dynamic-security.json in-place so the hash always
+# matches MQTT_USERNAME / MQTT_PASSWORD from the environment.  Works in every
+# state: fresh volume (just seeded), old 'bunker' volume, or a previous random
+# password that is no longer known.  No MQTT connection needed.
+sync_admin_credentials() {
+    python3 - <<'PYEOF'
+import json, hashlib, base64, os, secrets, sys
+
+username = os.environ.get('MQTT_USERNAME', 'admin')
+password = os.environ.get('MQTT_PASSWORD', 'Usuario@1')
+path     = '/var/lib/mosquitto/dynamic-security.json'
+
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception as e:
+    print('[sync-creds] ERROR reading {}: {}'.format(path, e))
+    sys.exit(0)
+
+clients = data.get('clients', [])
+
+salt_bytes = secrets.token_bytes(12)
+salt_b64   = base64.b64encode(salt_bytes).decode()
+dk         = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt_bytes, 101)
+hash_b64   = base64.b64encode(dk).decode()
+
+def patch_client(c):
+    c['username']   = username
+    c['password']   = hash_b64
+    c['salt']       = salt_b64
+    c['iterations'] = 101
+
+legacy_names = {'bunker', 'admin'}
+target_idx   = None
+legacy_idx   = None
+
+for i, c in enumerate(clients):
+    if c.get('username') == username:
+        target_idx = i
+        break
+    if c.get('username') in legacy_names and legacy_idx is None:
+        legacy_idx = i
+
+if target_idx is not None:
+    patch_client(clients[target_idx])
+    print('[sync-creds] Updated password for {}'.format(username))
+elif legacy_idx is not None:
+    old_name = clients[legacy_idx]['username']
+    patch_client(clients[legacy_idx])
+    print('[sync-creds] Migrated {} -> {}'.format(old_name, username))
+else:
+    new_client = {
+        'username':   username,
+        'textname':   'Dynsec admin user',
+        'roles':      [{'rolename': 'admin'}],
+        'password':   hash_b64,
+        'salt':       salt_b64,
+        'iterations': 101,
+    }
+    clients.append(new_client)
+    print('[sync-creds] Created new admin client {}'.format(username))
+
+data['clients'] = clients
+with open(path, 'w') as f:
+    json.dump(data, f, indent='\t')
+print('[sync-creds] Credentials synced for {}'.format(username))
+PYEOF
+}
+sync_admin_credentials || echo "[sync-creds] WARNING: credential sync failed — mosquitto may reject connections"
+
 # ── 4. Ajustar permisos en volumenes compartidos ──────────────────────────────
 chown -R mosquitto:mosquitto /var/lib/mosquitto /var/log/mosquitto
 chmod -R 755 /var/lib/mosquitto

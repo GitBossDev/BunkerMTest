@@ -25,8 +25,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Environment variables
-MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME", "bunker")
-MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD", "bunker")
+MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME", "admin")
+MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD", "Usuario@1")
 MOSQUITTO_IP = os.getenv("MOSQUITTO_IP", "localhost")
 MOSQUITTO_PORT = os.getenv("MOSQUITTO_PORT", "1883")
 
@@ -145,7 +145,7 @@ class MQTTMonitor:
         return "unknown", "MQTT vunknown", "unknown", 0, False, 0
 
     def _is_admin(self, username: str) -> bool:
-        return username == os.getenv("MOSQUITTO_ADMIN_USERNAME", "bunker")
+        return username == os.getenv("MOSQUITTO_ADMIN_USERNAME", "admin")
 
     def _is_internal_auto_client(self, client_id: str) -> bool:
         """Return True for mosquitto_ctrl ephemeral connections (auto-UUID pattern)."""
@@ -584,6 +584,41 @@ def monitor_mosquitto_logs():
         )
     except Exception as exc:
         print(f"Startup subscribe replay failed: {exc}")
+
+    # After all replays: detect if mosquitto was previously restarted.
+    # If the last "terminating" log entry is more recent than the last client
+    # connection event we replayed, those connections ended at shutdown and the
+    # connected_clients / _last_seen dicts contain stale data.  Clear them so
+    # the UI shows no ghost connections until clients actually reconnect.
+    try:
+        term_grep = subprocess.run(
+            ["grep", "mosquitto version .* terminating", log_file],
+            capture_output=True, text=True,
+        )
+        if term_grep.returncode == 0:
+            term_lines = [l.strip() for l in term_grep.stdout.splitlines() if l.strip()]
+            if term_lines and mqtt_monitor.connected_clients:
+                last_term_raw = term_lines[-1].split(": ")[0]
+                # Parse the terminating timestamp (ISO or unix)
+                if last_term_raw.isdigit():
+                    last_term_dt = datetime.fromtimestamp(int(last_term_raw), tz=timezone.utc)
+                else:
+                    last_term_dt = datetime.fromisoformat(last_term_raw).replace(tzinfo=timezone.utc)
+                # Find the latest connection timestamp among replayed connected clients
+                last_conn_dt = max(
+                    (datetime.fromisoformat(ev.timestamp) for ev in mqtt_monitor.connected_clients.values()),
+                    default=datetime.min.replace(tzinfo=timezone.utc),
+                )
+                if last_term_dt > last_conn_dt:
+                    stale = len(mqtt_monitor.connected_clients)
+                    mqtt_monitor.connected_clients.clear()
+                    mqtt_monitor._last_seen.clear()
+                    print(
+                        f"Startup: mosquitto restart detected (term={last_term_raw}) — "
+                        f"cleared {stale} stale connected client(s)."
+                    )
+    except Exception as exc:
+        print(f"Startup: restart detection failed: {exc}")
 
     process = subprocess.Popen(
         ["tail", "-f", log_file],

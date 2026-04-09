@@ -54,8 +54,8 @@ handler = RotatingFileHandler(
 logger.addHandler(handler)
 
 # MQTT Settings - Convert port to integer
-MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME") or os.getenv("MQTT_USERNAME", "bunker")
-MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD") or os.getenv("MQTT_PASSWORD", "bunker")
+MOSQUITTO_ADMIN_USERNAME = os.getenv("MOSQUITTO_ADMIN_USERNAME") or os.getenv("MQTT_USERNAME", "admin")
+MOSQUITTO_ADMIN_PASSWORD = os.getenv("MOSQUITTO_ADMIN_PASSWORD") or os.getenv("MQTT_PASSWORD", "Usuario@1")
 MOSQUITTO_IP = os.getenv("MOSQUITTO_IP", "127.0.0.1")
 # Convert to int with a default value
 MOSQUITTO_PORT = int(os.getenv("MOSQUITTO_PORT", "1900"))
@@ -152,7 +152,7 @@ _alert_config_ts: float = 0.0
 def _default_alert_config() -> dict:
     """Build the default config from env vars (backwards-compatible fallback)."""
     return {
-        "broker_down_grace_polls":  int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "3")),
+        "broker_down_grace_polls":  int(os.getenv("ALERT_BROKER_DOWN_GRACE_POLLS", "5")),
         "client_capacity_pct":      float(os.getenv("ALERT_CLIENT_CAPACITY_PCT", "80")),
         "reconnect_loop_count":     int(os.getenv("ALERT_RECONNECT_LOOP_COUNT", "5")),
         "reconnect_loop_window_s":  int(os.getenv("ALERT_RECONNECT_LOOP_WINDOW_S", "60")),
@@ -1026,11 +1026,14 @@ async def get_mqtt_stats(
         
         try:
             stats = mqtt_stats.get_stats()
-            
-            # Add MQTT connection status
-            mqtt_connected = mqtt_stats.connected_clients > 0
+
+            # Use the MQTT callback flag (_is_connected) as the authoritative
+            # connection signal. connected_clients comes from $SYS messages which
+            # may not arrive for several seconds after reconnect — using it alone
+            # produces false "broker offline" alerts on every restart/reload.
+            mqtt_connected = mqtt_stats._is_connected
             stats["mqtt_connected"] = mqtt_connected
-            
+
             # If MQTT is not connected, add a message
             if not mqtt_connected:
                 stats["connection_error"] = f"MQTT broker connection failed. Check if Mosquitto is running on {MOSQUITTO_IP}:{MOSQUITTO_PORT}"

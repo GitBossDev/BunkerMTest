@@ -44,6 +44,7 @@ function buildPageNumbers(current: number, total: number): (number | '...')[] {
 }
 
 export default function ConnectedClientsPage() {
+  const ADMIN_USERNAME = 'admin'
   const [allUsernames, setAllUsernames] = useState<string[]>([])
   // username → MQTTEvent for currently connected clients (deduplicated by username)
   const [connectedMap, setConnectedMap] = useState<Map<string, MQTTEvent>>(new Map())
@@ -327,28 +328,30 @@ export default function ConnectedClientsPage() {
 
                   <TableCell>
                     <div className="flex items-center justify-end">
-                      {row.status === 'disabled' ? (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleEnable(row.username)}
-                          disabled={actionUsername === row.username}
-                          className="text-green-600 hover:text-green-600 hover:bg-green-50 gap-1"
-                        >
-                          <Power className="h-3.5 w-3.5" />
-                          Enable
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleDisable(row.username)}
-                          disabled={actionUsername === row.username}
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
-                        >
-                          <PowerOff className="h-3.5 w-3.5" />
-                          Disable
-                        </Button>
+                      {row.username !== ADMIN_USERNAME && (
+                        row.status === 'disabled' ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleEnable(row.username)}
+                            disabled={actionUsername === row.username}
+                            className="text-green-600 hover:text-green-600 hover:bg-green-50 gap-1"
+                          >
+                            <Power className="h-3.5 w-3.5" />
+                            Enable
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDisable(row.username)}
+                            disabled={actionUsername === row.username}
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1"
+                          >
+                            <PowerOff className="h-3.5 w-3.5" />
+                            Disable
+                          </Button>
+                        )
                       )}
                     </div>
                   </TableCell>

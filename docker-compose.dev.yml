@@ -72,6 +72,10 @@ services:
     ports:
       - "1900:1900"   # MQTT (TCP) — dispositivos, clientes externos y app procesamiento
       - "9001:9001"   # MQTT sobre WebSockets (opcional)
+    environment:
+      # Credentials used by the entrypoint to reconcile admin user on every start
+      - MQTT_USERNAME=${MQTT_USERNAME:-admin}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
     volumes:
       - mosquitto-data:/var/lib/mosquitto   # DynSec JSON + persistencia
       - mosquitto-conf:/etc/mosquitto       # mosquitto.conf + conf.d/
@@ -104,11 +108,11 @@ services:
       # MQTT — apunta al contenedor mosquitto standalone en la red interna
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1900
-      - MQTT_USERNAME=${MQTT_USERNAME:-bunker}
-      - MQTT_PASSWORD=${MQTT_PASSWORD:-bunker}
+      - MQTT_USERNAME=${MQTT_USERNAME:-admin}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       # Variables que usan los backends Python para conectarse al broker
-      - MOSQUITTO_ADMIN_USERNAME=${MQTT_USERNAME:-bunker}
-      - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-bunker}
+      - MOSQUITTO_ADMIN_USERNAME=${MQTT_USERNAME:-admin}
+      - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
       # Seguridad (secrets generados por generate-secrets.py)

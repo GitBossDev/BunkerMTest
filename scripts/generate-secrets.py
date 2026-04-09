@@ -7,6 +7,9 @@ Usage: python scripts/generate-secrets.py
 import secrets
 import uuid
 import string
+import hashlib
+import base64
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -166,6 +169,47 @@ if __name__ == '__main__':
         f.write(env_content)
     
     print(f"[OK] Secrets generated and saved to: {env_file}")
+    print()
+
+    # ── Patch mosquitto seed JSON with the generated MQTT_PASSWORD hash ──────
+    # This ensures that on a clean volume, the seed credentials match what the
+    # backend services will receive via MQTT_PASSWORD on the first boot.
+    seed_json_path = Path(__file__).parent.parent / 'bunkerm-source' / 'backend' / 'mosquitto' / 'dynsec' / 'dynamic-security.json'
+    if seed_json_path.exists():
+        try:
+            mqtt_user = 'admin'
+            # Extract the generated password from the written env_content
+            mqtt_pass = next(
+                line.split('=', 1)[1]
+                for line in env_content.splitlines()
+                if line.startswith('MQTT_PASSWORD=')
+            )
+            # Generate a fresh 12-byte salt
+            salt_bytes = secrets.token_bytes(12)
+            salt_b64 = base64.b64encode(salt_bytes).decode()
+            dk = hashlib.pbkdf2_hmac('sha512', mqtt_pass.encode('utf-8'), salt_bytes, 101)
+            password_b64 = base64.b64encode(dk).decode()
+
+            with open(seed_json_path, 'r') as fh:
+                seed = json.load(fh)
+
+            # Find and update the admin client entry
+            for client in seed.get('clients', []):
+                if client.get('username') == mqtt_user:
+                    client['password'] = password_b64
+                    client['salt'] = salt_b64
+                    client['iterations'] = 101
+                    break
+
+            with open(seed_json_path, 'w') as fh:
+                json.dump(seed, fh, indent='\t')
+
+            print(f"[OK] Mosquitto seed JSON updated for user '{mqtt_user}': {seed_json_path}")
+        except Exception as exc:
+            print(f"[WARNING] Could not update mosquitto seed JSON: {exc}")
+    else:
+        print(f"[WARNING] Mosquitto seed JSON not found at: {seed_json_path}")
+        print("         Run after cloning bunkerm-source/ so the seed matches .env.dev credentials.")
     print()
     print("IMPORTANT:")
     print("1. Update SMTP settings for email notifications")

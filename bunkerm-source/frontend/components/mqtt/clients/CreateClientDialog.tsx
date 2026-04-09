@@ -23,7 +23,7 @@ const schema = z
       .min(1, 'Username is required')
       .max(64, 'Username too long')
       .regex(/^[a-zA-Z0-9_.\-]+$/, 'Only letters, numbers, hyphens, underscores, and dots allowed'),
-    password: z.string().min(8, 'Password must be at least 8 characters').max(128, 'Password too long'),
+    password: z.string().min(6, 'Password must be at least 6 characters').max(128, 'Password too long'),
     confirmPassword: z.string().min(1, 'Please confirm your password'),
   })
   .refine((data) => data.password === data.confirmPassword, {

@@ -445,6 +445,9 @@ function Invoke-Build {
         exit 1
     }
 
+    # Construir Mosquitto primero (más rápido; BunkerM depende de él en runtime)
+    Invoke-BuildMosquitto
+
     # Convertir CRLF a LF en scripts .sh antes de construir
     Write-Info "Normalizando line endings en scripts shell..."
     Get-ChildItem bunkerm-source -Recurse -Filter "*.sh" | ForEach-Object {

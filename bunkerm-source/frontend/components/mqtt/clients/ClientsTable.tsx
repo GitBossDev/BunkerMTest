@@ -67,6 +67,7 @@ export function ClientsTable({
   onSearchChange,
   onPageChange,
 }: ClientsTableProps) {
+  const ADMIN_USERNAME = 'admin'
   const [createOpen, setCreateOpen] = useState(false)
   const [rolesDialogClient, setRolesDialogClient] = useState<MqttClient | null>(null)
   const [groupsDialogClient, setGroupsDialogClient] = useState<MqttClient | null>(null)
@@ -196,7 +197,7 @@ export function ClientsTable({
                                   <Switch
                                     checked={!disabled}
                                     onCheckedChange={() => handleToggleDisabled(client)}
-                                    disabled={togglingUsername === client.username}
+                                    disabled={togglingUsername === client.username || client.username === ADMIN_USERNAME}
                                     aria-label={`${disabled ? 'Enable' : 'Disable'} ${client.username}`}
                                   />
                                 )
@@ -204,7 +205,9 @@ export function ClientsTable({
                             </div>
                           </TooltipTrigger>
                           <TooltipContent>
-                            {(localDisabled[client.username] ?? client.disabled ?? false) ? 'Enable client' : 'Disable client'}
+                            {client.username === ADMIN_USERNAME
+                              ? 'Admin client — protected'
+                              : (localDisabled[client.username] ?? client.disabled ?? false) ? 'Enable client' : 'Disable client'}
                           </TooltipContent>
                         </Tooltip>
 
@@ -244,11 +247,12 @@ export function ClientsTable({
                               onClick={() => setDeleteTarget(client)}
                               className="text-destructive hover:text-destructive hover:bg-destructive/10"
                               aria-label={`Delete ${client.username}`}
+                              disabled={client.username === ADMIN_USERNAME}
                             >
                               <Trash2 className="h-4 w-4" />
                             </Button>
                           </TooltipTrigger>
-                          <TooltipContent>Delete client</TooltipContent>
+                          <TooltipContent>{client.username === ADMIN_USERNAME ? 'Admin client — protected' : 'Delete client'}</TooltipContent>
                         </Tooltip>
                       </div>
                     </TableCell>
