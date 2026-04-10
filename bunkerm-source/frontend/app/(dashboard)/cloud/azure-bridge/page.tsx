@@ -44,11 +44,10 @@ export default function AzureBridgePage() {
     setIsSaving(true)
     try {
       await azureApi.saveConfig({
-        connectionString,
-        hubName,
-        deviceId,
-        sasToken,
-        topic,
+        hub_name: hubName,
+        device_id: deviceId,
+        sas_token: sasToken,
+        topics: [topic],
       })
       toast.success('Azure Bridge configuration saved')
     } catch {

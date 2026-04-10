@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import type { MosquittoConfigResponse } from '@/types/api.generated'
 
 interface ListenerData {
   port: number
@@ -58,7 +59,11 @@ const DEFAULT_STATE: ConfigState = {
   dyncSecListeners: [],
 }
 
-function parseApiResponse(data: Record<string, unknown>): ConfigState {
+type MosquittoConfigPageResponse = MosquittoConfigResponse & {
+  available_certs?: string[]
+}
+
+function parseApiResponse(data: MosquittoConfigPageResponse): ConfigState {
   const listeners = (data.listeners as ListenerData[]) ?? []
 
   // Main TCP listener: first non-websocket listener that is NOT the DynSec HTTP port (8080)
@@ -186,7 +191,7 @@ export default function MosquittoConfigPage() {
   const fetchConfig = useCallback(async () => {
     setIsLoading(true)
     try {
-      const data = await configApi.getMosquittoConfig() as Record<string, unknown>
+      const data = await configApi.getMosquittoConfig() as MosquittoConfigPageResponse
       const parsed = parseApiResponse(data)
       setState(parsed)
       setSaved(parsed)

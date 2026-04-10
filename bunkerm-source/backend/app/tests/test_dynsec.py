@@ -7,9 +7,16 @@ para que los tests no dependan del broker en ejecucion.
 """
 import pytest
 import services.dynsec_service as dynsec_svc
+from config.dynsec_config import merge_dynsec_configs
 
 # Estructura minima valida de dynamic-security.json para los mocks
 SAMPLE_DYNSEC = {
+    "defaultACLAccess": {
+        "publishClientSend": True,
+        "publishClientReceive": False,
+        "subscribe": False,
+        "unsubscribe": True,
+    },
     "clients": [
         {"username": "sensor-01", "textname": "Sensor de prueba", "groups": [], "roles": [{"rolename": "sensors"}]}
     ],
@@ -37,6 +44,84 @@ async def test_list_clients_returns_200(client, monkeypatch):
     body = resp.json()
     assert "clients" in body
     assert any(c["username"] == "sensor-01" for c in body["clients"])
+    assert body["total"] == 1
+
+
+async def test_list_clients_returns_paginated_normalized_shape(client, monkeypatch):
+    """El listado normaliza roles/grupos y retorna metadatos de paginación."""
+    dynsec = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {
+                "username": "sensor-01",
+                "disabled": False,
+                "roles": [{"rolename": "sensors"}],
+                "groups": [{"groupname": "plantas"}],
+            },
+            {
+                "username": "sensor-02",
+                "disabled": True,
+                "roles": ["operators"],
+                "groups": ["line-a"],
+            },
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec)
+    resp = await client.get("/api/v1/dynsec/clients?page=1&limit=1&search=sensor")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["page"] == 1
+    assert body["limit"] == 1
+    assert body["total"] == 2
+    assert body["pages"] == 2
+    assert body["clients"][0]["roles"] == ["sensors"]
+    assert body["clients"][0]["groups"] == ["plantas"]
+
+
+async def test_get_clients_disabled_map_returns_all_clients(client, monkeypatch):
+    """Connected Clients usa disabled-map para poblar todos los usernames sin N+1."""
+    dynsec = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {"username": "sensor-01", "disabled": False},
+            {"username": "sensor-02", "disabled": True},
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec)
+    resp = await client.get("/api/v1/dynsec/clients/disabled-map")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["map"] == {"sensor-01": False, "sensor-02": True}
+    assert body["usernames"] == ["sensor-01", "sensor-02"]
+
+
+async def test_get_default_acl_reads_json_directly(client, monkeypatch):
+    """El endpoint no debe depender del parseo textual de mosquitto_ctrl."""
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
+    resp = await client.get("/api/v1/dynsec/default-acl")
+    assert resp.status_code == 200
+    assert resp.json() == SAMPLE_DYNSEC["defaultACLAccess"]
+
+
+def test_merge_dynsec_configs_preserves_imported_default_acl(monkeypatch):
+    """La importación debe conservar defaultACLAccess del JSON subido."""
+    imported = {
+        "defaultACLAccess": {
+            "publishClientSend": False,
+            "publishClientReceive": False,
+            "subscribe": True,
+            "unsubscribe": False,
+        },
+        "clients": [{"username": "sensor-01", "roles": [], "groups": []}],
+        "groups": [],
+        "roles": [],
+    }
+    monkeypatch.setattr(
+        "config.dynsec_config.read_dynsec_json",
+        lambda: {"clients": [{"username": "admin", "roles": [{"rolename": "admin"}]}]},
+    )
+    merged = merge_dynsec_configs(imported)
+    assert merged["defaultACLAccess"] == imported["defaultACLAccess"]
 
 
 async def test_list_clients_requires_auth(raw_client, monkeypatch):
@@ -58,6 +143,27 @@ async def test_get_client_found(client, monkeypatch):
     body = resp.json()
     # El router envuelve el resultado en {"client": {...}}
     assert body.get("client", {}).get("username") == "sensor-01"
+
+
+async def test_get_client_normalizes_role_and_group_entries(client, monkeypatch):
+    """El detalle del cliente debe exponer nombres compatibles con la UI."""
+    dynsec = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {
+                "username": "sensor-01",
+                "textname": "Sensor",
+                "roles": [{"rolename": "sensors", "priority": 7}],
+                "groups": [{"groupname": "plantas", "priority": 3}],
+            }
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec)
+    resp = await client.get("/api/v1/dynsec/clients/sensor-01")
+    assert resp.status_code == 200
+    body = resp.json()["client"]
+    assert body["roles"] == [{"rolename": "sensors", "name": "sensors", "priority": 7}]
+    assert body["groups"] == [{"groupname": "plantas", "name": "plantas", "priority": 3}]
 
 
 async def test_get_client_not_found(client, monkeypatch):

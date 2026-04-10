@@ -51,6 +51,68 @@ class DefaultACLConfig(BaseModel):
 _DEFAULT_ACL_TYPES = ["publishClientSend", "publishClientReceive", "subscribe", "unsubscribe"]
 
 
+def _normalize_role_names(raw_roles: List[Any]) -> List[str]:
+    """Normaliza roles a lista de nombres simple para la UI."""
+    result: List[str] = []
+    for role in raw_roles:
+        if isinstance(role, dict):
+            name = role.get("rolename")
+        else:
+            name = role
+        if isinstance(name, str) and name:
+            result.append(name)
+    return result
+
+
+def _normalize_group_names(raw_groups: List[Any]) -> List[str]:
+    """Normaliza grupos a lista de nombres simple para la UI."""
+    result: List[str] = []
+    for group in raw_groups:
+        if isinstance(group, dict):
+            name = group.get("groupname")
+        else:
+            name = group
+        if isinstance(name, str) and name:
+            result.append(name)
+    return result
+
+
+def _normalize_role_entries(raw_roles: List[Any]) -> List[Dict[str, Any]]:
+    """Normaliza roles preservando compatibilidad con contratos viejos y nuevos."""
+    result: List[Dict[str, Any]] = []
+    for role in raw_roles:
+        if isinstance(role, dict):
+            name = role.get("rolename") or role.get("name")
+            priority = role.get("priority")
+        else:
+            name = role
+            priority = None
+        if isinstance(name, str) and name:
+            entry: Dict[str, Any] = {"rolename": name, "name": name}
+            if priority is not None:
+                entry["priority"] = priority
+            result.append(entry)
+    return result
+
+
+def _normalize_group_entries(raw_groups: List[Any]) -> List[Dict[str, Any]]:
+    """Normaliza grupos preservando compatibilidad con contratos viejos y nuevos."""
+    result: List[Dict[str, Any]] = []
+    for group in raw_groups:
+        if isinstance(group, dict):
+            name = group.get("groupname") or group.get("name")
+            priority = group.get("priority")
+        else:
+            name = group
+            priority = None
+        if isinstance(name, str) and name:
+            entry: Dict[str, Any] = {"groupname": name, "name": name}
+            if priority is not None:
+                entry["priority"] = priority
+            result.append(entry)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
@@ -115,21 +177,64 @@ def _write_or_raise(
 # ---------------------------------------------------------------------------
 
 @router.get("/clients")
-async def list_clients(api_key: str = Security(get_api_key)):
-    """Lista todos los clientes leyendo dynamic-security.json."""
+async def list_clients(
+    page: int = 1,
+    limit: int = 50,
+    search: Optional[str] = None,
+    api_key: str = Security(get_api_key),
+):
+    """Lista clientes desde dynamic-security.json con paginación y búsqueda."""
     try:
         data = dynsec_svc.read_dynsec()
+        raw_clients = data.get("clients", [])
+
+        if search:
+            q = search.lower()
+            raw_clients = [c for c in raw_clients if q in c.get("username", "").lower()]
+
+        limit = max(1, limit)
+        page = max(1, page)
+        total = len(raw_clients)
+        pages = max(1, -(-total // limit))
+        start = (page - 1) * limit
+        page_clients = raw_clients[start:start + limit]
+
         clients = [
             {
                 "username": c.get("username", ""),
-                "textname": c.get("textname", ""),
-                "groups": c.get("groups", []),
-                "roles": c.get("roles", []),
                 "disabled": c.get("disabled", False),
+                "roles": _normalize_role_names(c.get("roles", [])),
+                "groups": _normalize_group_names(c.get("groups", [])),
             }
-            for c in data.get("clients", [])
+            for c in page_clients
         ]
-        return {"clients": clients}
+        return {
+            "clients": clients,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages,
+        }
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Dynamic security config not found")
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail=str(exc))
+
+
+@router.get("/clients/disabled-map")
+async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
+    """Devuelve el mapa disabled y la lista de usernames para Connected Clients."""
+    try:
+        data = dynsec_svc.read_dynsec()
+        clients = data.get("clients", [])
+        disabled_map = {
+            c["username"]: c.get("disabled", False)
+            for c in clients
+            if isinstance(c, dict) and c.get("username")
+        }
+        return {"map": disabled_map, "usernames": list(disabled_map.keys())}
     except FileNotFoundError:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Dynamic security config not found")
@@ -147,7 +252,15 @@ async def get_client(username: str, api_key: str = Security(get_api_key)):
         if client is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Client {username} not found")
-        return {"client": client}
+        return {
+            "client": {
+                "username": client.get("username", ""),
+                "textname": client.get("textname", ""),
+                "disabled": client.get("disabled", False),
+                "roles": _normalize_role_entries(client.get("roles", [])),
+                "groups": _normalize_group_entries(client.get("groups", [])),
+            }
+        }
     except HTTPException:
         raise
     except Exception as exc:
@@ -535,20 +648,18 @@ async def remove_client_from_group(group_name: str, username: str,
 
 @router.get("/default-acl")
 async def get_default_acl(api_key: str = Security(get_api_key)):
-    output = _cmd_or_raise(["getDefaultACLAccess"],
-                           err_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    config: Dict[str, bool] = {}
-    for line in output.splitlines():
-        line = line.strip()
-        if " : " in line:
-            key, value = line.split(" : ", 1)
-            key = key.strip()
-            if key in _DEFAULT_ACL_TYPES:
-                config[key] = value.strip() == "allow"
-    if not config:
+    try:
+        data = dynsec_svc.read_dynsec()
+        raw = data.get("defaultACLAccess", {})
+        return {
+            "publishClientSend": bool(raw.get("publishClientSend", True)),
+            "publishClientReceive": bool(raw.get("publishClientReceive", True)),
+            "subscribe": bool(raw.get("subscribe", True)),
+            "unsubscribe": bool(raw.get("unsubscribe", True)),
+        }
+    except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Failed to parse defaultACLAccess")
-    return config
+                            detail=f"Failed to load defaultACLAccess: {exc}")
 
 
 @router.put("/default-acl")
@@ -570,4 +681,11 @@ async def set_default_acl(acl_config: DefaultACLConfig,
     if errors:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="; ".join(errors))
+    try:
+        with dynsec_svc._dynsec_lock:
+            data = dynsec_svc.read_dynsec()
+            data["defaultACLAccess"] = updates
+            _write_or_raise(data, None, "set_default_acl")
+    except HTTPException:
+        raise
     return {"message": "Default ACL access updated successfully", "config": updates}

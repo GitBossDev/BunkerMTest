@@ -13,15 +13,19 @@ import json
 from pathlib import Path
 from datetime import datetime
 
+# Caracteres seguros para docker-compose/.env y para URLs embebidas
+# (evita $, #, @, :, comillas, backslash y espacios).
+SAFE_ENV_PUNCTUATION = "._-+=^~"
+
 def generate_secure_password(length=32):
-    """Generate a secure random password"""
-    alphabet = string.ascii_letters + string.digits + string.punctuation
+    """Generate a secure random password safe for compose/.env interpolation."""
+    alphabet = string.ascii_letters + string.digits + SAFE_ENV_PUNCTUATION
     # Ensure password has at least one of each type
     password = (
         secrets.choice(string.ascii_lowercase) +
         secrets.choice(string.ascii_uppercase) +
         secrets.choice(string.digits) +
-        secrets.choice(string.punctuation)
+        secrets.choice(SAFE_ENV_PUNCTUATION)
     )
     password += ''.join(secrets.choice(alphabet) for _ in range(length - 4))
     # Shuffle the password
@@ -67,6 +71,8 @@ DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
 # ------------------------------------------
 # MQTT Broker (Mosquitto) Configuration
 # ------------------------------------------
+# Credenciales para clientes MQTT externos e internos.
+# No confundir con ADMIN_INITIAL_PASSWORD, que es solo para la UI web.
 MQTT_BROKER=mosquitto
 MQTT_PORT=1900
 MQTT_WS_PORT=9001

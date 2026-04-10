@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { readFileSync } from 'fs'
 
+// Backend unificado: todos los servicios HTTP viven en un único proceso uvicorn.
+// El proxy de Next.js debe apuntar a ese puerto interno, no a los puertos legacy
+// de los antiguos microservicios standalone.
+const UNIFIED_API_BASE = process.env.BUNKERM_API_URL || 'http://127.0.0.1:9001/api/v1'
+
 // Service registry: first path segment → Python backend base URL
 const SERVICES: Record<string, string> = {
-  dynsec:        'http://127.0.0.1:1000/api/v1',
-  monitor:       'http://127.0.0.1:1001/api/v1',
-  clientlogs:    'http://127.0.0.1:1002/api/v1',
-  'aws-bridge':  'http://127.0.0.1:1003/api/v1',
-  'azure-bridge':'http://127.0.0.1:1004/api/v1',
-  config:        'http://127.0.0.1:1005/api/v1',
-  // Smart Anomaly Detection service (runs inside the same container)
-  ai:            process.env.AI_SERVICE_URL || 'http://127.0.0.1:8100',
+  dynsec:         `${UNIFIED_API_BASE}/dynsec`,
+  monitor:        `${UNIFIED_API_BASE}/monitor`,
+  clientlogs:     `${UNIFIED_API_BASE}/clientlogs`,
+  'aws-bridge':   `${UNIFIED_API_BASE}/aws-bridge`,
+  'azure-bridge': `${UNIFIED_API_BASE}/azure-bridge`,
+  config:         `${UNIFIED_API_BASE}/config`,
+  // Smart-anomaly también está montado en el backend unificado.
+  ai:             `${UNIFIED_API_BASE}/ai`,
 }
 
 const KEY_FILE = '/nextjs/data/.api_key'
@@ -52,7 +57,7 @@ async function handler(
   }
 
   // Build upstream URL, preserving all query params
-  const upstreamUrl = new URL(`${base}/${rest.join('/')}`)
+  const upstreamUrl = new URL(rest.length > 0 ? `${base}/${rest.join('/')}` : base)
   req.nextUrl.searchParams.forEach((v, k) => upstreamUrl.searchParams.set(k, v))
 
   // Reenviar headers inyectando la clave API del lado del servidor (nunca expuesta al browser)

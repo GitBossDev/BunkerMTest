@@ -32,9 +32,17 @@ interface ClientRolesDialogProps {
   onSuccess: () => void
 }
 
-// Backend getClient returns roles as [{name, priority}]
-interface BackendRole { name: string; priority: string }
-interface BackendClient { username: string; roles: BackendRole[]; groups: BackendRole[] }
+interface BackendRole {
+  name?: string
+  rolename?: string
+  priority?: string | number
+}
+
+interface BackendClient {
+  username: string
+  roles: BackendRole[]
+  groups: BackendRole[]
+}
 
 export function ClientRolesDialog({
   client,
@@ -53,7 +61,11 @@ export function ClientRolesDialog({
     setLoading(true)
     try {
       const res = await dynsecApi.getClient(username) as { client: BackendClient }
-      setCurrentRoleNames((res.client?.roles ?? []).map((r) => r.name).filter(Boolean))
+      setCurrentRoleNames(
+        (res.client?.roles ?? [])
+          .map((role) => role.rolename ?? role.name)
+          .filter((value): value is string => Boolean(value))
+      )
     } catch {
       setCurrentRoleNames([])
     } finally {

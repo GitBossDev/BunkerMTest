@@ -487,14 +487,9 @@ function Invoke-Build {
         }
     }
 
-    # Leer API_KEY del .env.dev para el build arg
-    $apiKey = (Get-Content .env.dev | Select-String "^API_KEY=" | Select-Object -First 1) -replace "^API_KEY=", ""
-    if (-not $apiKey) { $apiKey = "default_api_key_replace_in_production" }
-
     Write-Info "Construyendo imagen (puede tardar 5-15 minutos la primera vez)..."
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     & $script:CE build `
-        --build-arg "NEXT_PUBLIC_API_KEY=$apiKey" `
         -t bunkermtest-bunkerm:latest `
         -f bunkerm-source/Dockerfile.next `
         bunkerm-source

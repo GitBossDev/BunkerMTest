@@ -19,9 +19,7 @@ logger = logging.getLogger(__name__)
 _dynsec_lock = threading.Lock()
 
 # Comando base para mosquitto_ctrl (se completa con subcomando y parámetros).
-# Las credenciales se pasan SOLO via archivo temporal de configuracion (modo 0o600)
-# para que no aparezcan en la salida de `ps aux` (HIGH-4).
-# _build_base_command() ya no se usa; se conserva a modo de referencia interna.
+# La versión disponible en runtime no soporta `-c`, así que usamos flags directos.
 def _build_base_command() -> List[str]:
     return [
         "mosquitto_ctrl",
@@ -52,6 +50,7 @@ def write_dynsec(data: Dict[str, Any]) -> None:
     try:
         with os.fdopen(fd, "w") as fh:
             json.dump(data, fh, indent="\t")
+        os.chmod(tmp_path, 0o644)
     except Exception:
         try:
             os.unlink(tmp_path)
@@ -59,6 +58,7 @@ def write_dynsec(data: Dict[str, Any]) -> None:
             pass
         raise
     os.replace(tmp_path, settings.dynsec_path)
+    os.chmod(settings.dynsec_path, 0o644)
 
 
 # ---------------------------------------------------------------------------
@@ -69,58 +69,29 @@ def execute_mosquitto_command(subcommand: List[str]) -> Dict[str, Any]:
     """
     Ejecuta un subcomando de mosquitto_ctrl dynsec y devuelve un dict con
     success, output y error_output. No lanza excepciones.
-
-    Las credenciales se escriben en un archivo temporal con permisos 0o600 y se
-    pasan a mosquitto_ctrl via -c, evitando que la contraseña aparezca en ps aux
-    (que solo muestra argumentos de linea de comandos, no el contenido de archivos).
-    El archivo se borra en el bloque finally aunque falle el proceso.
     """
-    broker_host = os.getenv("MOSQUITTO_IP", settings.mqtt_broker)
-    broker_port  = os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port))
-    username     = os.getenv("MOSQUITTO_ADMIN_USERNAME", settings.mqtt_username)
-    password     = os.getenv("MOSQUITTO_ADMIN_PASSWORD", settings.mqtt_password)
-
-    # Escribir credenciales en archivo temporal con permisos restrictivos
-    config_content = (
-        f"host {broker_host}\n"
-        f"port {broker_port}\n"
-        f"username {username}\n"
-        f"password {password}\n"
-    )
-    fd, tmp_path = tempfile.mkstemp(prefix=".mqctrl-", suffix=".conf")
+    cmd = _build_base_command() + subcommand
     try:
-        with os.fdopen(fd, "w") as fh:
-            fh.write(config_content)
-        os.chmod(tmp_path, 0o600)
-
-        cmd = ["mosquitto_ctrl", "-c", tmp_path, "dynsec"] + subcommand
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            success = result.returncode == 0
-            if not success:
-                logger.warning("mosquitto_ctrl falló: %s", result.stderr)
-            return {
-                "success": success,
-                "output": result.stdout,
-                "error_output": result.stderr,
-            }
-        except subprocess.TimeoutExpired:
-            logger.error("mosquitto_ctrl agotó el tiempo de espera")
-            return {"success": False, "output": "", "error_output": "Broker unreachable: command timed out", "timeout": True}
-        except Exception as exc:
-            logger.error("Error ejecutando mosquitto_ctrl: %s", exc)
-            return {"success": False, "output": "", "error_output": str(exc)}
-    finally:
-        # Eliminar el archivo de credenciales sea cual sea el resultado
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        success = result.returncode == 0
+        if not success:
+            logger.warning("mosquitto_ctrl falló: %s", result.stderr)
+        return {
+            "success": success,
+            "output": result.stdout,
+            "error_output": result.stderr,
+        }
+    except subprocess.TimeoutExpired:
+        logger.error("mosquitto_ctrl agotó el tiempo de espera")
+        return {"success": False, "output": "", "error_output": "Broker unreachable: command timed out", "timeout": True}
+    except Exception as exc:
+        logger.error("Error ejecutando mosquitto_ctrl: %s", exc)
+        return {"success": False, "output": "", "error_output": str(exc)}
 
 
 # ---------------------------------------------------------------------------

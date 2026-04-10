@@ -33,8 +33,17 @@ interface ClientGroupsDialogProps {
   onSuccess: () => void
 }
 
-interface BackendGroupEntry { name: string; priority: string }
-interface BackendClient { username: string; roles: BackendGroupEntry[]; groups: BackendGroupEntry[] }
+interface BackendGroupEntry {
+  name?: string
+  groupname?: string
+  priority?: string | number
+}
+
+interface BackendClient {
+  username: string
+  roles: BackendGroupEntry[]
+  groups: BackendGroupEntry[]
+}
 
 export function ClientGroupsDialog({
   client,
@@ -57,8 +66,15 @@ export function ClientGroupsDialog({
       const res = await dynsecApi.getClient(username) as { client: BackendClient }
       setCurrentGroups(
         (res.client?.groups ?? [])
-          .filter((g) => g.name)
-          .map((g) => ({ groupname: g.name, priority: parseInt(g.priority) || 0 }))
+          .map((group) => {
+            const groupname = group.groupname ?? group.name
+            const priority = typeof group.priority === 'number'
+              ? group.priority
+              : parseInt(group.priority ?? '', 10) || 0
+
+            return groupname ? { groupname, priority } : null
+          })
+          .filter((group): group is { groupname: string; priority: number } => group !== null)
       )
     } catch {
       setCurrentGroups([])

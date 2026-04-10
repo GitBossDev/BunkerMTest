@@ -163,6 +163,7 @@ def write_dynsec_json(data: Dict[str, Any]) -> bool:
         try:
             with os.fdopen(fd, "w") as f:
                 json.dump(data, f, indent=4)
+            os.chmod(tmp_path, 0o644)
         except Exception:
             try:
                 os.unlink(tmp_path)
@@ -170,6 +171,7 @@ def write_dynsec_json(data: Dict[str, Any]) -> bool:
                 pass
             raise
         os.replace(tmp_path, DYNSEC_JSON_PATH)
+        os.chmod(DYNSEC_JSON_PATH, 0o644)
         return True
     except Exception as e:
         logger.error(f"Error writing dynamic security JSON: {str(e)}")
@@ -215,6 +217,11 @@ def merge_dynsec_configs(imported_config: Dict[str, Any]) -> Dict[str, Any]:
     import copy
     merged_config = copy.deepcopy(DEFAULT_CONFIG)
 
+    # Preservar la ACL por defecto del archivo importado.
+    merged_config["defaultACLAccess"] = copy.deepcopy(
+        imported_config.get("defaultACLAccess", DEFAULT_CONFIG["defaultACLAccess"])
+    )
+
     # --- Admin user: prefer the live file so password hash is always current ---
     live_admin_user = None
     try:
@@ -243,7 +250,7 @@ def merge_dynsec_configs(imported_config: Dict[str, Any]) -> Dict[str, Any]:
     ]
     merged_config["roles"] = [admin_role] + non_admin_roles
 
-    # Import groups from imported config
+    # Importar grupos desde la configuración importada
     merged_config["groups"] = imported_config.get("groups", [])
 
     return merged_config
