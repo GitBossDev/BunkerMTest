@@ -105,6 +105,7 @@ export interface MonitorStats {
   latency_ms?: number
   // Configured connection limit (for gauge scale)
   client_max_connections?: number
+  last_broker_sample_at?: string
 }
 
 export interface PeriodBytesData {

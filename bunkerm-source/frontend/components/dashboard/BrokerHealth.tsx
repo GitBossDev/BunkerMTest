@@ -7,6 +7,8 @@ import type { MonitorStats } from '@/types'
 
 interface BrokerHealthProps {
   stats: MonitorStats | null
+  isOffline?: boolean
+  snapshotLabel?: string
 }
 
 function formatBytes(bps: number): string {
@@ -22,7 +24,7 @@ function latencyColor(ms: number): string {
   return 'text-red-500'
 }
 
-export function BrokerHealth({ stats }: BrokerHealthProps) {
+export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: BrokerHealthProps) {
   const rxMsg  = stats?.load_msg_rx_1min  ?? 0
   const txMsg  = stats?.load_msg_tx_1min  ?? 0
   const rxByte = stats?.load_bytes_rx_1min ?? 0
@@ -34,16 +36,21 @@ export function BrokerHealth({ stats }: BrokerHealthProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
-          <InfoTooltip content={
-            <>
-              <p className="font-semibold text-foreground mb-1">Broker Performance</p>
-              <TipRow label="Msg RX/TX" text="Messages received/sent per second. 1-minute moving average reported by Mosquitto." />
-              <TipRow label="Bytes RX/TX" text="Data volume transferred per second, including MQTT protocol headers." />
-              <TipRow label="Latency" text="Round-trip time: the monitor publishes a ping to the broker and measures the response time. Green &lt;50ms · Yellow &lt;200ms · Red &gt;200ms." />
-            </>
-          } />
+        <div>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
+            <InfoTooltip content={
+              <>
+                <p className="font-semibold text-foreground mb-1">Broker Performance</p>
+                <TipRow label="Msg RX/TX" text="Messages received/sent per second. 1-minute moving average reported by Mosquitto." />
+                <TipRow label="Bytes RX/TX" text="Data volume transferred per second, including MQTT protocol headers." />
+                <TipRow label="Latency" text="Round-trip time: the monitor publishes a ping to the broker and measures the response time. Green &lt;50ms · Yellow &lt;200ms · Red &gt;200ms." />
+              </>
+            } />
+          </div>
+          {isOffline && (
+            <p className="text-xs text-amber-700 mt-1">Live rates paused. Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
+          )}
         </div>
         <div className="p-2 rounded-lg bg-emerald-500/10">
           <Activity className="h-4 w-4 text-emerald-500" />

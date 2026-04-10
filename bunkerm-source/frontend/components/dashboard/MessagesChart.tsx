@@ -45,9 +45,11 @@ function formatLabel(ts: string, period: StatsPeriod): string {
 
 interface Props {
   retained?: number
+  isOffline?: boolean
+  snapshotLabel?: string
 }
 
-export function MessagesChart({ retained = 0 }: Props) {
+export function MessagesChart({ retained = 0, isOffline = false, snapshotLabel }: Props) {
   const [period, setPeriod] = useState<StatsPeriod>('1h')
   const [chartData, setChartData] = useState<{ time: string; received: number; sent: number }[]>([])
   const [loading, setLoading] = useState(true)
@@ -104,6 +106,9 @@ export function MessagesChart({ retained = 0 }: Props) {
           <CardDescription className="text-xs text-muted-foreground">
             Received &amp; sent per interval
           </CardDescription>
+          {isOffline && (
+            <p className="text-xs text-amber-700 mt-1">History paused. Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-1">
           {PERIODS.map((p) => (

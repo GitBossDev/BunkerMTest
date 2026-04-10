@@ -9,6 +9,7 @@ import type { MonitorStats } from '@/types'
 
 interface BrokerInfoProps {
   stats: MonitorStats | null
+  snapshotLabel?: string
 }
 
 /** Parse Mosquitto broker version e.g. "mosquitto version 2.0.18" → "2.0.18" */
@@ -40,10 +41,10 @@ function fmtBytes(b: number | null): string {
   return `${(b / 1024 / 1024).toFixed(1)} MB`
 }
 
-export function BrokerInfo({ stats }: BrokerInfoProps) {
+export function BrokerInfo({ stats, snapshotLabel }: BrokerInfoProps) {
   const connected = stats?.mqtt_connected ?? false
   const version   = parseVersion(stats?.broker_version)
-  const uptime    = parseUptime(stats?.broker_uptime)
+  const uptime    = connected ? parseUptime(stats?.broker_uptime) : 'Offline'
 
   const [cpu, setCpu] = useState<number | null>(null)
   const [rss, setRss] = useState<number | null>(null)
@@ -94,6 +95,9 @@ export function BrokerInfo({ stats }: BrokerInfoProps) {
           <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}          label="CPU"   value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
           <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />}  label="Heap"  value={fmtBytes(rss)} />
         </div>
+        {!connected && (
+          <p className="text-xs text-amber-700 mt-3">Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
+        )}
       </CardContent>
     </Card>
   )

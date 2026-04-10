@@ -517,6 +517,7 @@ class MQTTStats:
         self.heap_current = 0
         self.heap_maximum = 0
         self.latency_ms: float = -1.0
+        self.last_broker_sample_at = ""
         self._ping_sent_at: float = 0.0
         self._is_connected: bool = False
         self.message_counter = MessageCounter()
@@ -647,6 +648,7 @@ class MQTTStats:
                 "latency_ms": self.latency_ms,
                 "mqtt_connected": self._is_connected,
                 "client_max_connections": read_max_connections(),
+                "last_broker_sample_at": self.last_broker_sample_at,
             }
         try:
             alert_engine.evaluate(stats, topic_store.get_all())
@@ -677,6 +679,7 @@ def on_message(client, userdata, msg):
         try:
             attr_name = MONITORED_TOPICS[msg.topic]
             raw = msg.payload.decode()
+            sample_ts = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
             with mqtt_stats._lock:
                 if msg.topic in _STRING_TOPICS:
                     setattr(mqtt_stats, attr_name, raw)
@@ -684,6 +687,7 @@ def on_message(client, userdata, msg):
                     setattr(mqtt_stats, attr_name, float(raw))
                 else:
                     setattr(mqtt_stats, attr_name, int(raw))
+                mqtt_stats.last_broker_sample_at = sample_ts
         except ValueError as exc:
             logger.error("Error procesando %s: %s", msg.topic, exc)
     elif msg.topic == "bunkerm/monitor/ping":
@@ -691,6 +695,7 @@ def on_message(client, userdata, msg):
             sent_at = float(msg.payload.decode())
             with mqtt_stats._lock:
                 mqtt_stats.latency_ms = round((time.time() - sent_at) * 1000, 2)
+                mqtt_stats.last_broker_sample_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         except (ValueError, AttributeError):
             pass
     elif not msg.topic.startswith("$SYS/"):

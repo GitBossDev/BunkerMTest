@@ -7,6 +7,8 @@ import type { MonitorStats } from '@/types'
 
 interface QoSPanelProps {
   stats: MonitorStats | null
+  isOffline?: boolean
+  snapshotLabel?: string
 }
 
 function formatBytes(b: number): string {
@@ -15,7 +17,7 @@ function formatBytes(b: number): string {
   return `${(b / (1024 * 1024)).toFixed(2)} MB`
 }
 
-export function QoSPanel({ stats }: QoSPanelProps) {
+export function QoSPanel({ stats, isOffline = false, snapshotLabel }: QoSPanelProps) {
   const inflight   = stats?.messages_inflight ?? 0
   const stored     = stats?.messages_stored ?? 0
   const storeBytes = stats?.messages_store_bytes ?? 0
@@ -40,6 +42,9 @@ export function QoSPanel({ stats }: QoSPanelProps) {
         </div>
       </CardHeader>
       <CardContent>
+        {isOffline && (
+          <p className="text-xs text-amber-700 mb-3">In-flight is reset to 0 while offline. Stored/retained are shown from the last broker snapshot at {snapshotLabel ?? 'before disconnection'}.</p>
+        )}
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
           <Metric label="In-flight msgs" value={String(inflight)}                              accent="text-yellow-500" />
           <Metric label="Stored msgs"    value={`${stored} (${formatBytes(storeBytes)})`} />

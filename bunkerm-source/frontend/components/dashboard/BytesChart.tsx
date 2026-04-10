@@ -50,7 +50,7 @@ function formatLabel(ts: string, period: StatsPeriod): string {
   }
 }
 
-export function BytesChart() {
+export function BytesChart({ isOffline = false, snapshotLabel }: { isOffline?: boolean; snapshotLabel?: string }) {
   const [period, setPeriod] = useState<StatsPeriod>('1h')
   const [chartData, setChartData] = useState<{ time: string; sent: number; received: number }[]>([])
   const [unit, setUnit] = useState('B')
@@ -92,17 +92,22 @@ export function BytesChart() {
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
-        <div className="flex items-center gap-2">
-          <CardTitle className="text-sm font-medium">Bytes Transfer ({unit})</CardTitle>
-          <InfoTooltip side="bottom" content={
-            <>
-              <p className="font-semibold text-foreground mb-1">Bytes Transfer</p>
-              <TipRow label="RX (Received)" text="Bytes received by the broker from clients (PUBLISH messages + MQTT protocol headers)." />
-              <TipRow label="TX (Sent)" text="Bytes sent by the broker to clients (message deliveries + ACKs)." />
-              <TipRow label="Scale" text="Automatically adjusts to B, KB or MB based on the volume in the selected period." />
-              <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
-            </>
-          } />
+        <div>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium">Bytes Transfer ({unit})</CardTitle>
+            <InfoTooltip side="bottom" content={
+              <>
+                <p className="font-semibold text-foreground mb-1">Bytes Transfer</p>
+                <TipRow label="RX (Received)" text="Bytes received by the broker from clients (PUBLISH messages + MQTT protocol headers)." />
+                <TipRow label="TX (Sent)" text="Bytes sent by the broker to clients (message deliveries + ACKs)." />
+                <TipRow label="Scale" text="Automatically adjusts to B, KB or MB based on the volume in the selected period." />
+                <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
+              </>
+            } />
+          </div>
+          {isOffline && (
+            <p className="text-xs text-amber-700 mt-1">History paused. Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
+          )}
         </div>
         <div className="flex flex-wrap gap-1">
           {PERIODS.map((p) => (
