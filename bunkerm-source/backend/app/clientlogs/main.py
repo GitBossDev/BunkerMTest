@@ -12,9 +12,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from collections import deque
 import subprocess
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.security.api_key import APIKeyHeader
 import uvicorn
 from pydantic import BaseModel
 import uuid
@@ -421,6 +422,40 @@ class MQTTMonitor:
 
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+# Origins permitidos para CORS (protocolo+host+puerto de la interfaz web)
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:2000").split(",")]
+
+# Autenticación por clave API compartida
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+_api_key_cache: dict = {"key": "", "ts": 0.0}
+
+
+def _get_current_api_key() -> str:
+    """Devuelve la clave API activa, refrescando desde archivo cada 5 s."""
+    import time as _t
+    now = _t.time()
+    if _api_key_cache["key"] and now - _api_key_cache["ts"] < 5.0:
+        return _api_key_cache["key"]
+    key = os.getenv("API_KEY", "")
+    if not key or key == "default_api_key_replace_in_production":
+        try:
+            with open("/nextjs/data/.api_key") as _fh:
+                file_key = _fh.read().strip()
+                if file_key:
+                    key = file_key
+        except Exception:
+            pass
+    _api_key_cache["key"] = key
+    _api_key_cache["ts"] = now
+    return key
+
+
+async def _require_api_key(api_key: str = Security(_api_key_header)) -> str:
+    """Dependencia FastAPI que valida la clave API en el header X-API-Key."""
+    if api_key != _get_current_api_key():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+    return api_key
+
 
 # Initialize FastAPI app with versioning
 app = FastAPI(
@@ -428,12 +463,14 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     openapi_url="/openapi.json",
+    # Todos los endpoints requieren autenticación por clave API
+    dependencies=[Security(_require_api_key)],
 )
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[ALLOWED_HOSTS],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

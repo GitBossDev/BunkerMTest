@@ -88,6 +88,7 @@ RUN pip install --upgrade pip && \
     typing-extensions \
     "sqlalchemy[asyncio]>=2.0.30" \
     "aiosqlite>=0.20.0" \
+    "asyncpg>=0.29.0" \
     "alembic>=1.13.0" \
     "httpx>=0.27.0" \
     "numpy>=1.26.0"
@@ -100,6 +101,12 @@ RUN pip install --no-cache-dir \
 RUN pip install --no-cache-dir \
     fastapi-jwt-auth \
     fastapi-limiter
+
+# Dependencias de test — no se usan en produccion pero deben estar en la imagen
+# para poder ejecutar .\deploy.ps1 -Action test sin rebuild
+RUN pip install --no-cache-dir \
+    "pytest>=8.2.0" \
+    "pytest-asyncio>=0.23.0"
 
 # Create all required directories
 RUN mkdir -p \
@@ -116,7 +123,8 @@ RUN mkdir -p \
     /var/lib/mosquitto/db \
     /tmp/mosquitto_backups \
     /tmp/dynsec_backups \
-    /nextjs/data && \
+    /nextjs/data \
+    /nextjs/data/backups && \
     touch /etc/mosquitto/mosquitto_passwd && \
     chmod 644 /etc/mosquitto/mosquitto_passwd
 
@@ -132,7 +140,6 @@ COPY supervisord-next.conf /etc/supervisor/conf.d/supervisord.conf
 # They live on shared Docker volumes (mosquitto-conf, mosquitto-data) managed by
 # the bunkerm-mosquitto standalone container. BunkerM mounts those same volumes.
 COPY backend/app /app
-RUN touch /app/monitor/__init__.py
 
 # Copy config-env script
 COPY config-env.sh /docker-entrypoint.d/
@@ -172,11 +179,11 @@ ENV MQTT_BROKER=mosquitto \
     API_LOG_FILE=/var/log/api/api_activity.log \
     MOSQUITTO_PASSWD_PATH=/etc/mosquitto/mosquitto_passwd \
     MOSQUITTO_CONF_PATH=/etc/mosquitto/mosquitto.conf \
-    MOSQUITTO_BACKUP_DIR=/tmp/mosquitto_backups \
-    CONFIG_API_PORT=1005 \
+    MOSQUITTO_CONF_BACKUP_DIR=/nextjs/data/backups \
+    DYNSEC_BACKUP_DIR=/nextjs/data/backups \
     DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json \
     MAX_UPLOAD_SIZE=10485760 \
-    PYTHONPATH=/app/monitor \
+    PYTHONPATH=/app:/app/smart-anomaly \
     NODE_ENV=production \
     BROKER_LOG_PATH=/var/log/mosquitto/mosquitto.log \
     CLIENT_LOG_PATH=/var/log/api/api_activity.log

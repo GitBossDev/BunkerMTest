@@ -7,6 +7,7 @@
 #
 # backend/app/config/main.py
 import logging
+import logging.handlers
 import os
 import ssl
 from fastapi import FastAPI, HTTPException, Security, Depends, Request, status
@@ -58,6 +59,8 @@ def _get_current_api_key() -> str:
     _api_key_cache["ts"] = now
     return key
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+# Origins permitidos para CORS (protocolo+host+puerto de la interfaz web)
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:2000").split(",")]
 
 # Initialize FastAPI app with versioning
 app = FastAPI(
@@ -70,7 +73,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

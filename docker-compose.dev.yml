@@ -105,6 +105,24 @@ services:
       mosquitto:
         condition: service_healthy
     environment:
+      # ------------------------------------------------------------------
+      # Variables requeridas (sin fallback) — deben estar en .env.dev
+      # Generadas automaticamente con: .\deploy.ps1 -Action setup
+      # Si faltan, el deploy falla con mensaje claro (validate-env.py).
+      # ------------------------------------------------------------------
+      - JWT_SECRET=${JWT_SECRET}
+      - AUTH_SECRET=${AUTH_SECRET}
+
+      # ------------------------------------------------------------------
+      # Variables con fallback seguro — opcionales en .env.dev
+      # El valor a la derecha de :- se usa si la variable no esta definida.
+      # Sobreescribir en .env.dev para entornos distintos de desarrollo local.
+      # ------------------------------------------------------------------
+      # UI admin credentials — used by Next.js to seed the first user
+      - ADMIN_INITIAL_EMAIL=${ADMIN_INITIAL_EMAIL:-admin@brokerpanel.com}
+      - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-Usuario@1}
+      # API key — tambien referenciada en build args con el mismo fallback
+      - API_KEY=${API_KEY:-default_api_key_replace_in_production}
       # MQTT — apunta al contenedor mosquitto standalone en la red interna
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1900
@@ -115,10 +133,6 @@ services:
       - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
-      # Seguridad (secrets generados por generate-secrets.py)
-      - JWT_SECRET=${JWT_SECRET}
-      - API_KEY=${API_KEY}
-      - AUTH_SECRET=${AUTH_SECRET}
       # URLs
       - FRONTEND_URL=http://localhost:2000
       - ALLOWED_ORIGINS=*
@@ -137,16 +151,8 @@ services:
       - SSL_CERT_PATH=/app/certs/cert.pem
       - SSL_KEY_PATH=/app/certs/key.pem
     ports:
-      # UI accesible en http://localhost:2000
+      # UI + APIs accesibles en http://localhost:2000 (nginx interno del contenedor)
       - "2000:2000"
-      # APIs Backend
-      - "1000:1000"  # Dynsec API
-      - "1001:1001"  # Monitor API
-      - "1002:1002"  # Client Logs
-      - "1003:1003"  # AWS Bridge
-      - "1004:1004"  # Azure Bridge
-      - "1005:1005"  # Config API
-      - "8100:8100"  # Smart Anomaly
     volumes:
       # Datos exclusivos de BunkerM
       - bunkerm-nextjs:/nextjs/data
@@ -159,7 +165,7 @@ services:
     networks:
       - bunkerm-network
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:2000 || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:2000/api/v1/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5

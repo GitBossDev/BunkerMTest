@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     MOSQUITTO_CONF_PATH: str = "/etc/mosquitto/conf.d"
     FRONTEND_URL: str = "http://localhost:2000"
     ALLOWED_HOSTS: str = "localhost"
+    # Origins permitidos para CORS separados por coma (protocolo+host+puerto)
+    ALLOWED_ORIGINS: str = "http://localhost:2000"
     API_KEY: str = None
     
     class Config:
@@ -96,7 +98,7 @@ def _get_current_api_key() -> str:
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=settings.ALLOWED_ORIGINS.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

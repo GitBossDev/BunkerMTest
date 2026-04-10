@@ -44,6 +44,7 @@ def generate_secrets():
     auth_secret = generate_secure_password(48)
     nextauth_secret = generate_secure_password(32)
     pgadmin_password = generate_secure_password(16)
+    admin_ui_password = generate_secure_password(16)
     
     # Create .env.dev content
     env_content = f"""# ==========================================
@@ -80,27 +81,11 @@ API_KEY={api_key}
 JWT_SECRET={jwt_secret}
 AUTH_SECRET={auth_secret}
 
-# Service tier (community, pro, enterprise, enterprise_plus)
-TIER=enterprise
-
 # Paths
 DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
 
-# Service Ports
-DYNSEC_PORT=1000
-MONITOR_PORT=1001
-CLIENTLOGS_PORT=1002
-AWS_BRIDGE_PORT=1003
-AZURE_BRIDGE_PORT=1004
-CONFIG_PORT=1005
-SMART_ANOMALY_PORT=8100
-
-# ------------------------------------------
-# New Extended Services (Funcionalidades Propias)
-# ------------------------------------------
-DASHBOARD_SERVICE_PORT=1006
-BACKUP_SERVICE_PORT=1007
-LOAD_SIMULATOR_PORT=1008
+# Backend API (unified uvicorn process — internal port, not exposed to host)
+BUNKERM_API_PORT=9001
 
 # ------------------------------------------
 # Frontend Configuration
@@ -113,6 +98,14 @@ NEXTAUTH_SECRET={nextauth_secret}
 # Nginx Configuration
 # ------------------------------------------
 NGINX_PORT=2000
+
+# ------------------------------------------
+# Frontend / UI Admin Credentials
+# ------------------------------------------
+# Initial admin account for the BunkerM web UI.
+# Change this password after first login.
+ADMIN_INITIAL_EMAIL=admin@brokerpanel.com
+ADMIN_INITIAL_PASSWORD={admin_ui_password}
 
 # ------------------------------------------
 # pgAdmin (Optional - for database management)

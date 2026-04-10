@@ -1,8 +1,20 @@
 import { SignJWT, jwtVerify } from 'jose'
 import type { User } from '@/types'
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-in-production'
-const secret = new TextEncoder().encode(AUTH_SECRET)
+// Obtener el secreto de firma desde el entorno.
+// Lanza un error explícito si AUTH_SECRET no está definida para evitar emitir
+// tokens con un secreto vacío o previsible.
+function getSecret(): Uint8Array {
+  const raw = process.env.AUTH_SECRET
+  if (!raw) {
+    throw new Error(
+      'AUTH_SECRET no está configurada. ' +
+      'Esta variable de entorno es obligatoria para firmar y verificar sesiones.'
+    )
+  }
+  return new TextEncoder().encode(raw)
+}
+
 const TOKEN_EXPIRY = '24h'
 export const COOKIE_NAME = 'bunkerm_token'
 
@@ -17,12 +29,12 @@ export async function signToken(user: User): Promise<string> {
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(TOKEN_EXPIRY)
-    .sign(secret)
+    .sign(getSecret())
 }
 
 export async function verifyToken(token: string): Promise<User | null> {
   try {
-    const { payload } = await jwtVerify(token, secret)
+    const { payload } = await jwtVerify(token, getSecret())
     return {
       id: payload.id as string,
       email: payload.email as string,

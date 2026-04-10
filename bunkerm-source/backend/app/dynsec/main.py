@@ -6,6 +6,13 @@
 # Distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND.
 #
 # app/dynsec/main.py
+#
+# LEGACY — Antiguo microservicio standalone (puerto 1000).
+# Ya no se importa ni ejecuta: toda la lógica DynSec vive ahora en
+#   services/dynsec_service.py  (capa de negocio)
+#   routers/dynsec.py           (endpoints HTTP)
+# Este archivo se conserva solo como referencia histórica.
+# NO modificar; será eliminado en la Fase 4.
 import logging
 import threading
 from fastapi import FastAPI, HTTPException, Security, Depends, Request, status, UploadFile, File, Form
@@ -79,6 +86,8 @@ def _get_current_api_key() -> str:
     return key
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+# Origins permitidos para CORS (protocolo+host+puerto de la interfaz web)
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:2000").split(",")]
 
 # Path to the live DynSec JSON (same volume as mosquitto)
 DYNSEC_PATH = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
@@ -127,7 +136,7 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -161,7 +170,8 @@ async def log_request(request: Request):
     )
 
 
-@app.middleware("https")
+# Los security headers se registran correctamente usando el tipo 'http'
+@app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Strict-Transport-Security"] = (

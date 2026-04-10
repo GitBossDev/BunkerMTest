@@ -22,6 +22,8 @@ export function formatUptime(seconds: number): string {
   return `${minutes}m`
 }
 
-export function generateNonce(): string {
-  return Math.random().toString(36).substring(2, 15)
+export function generateCacheBuster(): string {
+  const arr = new Uint32Array(1)
+  crypto.getRandomValues(arr)
+  return arr[0].toString(36)
 }

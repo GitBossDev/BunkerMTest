@@ -744,6 +744,8 @@ mqtt_stats = MQTTStats()
 limiter = Limiter(key_func=get_remote_address)
 
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost").split(",")
+# Origins permitidos para CORS (protocolo+host+puerto de la interfaz web)
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:2000").split(",")]
 
 # Global MQTT client reference (set during lifespan startup)
 _mqtt_client = None
@@ -793,7 +795,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1084,7 +1086,7 @@ async def get_mqtt_stats(
         )
         
         
-@app.get("/api/v1/test/mqtt-stats")
+@app.get("/api/v1/test/mqtt-stats", dependencies=[Depends(get_api_key)])
 async def test_mqtt_stats():
     """Test endpoint to verify MQTT stats functionality"""
     try:
@@ -1112,7 +1114,7 @@ async def test_mqtt_stats():
             content={"error": f"Test failed: {str(e)}"}
         )
 
-@app.get("/api/v1/test/storage")
+@app.get("/api/v1/test/storage", dependencies=[Depends(get_api_key)])
 async def test_storage():
     """Test endpoint to verify storage functionality"""
     try:

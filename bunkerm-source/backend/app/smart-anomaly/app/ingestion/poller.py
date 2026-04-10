@@ -19,7 +19,7 @@ _seen_event_ids: set[str] = set()
 
 async def poll_topics() -> None:
     """Poll monitor-api for topic stats and ingest each topic."""
-    url = f"{settings.BUNKERM_MONITOR_URL}/api/v1/topics"
+    url = f"{settings.BUNKERM_MONITOR_URL}/api/v1/monitor/topics"
     headers = {"X-API-Key": settings.BUNKERM_API_KEY}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -62,7 +62,7 @@ async def poll_topics() -> None:
 async def poll_events() -> None:
     """Poll clientlogs-api for connection events and ingest them."""
     global _seen_event_ids
-    url = f"{settings.BUNKERM_CLIENTLOGS_URL}/api/v1/events"
+    url = f"{settings.BUNKERM_CLIENTLOGS_URL}/api/v1/clientlogs/events"
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:

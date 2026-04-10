@@ -5,11 +5,16 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'build-mosquitto', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend', 'reload-mosquitto')]
+    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'build-mosquitto', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend', 'reload-mosquitto', 'test', 'smoke')]
     [string]$Action = 'setup',
     
     [Parameter(Mandatory=$false)]
     [switch]$WithTools,
+
+    # Subconjunto de tests a ejecutar: 'all' (defecto), 'smart-anomaly', 'backend'
+    [Parameter(Mandatory=$false)]
+    [ValidateSet('all', 'smart-anomaly', 'backend')]
+    [string]$TestPath = 'all',
     
     [Parameter(Mandatory=$false)]
     [switch]$Follow
@@ -224,6 +229,19 @@ function Invoke-Start {
         exit 1
     }
 
+    # E2 -- Validar variables de entorno requeridas antes de levantar contenedores
+    Write-Info "Validating environment variables..."
+    $validateOutput = & python scripts/validate-env.py 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] Environment validation failed:" -ForegroundColor Red
+        $validateOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
+        Write-Host ""
+        Write-Host "  Run '.\deploy.ps1 -Action setup' to regenerate secrets." -ForegroundColor Yellow
+        exit 1
+    }
+    Write-Success $validateOutput
+    Write-Host ""
+
     # Si bunkerm-source existe pero no tiene .env, crear uno vacio para que compose no falle
     if (Test-Path "bunkerm-source") {
         if (-not (Test-Path "bunkerm-source\.env")) {
@@ -276,6 +294,16 @@ function Invoke-Start {
     Write-Info "Applying local source patches to the running container..."
     Invoke-PatchBackend
     Invoke-PatchFrontend
+
+    # A3 — Smoke automatico: verificar que el stack responde tras los patches
+    Write-Host ""
+    Write-Info "Ejecutando smoke test del stack (A3)..."
+    Start-Sleep -Seconds 8   # margen para que Next.js termine de arrancar
+    $smokeFailures = Invoke-Smoke
+    if ($smokeFailures -gt 0) {
+        Write-Warning "[AVISO] El smoke test detecto $smokeFailures fallo(s). El stack sigue corriendo para debug manual."
+        Write-Host "  Logs: .\deploy.ps1 -Action logs" -ForegroundColor Yellow
+    }
 
     Write-Host ""
     Write-Info "Service URLs:"
@@ -518,6 +546,173 @@ function Invoke-BuildMosquitto {
     Write-Host ""
 }
 
+function Invoke-Smoke {
+    # Verifica que los endpoints criticos del stack esten respondiendo correctamente.
+    # Retorna el numero de checks fallidos (0 = todo OK).
+    # Se usa como accion standalone ('smoke') o llamado automaticamente desde Invoke-Start (A3).
+    Write-Info "Smoke test -- verificando stack en ejecucion..."
+    Write-Host ""
+
+    # Leer API key del archivo de entorno
+    $apiKey = ""
+    if (Test-Path ".env.dev") {
+        $line = Get-Content ".env.dev" | Select-String "^API_KEY=" | Select-Object -First 1
+        if ($line) { $apiKey = "$line" -replace "^API_KEY=", "" }
+    }
+    if (-not $apiKey) {
+        Write-Warning "  API_KEY no encontrada en .env.dev -- check autenticado sera omitido"
+    }
+
+    $passed = 0
+    $failed = 0
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+
+    # ── 1. Puerto MQTT 1900 ──────────────────────────────────────────────────
+    Write-Host -NoNewline "  [1/5] MQTT puerto 1900 .......................... "
+    $tcpClient = New-Object System.Net.Sockets.TcpClient
+    try {
+        $tcpClient.Connect('localhost', 1900)
+        Write-Host "OK" -ForegroundColor Green
+        $passed++
+        $tcpClient.Close()
+    } catch {
+        Write-Host "FAIL" -ForegroundColor Red
+        $failed++
+    }
+
+    # ── 2. Nginx / Web UI ────────────────────────────────────────────────────
+    Write-Host -NoNewline "  [2/5] Web UI http://localhost:2000 .............. "
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
+        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+        $passed++
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -ge 200 -and $code -lt 400) {
+            Write-Host "OK HTTP $code" -ForegroundColor Green; $passed++
+        } else {
+            Write-Host "FAIL HTTP $code" -ForegroundColor Red; $failed++
+        }
+    }
+
+    # ── 3. Next.js / Auth ────────────────────────────────────────────────────
+    Write-Host -NoNewline "  [3/5] Auth API /api/auth/me ..................... "
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:2000/api/auth/me" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+        $passed++
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -in @(401, 403)) {
+            Write-Host "OK HTTP $code (sin sesion activa)" -ForegroundColor Green; $passed++
+        } else {
+            Write-Host "FAIL HTTP $code" -ForegroundColor Red; $failed++
+        }
+    }
+
+    # ── 4. Backend publico: /api/monitor/health ───────────────────────────────
+    Write-Host -NoNewline "  [4/5] Backend /api/monitor/health (publico) ..... "
+    try {
+        $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+        $passed++
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        Write-Host "FAIL HTTP $code" -ForegroundColor Red
+        $failed++
+    }
+
+    # ── 5. Backend autenticado: /api/dynsec/clients ──────────────────────────
+    if ($apiKey) {
+        Write-Host -NoNewline "  [5/5] Backend /api/dynsec/clients (API key) ..... "
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/clients" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
+            Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+            $passed++
+        } catch {
+            $code = $_.Exception.Response.StatusCode.value__
+            Write-Host "FAIL HTTP $code" -ForegroundColor Red
+            $failed++
+        }
+    } else {
+        Write-Host "  [5/5] Backend /api/dynsec/clients ................ OMITIDO (sin API key)" -ForegroundColor Yellow
+    }
+
+    $ErrorActionPreference = $savedPref
+
+    Write-Host ""
+    $total = $passed + $failed
+    if ($failed -eq 0) {
+        Write-Host "  Resultado: $passed/$total OK" -ForegroundColor Green
+        Write-Success "[SMOKE OK] Stack operativo."
+    } else {
+        Write-Host "  Resultado: $passed/$total OK, $failed FAIL(s)" -ForegroundColor Red
+        Write-Host "[SMOKE FAIL] Ejecuta '.\deploy.ps1 -Action logs' para diagnosticar." -ForegroundColor Red
+    }
+    Write-Host ""
+
+    return $failed
+}
+
+function Invoke-Test {
+    # Ejecuta los tests de pytest dentro del contenedor bunkerm-platform en ejecucion.
+    # Requiere que el contenedor este corriendo: .\.deploy.ps1 -Action start
+    Write-Info "Ejecutando tests dentro del contenedor bunkerm-platform..."
+    Write-Host ""
+
+    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
+    if (-not $containerRunning) {
+        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+        exit 1
+    }
+
+    # Determinar la ruta de tests segun el parametro -TestPath
+    switch ($TestPath) {
+        'smart-anomaly' {
+            $testDir = '/app/smart-anomaly/tests'
+            Write-Info "Corriendo tests de smart-anomaly: $testDir"
+        }
+        'backend' {
+            $testDir = '/app/tests'
+            Write-Info "Corriendo tests del backend unificado: $testDir"
+        }
+        default {
+            # Correr ambas suites
+            Write-Info "Corriendo todas las suites de tests..."
+            $testDir = $null
+        }
+    }
+
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    if ($testDir) {
+        & $script:CE exec bunkerm-platform pytest $testDir -v
+    } else {
+        # Primero backend unificado (si el directorio existe), luego smart-anomaly
+        $backendTestsExist = & $script:CE exec bunkerm-platform sh -c "test -d /app/tests && echo yes || echo no" 2>&1
+        if ($backendTestsExist -match 'yes') {
+            Write-Info "Suite: backend unificado (/app/tests)"
+            & $script:CE exec bunkerm-platform pytest /app/tests -v
+        } else {
+            Write-Warning "/app/tests no existe aun. Implementar Fase T del QUALITY_PLAN.md"
+        }
+        Write-Host ""
+        Write-Info "Suite: smart-anomaly (/app/smart-anomaly/tests)"
+        & $script:CE exec bunkerm-platform pytest /app/smart-anomaly/tests -v
+    }
+    $testExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    Write-Host ""
+    if ($testExit -eq 0) {
+        Write-Success "[OK] Todos los tests pasaron."
+    } else {
+        Write-Host "[FAIL] Algunos tests fallaron. Revisa la salida de arriba." -ForegroundColor Red
+    }
+    Write-Host ""
+    exit $testExit
+}
+
 function Invoke-ReloadMosquitto {
     Write-Info "Enviando señal de recarga a Mosquitto standalone..."
     $mqContainer = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-mosquitto"
@@ -570,9 +765,6 @@ function Invoke-StartBunkerM {
     Write-Info "URLs de acceso:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
-    Write-Host "  - Dynsec API: http://localhost:1000" -ForegroundColor Cyan
-    Write-Host "  - Monitor API: http://localhost:1001" -ForegroundColor Cyan
-    Write-Host "  - Config API: http://localhost:1005" -ForegroundColor Cyan
     Write-Host ""
     Write-Info "Verificar estado: .\deploy.ps1 -Action status"
     Write-Info "Ver logs: $script:CE logs bunkerm-platform -f"
@@ -670,30 +862,34 @@ function Invoke-PatchBackend {
         exit 1
     }
 
-    # Map: local subfolder -> container path + process pattern to kill/reload
-    $services = @(
-        @{ Name = 'dynsec';         Src = "$backendPath\dynsec";         Dst = '/app/dynsec';         Pattern = 'uvicorn main:app.*1000' },
-        @{ Name = 'monitor';        Src = "$backendPath\monitor";        Dst = '/app/monitor';        Pattern = 'uvicorn main:app.*1001' },
-        @{ Name = 'clientlogs';     Src = "$backendPath\clientlogs";     Dst = '/app/clientlogs';     Pattern = '/app/clientlogs/main.py' },
-        @{ Name = 'config';         Src = "$backendPath\config";         Dst = '/app/config';         Pattern = 'uvicorn main:app.*1005' },
-        @{ Name = 'smart-anomaly';  Src = "$backendPath\smart-anomaly";  Dst = '/app/smart-anomaly';  Pattern = 'uvicorn app.main:app.*8100' }
-    )
+    # Patch único: copiar todo el directorio app/ de una vez y recargar el proceso uvicorn unificado
+    $serviceNames = @('dynsec', 'monitor', 'clientlogs', 'config', 'smart-anomaly')
+    foreach ($name in $serviceNames) {
+        Write-Info "  Copiando $name..."
+    }
+    & $script:CE cp "${backendPath}/." "bunkerm-platform:/app/"
 
-    foreach ($svc in $services) {
-        if (Test-Path $svc.Src) {
-            Write-Info "  Copiando $($svc.Name)..."
-            & $script:CE cp "$($svc.Src)/." "bunkerm-platform:$($svc.Dst)/"
-            # Find PID and kill so supervisord restarts with new code
-            $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep '$($svc.Pattern)' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
-            if ($svcPid -match '\d+') {
-                & $script:CE exec bunkerm-platform sh -c "kill -HUP $svcPid" 2>&1 | Out-Null
-                Write-Info "    Proceso $svcPid reiniciado (SIGHUP)"
-            }
-        }
+    # Recargar el proceso uvicorn unificado (puerto 9001)
+    $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
+    if ($svcPid -match '\d+') {
+        & $script:CE exec bunkerm-platform sh -c "kill -HUP $svcPid" 2>&1 | Out-Null
+        Write-Info "    Proceso $svcPid recargado (SIGHUP)"
     }
 
-    Start-Sleep -Seconds 2
-    Write-Success "[OK] Backend actualizado. Los servicios afectados se han recargado."
+    # D2 -- Verificar que uvicorn sigue vivo 3 segundos despues del SIGHUP
+    Start-Sleep -Seconds 3
+    $uvicornAlive = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep" 2>&1
+    if (-not $uvicornAlive) {
+        Write-Host "" 
+        Write-Host "[AVISO] uvicorn (puerto 9001) no aparece en ps aux tras el SIGHUP." -ForegroundColor Yellow
+        Write-Host "  Ultimas 30 lineas de log de uvicorn:" -ForegroundColor Yellow
+        & $script:CE exec bunkerm-platform sh -c "tail -30 /var/log/supervisor/bunkerm-api.out.log 2>/dev/null || echo '(log no disponible)'" 2>&1 |
+            ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
+        Write-Host ""
+        Write-Host "  El backend puede no estar respondiendo. Comprueba con: .\deploy.ps1 -Action smoke" -ForegroundColor Yellow
+    } else {
+        Write-Success "[OK] Backend actualizado. Los servicios afectados se han recargado."
+    }
     Write-Host ""
 }
 
@@ -716,9 +912,14 @@ switch ($Action) {
     'patch-frontend'   { Invoke-PatchFrontend }
     'patch-backend'    { Invoke-PatchBackend }
     'reload-mosquitto' { Invoke-ReloadMosquitto }
+    'test'             { Invoke-Test }
+    'smoke'            {
+        $smokeResult = Invoke-Smoke
+        if ($smokeResult -gt 0) { exit 1 }
+    }
     default {
         Write-Error "Unknown action: $Action"
-        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, build-mosquitto, start-bunkerm, stop-bunkerm, patch-frontend, patch-backend, reload-mosquitto"
+        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, build-mosquitto, start-bunkerm, stop-bunkerm, patch-frontend, patch-backend, reload-mosquitto, test, smoke"
     }
 }
 

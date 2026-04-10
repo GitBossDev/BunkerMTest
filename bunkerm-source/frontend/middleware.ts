@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-in-production'
-const secret = new TextEncoder().encode(AUTH_SECRET)
+// El secreto de autenticación debe provenir exclusivamente de AUTH_SECRET.
+// Si no está configurado, el middleware entra en modo degradado seguro:
+// todas las sesiones son rechazadas y solo se permiten rutas públicas.
+const _raw_secret = process.env.AUTH_SECRET
+const secret: Uint8Array | null = _raw_secret ? new TextEncoder().encode(_raw_secret) : null
 const COOKIE_NAME = 'bunkerm_token'
 
 const PUBLIC_PATHS = ['/login', '/register']
-const API_PATHS = ['/api/auth', '/api/logs', '/api/proxy', '/api/settings']
-
+// Rutas de API de autenticación que no requieren cookie JWT
+const AUTH_API_PATHS = ['/api/auth', '/api/logs', '/api/settings']
 // Paths that require admin role (read-only 'user' role cannot access)
 const ADMIN_ONLY_PATHS = ['/settings/users']
 // HTTP methods that mutate state — blocked for 'user' role on proxy API
@@ -16,8 +19,8 @@ const MUTATING_METHODS = ['POST', 'PUT', 'DELETE', 'PATCH']
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Skip auth API routes
-  if (API_PATHS.some((p) => pathname.startsWith(p))) {
+  // Las rutas de auth API no requieren cookie JWT
+  if (AUTH_API_PATHS.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
   }
 
@@ -26,10 +29,16 @@ export async function middleware(request: NextRequest) {
 
   if (!token) {
     if (isPublicPath) return NextResponse.next()
+    // Para rutas API sin cookie devolver 401 JSON en lugar de redirigir
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 })
+    }
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
   try {
+    // AUTH_SECRET no configurada — tratar la sesión como inválida de forma segura
+    if (!secret) throw new Error('AUTH_SECRET not configured')
     const { payload } = await jwtVerify(token, secret)
     const role = (payload.role as string) ?? 'admin'
 

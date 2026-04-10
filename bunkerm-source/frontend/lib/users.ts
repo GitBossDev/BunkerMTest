@@ -7,14 +7,33 @@ import type { UserWithHash, UserRole } from '@/types'
 const DATA_DIR = path.join(process.cwd(), 'data')
 const USERS_FILE = path.join(DATA_DIR, 'users.json')
 
-const DEFAULT_ADMIN: UserWithHash = {
-  id: 'admin-default',
-  email: 'admin@brokerpanel.com',
-  passwordHash: bcrypt.hashSync('Usuario@1', 10),
-  firstName: 'Admin',
-  lastName: 'User',
-  role: 'admin',
-  createdAt: new Date().toISOString(),
+// Construir el usuario administrador inicial leyendo las credenciales del entorno.
+// Si ADMIN_INITIAL_PASSWORD no está configurada, se genera una contraseña aleatoria
+// y se registra en consola para que el operador la conozca en el primer arranque.
+// El email puede personalizarse con ADMIN_INITIAL_EMAIL.
+function buildDefaultAdmin(): UserWithHash {
+  const email = process.env.ADMIN_INITIAL_EMAIL || 'admin@brokerpanel.com'
+  const rawPassword = process.env.ADMIN_INITIAL_PASSWORD
+  let passwordHash: string
+  if (rawPassword) {
+    passwordHash = bcrypt.hashSync(rawPassword, 10)
+  } else {
+    const generated = randomUUID()
+    console.warn(
+      '[bunkerm] ADMIN_INITIAL_PASSWORD no configurada. ' +
+      `Contrasena generada para el primer uso: ${generated}`
+    )
+    passwordHash = bcrypt.hashSync(generated, 10)
+  }
+  return {
+    id: 'admin-default',
+    email,
+    passwordHash,
+    firstName: 'Admin',
+    lastName: 'User',
+    role: 'admin',
+    createdAt: new Date().toISOString(),
+  }
 }
 
 function ensureDataDir() {
@@ -26,17 +45,18 @@ function ensureDataDir() {
 export function readUsers(): UserWithHash[] {
   ensureDataDir()
   if (!fs.existsSync(USERS_FILE)) {
-    const users = [DEFAULT_ADMIN]
+    const users = [buildDefaultAdmin()]
     fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2))
     return users
   }
   try {
     const content = fs.readFileSync(USERS_FILE, 'utf-8')
     const users = JSON.parse(content) as UserWithHash[]
-    // Migration: ensure all existing users have a role (legacy records default to 'admin')
+    // Migración: asegurar que todos los usuarios existentes tengan rol (registros legacy defaulean a 'admin')
     return users.map((u) => ({ ...u, role: u.role ?? 'admin' }))
   } catch {
-    return [DEFAULT_ADMIN]
+    // Archivo corrupto — reconstruir solo el admin por defecto para no bloquear el arranque
+    return [buildDefaultAdmin()]
   }
 }
 

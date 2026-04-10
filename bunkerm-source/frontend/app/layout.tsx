@@ -7,7 +7,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'BrokerPanel - Para CIC',
+  title: 'BunkerM',
   description: 'Panel de control para administrar broker MQTT',
 }
 

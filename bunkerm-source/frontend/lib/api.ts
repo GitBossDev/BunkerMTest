@@ -1,5 +1,12 @@
-import { generateNonce } from './utils'
+import { generateCacheBuster } from './utils'
 import type { MqttClient, Role, Group, MqttTopic } from '@/types'
+import type {
+  ClientCreate,
+  ClientListResponse,
+  MonitorStatsResponse,
+  MosquittoConfigResponse,
+  AzureBridgeCreate,
+} from '@/types/api.generated'
 
 // The Python dynsec API's list endpoints return the raw mosquitto_ctrl stdout
 // as a plain string (e.g. {"clients": "name1\nname2\n..."}).
@@ -50,7 +57,7 @@ const CONFIG_API_URL     = '/api/proxy/config'
 const CLIENTLOGS_API_URL = '/api/proxy/clientlogs'
 
 function buildUrl(base: string, path: string): string {
-  const nonce = generateNonce()
+  const nonce = generateCacheBuster()
   const timestamp = Date.now()
   const url = `${base}${path}`
   const separator = url.includes('?') ? '&' : '?'
@@ -99,13 +106,7 @@ export const dynsecApi = {
     if (params?.search) p.set('search', params.search)
     const qs = p.toString()
     const path = qs ? `/clients?${qs}` : '/clients'
-    return request<{
-      clients: { username: string; disabled: boolean; roles: string[]; groups: string[] }[]
-      total: number
-      page: number
-      limit: number
-      pages: number
-    }>(buildUrl(DYNSEC_API_URL, path))
+    return request<ClientListResponse>(buildUrl(DYNSEC_API_URL, path))
   },
 
   // Disabled-state map for all clients (single JSON read — for Connected Clients page).
@@ -113,7 +114,7 @@ export const dynsecApi = {
     request<{ map: Record<string, boolean>; usernames: string[] }>(
       buildUrl(DYNSEC_API_URL, '/clients/disabled-map')
     ),
-  createClient: (data: { username: string; password: string }) =>
+  createClient: (data: ClientCreate) =>
     request(buildUrl(DYNSEC_API_URL, '/clients'), {
       method: 'POST',
       body: JSON.stringify(data),
@@ -166,9 +167,10 @@ export const dynsecApi = {
       body: JSON.stringify(acl),
     }),
   removeRoleACL: (rolename: string, aclType: string, topic: string) => {
-    const encoded = encodeURIComponent(topic)
+    const encodedTopic = encodeURIComponent(topic)
+    const encodedType = encodeURIComponent(aclType)
     return request(
-      buildUrl(DYNSEC_API_URL, `/roles/${rolename}/acls`) + `&acl_type=${aclType}&topic=${encoded}`,
+      buildUrl(DYNSEC_API_URL, `/roles/${rolename}/acls`) + `&acl_type=${encodedType}&topic=${encodedTopic}`,
       { method: 'DELETE' }
     )
   },
@@ -218,7 +220,7 @@ export const dynsecApi = {
 
   // Password import
   importPassword: (formData: FormData) =>
-    fetch(`/api/proxy/dynsec/import-password-file?nonce=${generateNonce()}&t=${Date.now()}`, {
+    fetch(`/api/proxy/dynsec/import-password-file?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
       body: formData,
     }),
@@ -227,7 +229,7 @@ export const dynsecApi = {
 // ─── Monitor API ─────────────────────────────────────────────────────────────
 
 export const monitorApi = {
-  getStats: () => request(buildUrl(MONITOR_API_URL, '/stats')),
+  getStats: () => request<MonitorStatsResponse>(buildUrl(MONITOR_API_URL, '/stats')),
   getBytesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/bytes?period=${period}`)),
   getMessagesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/messages?period=${period}`)),
   getTopologyStats: (limit = 15) => request(buildUrl(MONITOR_API_URL, `/stats/topology?limit=${limit}`)),
@@ -274,52 +276,52 @@ export const monitorApi = {
 
 export const configApi = {
   getMosquittoConfig: () =>
-    request<{ config: Record<string, unknown>; listeners: unknown[] }>(
-      `/api/proxy/config/mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`
+    request<MosquittoConfigResponse>(
+      `/api/proxy/config/mosquitto-config?nonce=${generateCacheBuster()}&t=${Date.now()}`
     ),
   saveMosquittoConfig: (configData: unknown) =>
-    request<{ success: boolean; message?: string }>(`/api/proxy/config/mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request<{ success: boolean; message?: string }>(`/api/proxy/config/mosquitto-config?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
       body: JSON.stringify(configData),
     }),
   resetMosquittoConfig: () =>
-    request(`/api/proxy/config/reset-mosquitto-config?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request(`/api/proxy/config/reset-mosquitto-config?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
     }),
   restartMosquitto: () =>
-    request<{ success: boolean; message: string }>(`/api/proxy/config/restart-mosquitto?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request<{ success: boolean; message: string }>(`/api/proxy/config/restart-mosquitto?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
     }),
   listTlsCerts: () =>
-    request<{ success: boolean; certs: string[]; certs_dir: string }>(`/api/proxy/config/tls-certs?nonce=${generateNonce()}&t=${Date.now()}`),
+    request<{ success: boolean; certs: string[]; certs_dir: string }>(`/api/proxy/config/tls-certs?nonce=${generateCacheBuster()}&t=${Date.now()}`),
   uploadTlsCert: (formData: FormData) =>
-    fetch(`/api/proxy/config/tls-certs/upload?nonce=${generateNonce()}&t=${Date.now()}`, {
+    fetch(`/api/proxy/config/tls-certs/upload?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
       body: formData,
     }),
   deleteTlsCert: (filename: string) =>
-    request<{ success: boolean }>(`/api/proxy/config/tls-certs/${encodeURIComponent(filename)}?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request<{ success: boolean }>(`/api/proxy/config/tls-certs/${encodeURIComponent(filename)}?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'DELETE',
     }),
 
   getDynSecJson: () =>
-    request(`/api/proxy/config/dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`),
+    request(`/api/proxy/config/dynsec-json?nonce=${generateCacheBuster()}&t=${Date.now()}`),
   importDynSecJson: (formData: FormData) =>
-    fetch(`/api/proxy/config/import-dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`, {
+    fetch(`/api/proxy/config/import-dynsec-json?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
       body: formData,
     }),
   importAcl: (data: unknown) =>
     request<{ success: boolean; message: string; stats?: { clients: number; groups: number; roles: number } }>(
-      `/api/proxy/config/import-acl?nonce=${generateNonce()}&t=${Date.now()}`,
+      `/api/proxy/config/import-acl?nonce=${generateCacheBuster()}&t=${Date.now()}`,
       { method: 'POST', body: JSON.stringify(data) }
     ),
   exportDynSecJson: () =>
-    fetch(`/api/proxy/config/export-dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`, {
+    fetch(`/api/proxy/config/export-dynsec-json?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       headers: { Accept: 'application/json' },
     }),
   resetDynSecJson: () =>
-    request(`/api/proxy/config/reset-dynsec-json?nonce=${generateNonce()}&t=${Date.now()}`, {
+    request(`/api/proxy/config/reset-dynsec-json?nonce=${generateCacheBuster()}&t=${Date.now()}`, {
       method: 'POST',
     }),
 }
@@ -339,7 +341,7 @@ export const awsApi = {
 
 export const azureApi = {
   getConfig: () => request(buildUrl(AZURE_BRIDGE_API_URL, '/config')),
-  saveConfig: (data: unknown) =>
+  saveConfig: (data: AzureBridgeCreate) =>
     request(buildUrl(AZURE_BRIDGE_API_URL, '/config'), {
       method: 'POST',
       body: JSON.stringify(data),

@@ -50,6 +50,9 @@ web_modules/
 # TypeScript cache
 *.tsbuildinfo
 
+# Generated API types (regenerated with: npm run gen-types)
+types/api.generated.ts
+
 # Optional npm cache directory
 .npm
 

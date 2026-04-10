@@ -14,16 +14,21 @@ const SERVICES: Record<string, string> = {
 }
 
 const KEY_FILE = '/nextjs/data/.api_key'
-const DEFAULT_KEY = 'default_api_key_replace_in_production'
+// Clave por defecto conocida — nunca debe usarse para reenviar requests reales
+const INSECURE_DEFAULT_KEY = 'default_api_key_replace_in_production'
 
-function getApiKey(): string {
+// Devuelve la clave activa o null si no hay ninguna configurada.
+// null indica que el proxy debe rechazar el request con 503.
+function getApiKey(): string | null {
   const envKey = process.env.API_KEY
-  if (envKey && envKey !== DEFAULT_KEY) return envKey
+  if (envKey && envKey !== INSECURE_DEFAULT_KEY) return envKey
   try {
-    return readFileSync(KEY_FILE, 'utf8').trim() || envKey || DEFAULT_KEY
+    const fileKey = readFileSync(KEY_FILE, 'utf8').trim()
+    if (fileKey && fileKey !== INSECURE_DEFAULT_KEY) return fileKey
   } catch {
-    return envKey || DEFAULT_KEY
+    // Archivo de clave aún no disponible (primer arranque antes de que start.sh lo genere)
   }
+  return null
 }
 
 async function handler(
@@ -37,13 +42,22 @@ async function handler(
     return NextResponse.json({ error: `Unknown service: ${service}` }, { status: 404 })
   }
 
+  // Verificar que la clave API esté configurada antes de reenviar
+  const apiKey = getApiKey()
+  if (!apiKey) {
+    return NextResponse.json(
+      { error: 'API key not configured. Set the API_KEY environment variable.' },
+      { status: 503 }
+    )
+  }
+
   // Build upstream URL, preserving all query params
   const upstreamUrl = new URL(`${base}/${rest.join('/')}`)
   req.nextUrl.searchParams.forEach((v, k) => upstreamUrl.searchParams.set(k, v))
 
-  // Forward headers, injecting the API key server-side
+  // Reenviar headers inyectando la clave API del lado del servidor (nunca expuesta al browser)
   const forwardHeaders = new Headers()
-  forwardHeaders.set('X-API-Key', getApiKey())
+  forwardHeaders.set('X-API-Key', apiKey)
   const contentType = req.headers.get('content-type')
   if (contentType) forwardHeaders.set('content-type', contentType)
 

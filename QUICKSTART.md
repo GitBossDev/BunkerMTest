@@ -2,7 +2,7 @@
 
 **Tiempo estimado**: 5-10 minutos  
 **Sistema**: Windows (PowerShell)  
-**Ultima revision**: 31 de marzo de 2026
+**Ultima revision**: 10 de abril de 2026
 
 ---
 
@@ -17,11 +17,14 @@ cd c:\Projects\BunkerMTest\BunkerMTest
 .\deploy.ps1 -Action setup
 ```
 
-### Paso 2: Construir imagen
+### Paso 2: Construir imagenes
 
 ```powershell
-# Primera vez o cuando haya cambios en el codigo fuente
+# Construir imagen principal de BunkerM (primera vez o cuando haya cambios de codigo)
 .\deploy.ps1 -Action build
+
+# Reconstruir imagen de Mosquitto (solo necesario cuando cambie Dockerfile.mosquitto)
+.\deploy.ps1 -Action build-mosquitto
 ```
 
 ### Paso 3: Iniciar servicios
@@ -43,9 +46,25 @@ cd c:\Projects\BunkerMTest\BunkerMTest
 ### Paso 5: Acceder a la plataforma
 
 - **Web UI**: http://localhost:2000
-- **Login admin**: `admin@brokerpanel.com` / `Usuario@1`
-- **MQTT broker**: `localhost:1901`
+- **MQTT broker**: `localhost:1900`
 - **pgAdmin** (solo con -WithTools): http://localhost:5050
+
+#### Credenciales de la UI web
+
+Las credenciales del administrador se establecen con las variables `ADMIN_INITIAL_EMAIL` y
+`ADMIN_INITIAL_PASSWORD` del archivo `.env.dev`, generadas automáticamente con `setup`.
+
+```powershell
+# Ver credenciales generadas
+Get-Content .env.dev | Select-String 'ADMIN_INITIAL'
+```
+
+> **Nota**: Si `.env.dev` no define `ADMIN_INITIAL_PASSWORD`, el sistema genera una contraseña
+> aleatoria en el primer arranque y la muestra en el log del contenedor:
+> ```powershell
+> podman logs bunkerm-platform 2>&1 | Select-String 'Contrasena'
+> ```
+> Cambia la contraseña desde la UI en **Settings → Account** tras el primer login.
 
 ---
 
@@ -54,12 +73,38 @@ cd c:\Projects\BunkerMTest\BunkerMTest
 Para aplicar cambios de codigo a un contenedor ya corriendo sin reconstruir la imagen completa:
 
 ```powershell
-# Actualizar servicios Python (dynsec, monitor, clientlogs, config)
+# Actualizar servicios Python del backend (dynsec, monitor, clientlogs, config, ai)
 .\deploy.ps1 -Action patch-backend
 
 # Actualizar frontend Next.js
 .\deploy.ps1 -Action patch-frontend
 ```
+
+> Los endpoints de AI usan el prefijo `/api/v1/ai` (p.ej. `GET /api/v1/ai/health`).
+
+---
+
+## Desarrollo Frontend: Tipos generados desde OpenAPI
+
+After any backend schema change (e.g. new fields in `core/config.py` or a router model), regenerate
+the TypeScript types so the compiler catches mismatches at build time:
+
+```powershell
+# Requires the stack to be running at localhost:2000
+cd bunkerm-source\frontend
+npm run gen-types
+```
+
+The command fetches `http://localhost:2000/api/openapi.json` and overwrites
+`frontend/types/api.generated.ts` with types derived from the live Pydantic schema.
+
+**When to run:**
+- After adding or renaming a field in any Pydantic request/response model
+- After pulling backend changes from another contributor
+- Before opening a pull request that modifies API contracts
+
+> `types/api.generated.ts` is intentionally excluded from version control (`.gitignore`).
+> A hand-written placeholder is committed so the project compiles without running the generator.
 
 ---
 
@@ -79,7 +124,7 @@ Para aplicar cambios de codigo a un contenedor ya corriendo sin reconstruir la i
 .\simulator.ps1 stop
 ```
 
-El simulador se conecta a `localhost:1901` y publica datos de 12 dispositivos IoT.
+El simulador se conecta a `localhost:1900` y publica datos de 12 dispositivos IoT.
 
 ---
 

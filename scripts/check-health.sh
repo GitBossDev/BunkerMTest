@@ -98,26 +98,22 @@ check_mosquitto() {
 
 echo "1. Docker Containers"
 echo "--------------------"
-check_container "bunkerm-postgres"
 check_container "bunkerm-mosquitto"
-check_container "bunkerm-nginx"
-# check_container "bunkerm-backend"
-# check_container "bunkerm-frontend"
+check_container "bunkerm-platform"
 
 echo ""
 echo "2. Service Connectivity"
 echo "-----------------------"
-check_postgres
 check_mosquitto
 
 echo ""
 echo "3. HTTP Endpoints"
 echo "-----------------"
-check_service "Nginx (Web UI)" "http://localhost:${NGINX_PORT:-2000}/" 200
-check_service "Nginx Health" "http://localhost:${NGINX_PORT:-2000}/health" 200
-
-# Uncomment when backend services are running
-# check_service "Backend API" "http://localhost:${NGINX_PORT:-2000}/api/health" 200
+check_service "BunkerM Web UI" "http://localhost:${NGINX_PORT:-2000}/" 200
+check_service "BunkerM API (auth)" "http://localhost:${NGINX_PORT:-2000}/api/auth/me" 401
+check_service "DynSec API" "http://localhost:${NGINX_PORT:-2000}/api/dynsec/clients" 401
+check_service "Monitor API" "http://localhost:${NGINX_PORT:-2000}/api/monitor/stats/health" 200
+check_service "AI API" "http://localhost:${NGINX_PORT:-2000}/api/v1/ai/health" 401
 # check_service "Smart Anomaly Service" "http://localhost:${SMART_ANOMALY_PORT:-8100}/health" 200
 
 echo ""

@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 API_KEY = os.getenv("API_KEY")
-MOSQUITTO_PASSWD_PATH = "/etc/mosquitto/mosquitto_passwd"
+MOSQUITTO_PASSWD_PATH = os.getenv("MOSQUITTO_PASSWD_PATH", "/var/lib/mosquitto/mosquitto_passwd")
 DYNSEC_PATH = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
 UPLOAD_DIR = "/tmp/mosquitto_uploads"
 
@@ -38,7 +38,8 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
-    if api_key_header != API_KEY:
+    from core.auth import get_active_api_key
+    if api_key_header != get_active_api_key():
         logger.warning(f"Invalid API key attempt")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key"
