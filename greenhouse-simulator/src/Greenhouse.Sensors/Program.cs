@@ -31,34 +31,36 @@ class Programa
     static string user = "";
     static string pass = "";
     static int clients = 0;
+    static int clients_t = 0;
     static int timeunit = 0;
+    static int qos = 0;
     static int time = 0;
+    static int msgs = 0;
     static int contadorEnvios = 0;
     static int contadorSuscripciones = 0;
     static int totalDatosEnviadosSubs = 0;
+    static bool retain;
+
     static async Task Main(string[] args)
     {
-        for (int i = 0; i < args.Length; i++)
-        {
-            if (args[i] == "--host") host = args[++i];
-            if (args[i] == "--user") user = args[++i];
-            if (args[i] == "--pass") pass = args[++i];
-            if (args[i] == "--clients") clients = int.Parse(args[++i]);
-            if (args[i] == "--timeunit") timeunit = int.Parse(args[++i]);
-            if (args[i] == "--time") time = int.Parse(args[++i]);
-        }
+
         // Fallback a variables de entorno si CLI no se pasó
         host = string.IsNullOrEmpty(host) ? Environment.GetEnvironmentVariable("MQTT_HOST") : host;
         user = string.IsNullOrEmpty(user) ? Environment.GetEnvironmentVariable("MQTT_USER") : user;
         pass = string.IsNullOrEmpty(pass) ? Environment.GetEnvironmentVariable("MQTT_PASS") : pass;
-        clients = clients == 0 ? int.Parse(Environment.GetEnvironmentVariable("CLIENTS") ?? "100") : clients;
-        timeunit = timeunit == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIMEUNIT") ?? "3") : timeunit;
-        time = time == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIME") ?? "1") : time;
+        clients = clients == 0 ? int.Parse(Environment.GetEnvironmentVariable("CLIENTS")) : clients;
+        timeunit = timeunit == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIMEUNIT")) : timeunit;
+        time = time == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIME")) : time;
+        msgs = msgs == 0 ? int.Parse(Environment.GetEnvironmentVariable("MSGS")) : msgs;
+        qos = qos == 0 ? int.Parse(Environment.GetEnvironmentVariable("QOS")) : qos;
+        retain = bool.Parse(Environment.GetEnvironmentVariable("RETAIN"));
+
+        clients_t = clients;
 
         Console.WriteLine($"Conectando a {host} con {user}");
 
         Console.WriteLine("==============================================");
-        Console.WriteLine("  GREENHOUSE MQTT - PUBLISHERS");
+        Console.WriteLine("  GREENHOUSE MQTT STRESSER - FASE 1");
         Console.WriteLine("==============================================\n");
         // Convertir el tiempo a milisegundos según la unidad seleccionada
         switch (timeunit)
@@ -73,7 +75,6 @@ class Programa
                 time = time * 1000;
                 break;
             default:
-                time = time * 1000;
                 break;
         }
 
@@ -92,7 +93,7 @@ class Programa
             tasks.Add(Task.Run(() => MyFunctionAsync(time)));
 
             // tiempo entre comienzo de la task de cada cliente
-            await Task.Delay(500);
+            await Task.Delay(10);
 
         }
 
@@ -118,13 +119,22 @@ class Programa
     {
         MqttClientHelper mqttHelper = await ComprobadorDeConexiones(); //Comprueba la conexion con la cuenta del cliente y espera que cada task termine
 
+        string[] id_partes = mqttHelper.ClientId.Split('-');
+        int id_sensor = int.Parse(id_partes[^1]) + 100000000;
+
+
+        await mqttHelper.PublishAsync(
+        topic: $"lab/device/{id_sensor}/Estatus_conexion",
+        payload: "Conectado",
+        qos: MqttQualityOfServiceLevel.AtLeastOnce,
+        retain: retain
+        );
+
         //Intenta diversas opciones para el cliente.
         try
         {
-            int messageCount = Random.Shared.Next(5, 20);
+            int messageCount = msgs;
 
-
-            var opcion_retain = new[] { true, false };
             var sensores = new[] { "CO2", "Humedad", "Temperatura" };
             var estados = new[] { "", "/status" };
             var qosLevels = new[]
@@ -134,11 +144,10 @@ class Programa
                     MqttQualityOfServiceLevel.ExactlyOnce
             };
 
-            //Manda cantidad aleatoria de mensajes entre 5 y 19.
             for (int i = 0; i < messageCount; i++)
             {
-                string[] id_partes = mqttHelper.ClientId.Split('-');
-                int id_sensor = int.Parse(id_partes[^1]) + 100000000;
+                id_partes = mqttHelper.ClientId.Split('-');
+                id_sensor = int.Parse(id_partes[^1]) + 100000000;
 
                 Interlocked.Increment(ref totalDatosEnviadosSubs); //Interlocked para evitar problemas de concurrencia al actualizar el contador desde múltiples tareas
                 var sensores_co2 = new List<Sensor_c02> { new Sensor_c02 { Id = id_sensor, Nivel_c02 = Random.Shared.Next(300, 1000) } };
@@ -153,8 +162,6 @@ class Programa
 
                 string sensor = sensores[Random.Shared.Next(sensores.Length)];
                 string estado = estados[Random.Shared.Next(estados.Length)];
-                var qos = qosLevels[Random.Shared.Next(qosLevels.Length)];
-                var retain = opcion_retain[Random.Shared.Next(opcion_retain.Length)];
 
                 string topic = $"lab/device/{id_sensor}/{sensor}{estado}";
 
@@ -165,7 +172,7 @@ class Programa
 
                     await mqttHelper.SubscribeAsync(
                         topic: topic,
-                        qos: qos
+                        qos: qosLevels[qos]
                     );
 
                     Interlocked.Increment(ref contadorSuscripciones);
@@ -198,14 +205,21 @@ class Programa
                     await mqttHelper.PublishAsync(
                         topic: topic,
                         payload: payload,
-                        qos: qos,
+                        qos: qosLevels[qos],
                         retain: retain
                     );
 
                     Interlocked.Increment(ref contadorEnvios);
                 }
 
-                Console.WriteLine($"Mensaje: #{i}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+                Console.WriteLine($"Mensaje: #{i + 1}, Publisher: {mqttHelper.ClientId} en el topic con id: {id_sensor}");
+
+                int cuenta_tiempo = msgs * clients_t;
+
+                double subs_act = contadorSuscripciones / (double)cuenta_tiempo * 100;
+                double pubs_act = contadorEnvios / (double)cuenta_tiempo * 100;
+                double total_act = (contadorSuscripciones + contadorEnvios) / (double)cuenta_tiempo * 100;
+                Console.WriteLine($"\nPublicaciones actuales: {contadorEnvios} ({pubs_act}%).\nSuscripciones actuales: {contadorSuscripciones} ({subs_act}%).\nTotal de relaciones simuladas actuales: {contadorEnvios + contadorSuscripciones} ({total_act}%).\n");
 
                 await Task.Delay(tiempo);
                 // Evitar esperar después del último mensaje
@@ -224,10 +238,8 @@ class Programa
         }
         finally
         {
-            // Importante: Siempre desconectar limpiamente antes de salir
-            Console.WriteLine("\n\nDesconectando del broker...");
+            // DESCONEXIÓN LIMPIA:
             //await mqttHelper.DisconnectAsync();
-            Console.WriteLine("Aplicación finalizada.");
         }
 
     }
@@ -240,19 +252,19 @@ class Programa
         id_cliente = id_cliente + 1;
         // Configurar parámetros de conexión MQTT
 
-
         MqttSettings settings = new MqttSettings
         {
-            BrokerHost = host,  // Mosquitto está corriendo en Docker en nuestra máquina
-            BrokerPort = 1900,          // Puerto estándar MQTT
-            ClientId = $"greenhouse-publisher-{id_cliente}",  // ID único para este cliente
-            Username = id_cliente.ToString(),  // Usuario que acabamos de añadir a dynamic-security.json
-            Password = "123456",  // Contraseña en texto plano
+            BrokerHost = host,
+            BrokerPort = 1900,
+            ClientId = $"greenhouse-publisher-{id_cliente}",
+            Username = id_cliente.ToString(),
+            Password = "123456",
+            KeepAliveSeconds = 3,
         };
 
         // Crear helper MQTT y conectar al broker
         MqttClientHelper mqttHelper = new(settings);
-        await mqttHelper.ConnectAsync();
+        await mqttHelper.ConnectAsync(id_cliente);
 
         if (!mqttHelper.IsConnected)
         {

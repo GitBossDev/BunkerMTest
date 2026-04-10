@@ -583,17 +583,44 @@ class MQTTStats:
                 self.last_messages_sent = self.messages_sent
                 self.last_update = now
 
+    def _get_client_counters_locked(self) -> Dict[str, int]:
+        """Normaliza contadores de clientes para que el dashboard sea coherente."""
+        connected = max(0, self.connected_clients - 1)
+        total = max(0, self.clients_total - 1)
+        maximum = max(0, self.clients_maximum - 1)
+
+        if total < connected:
+            total = connected
+
+        # `$SYS/broker/clients/disconnected` puede desbordarse bajo carga o tras
+        # tormentas de reconexión. Derivarlo desde total-connected mantiene la UI
+        # consistente con el resto de contadores del broker.
+        disconnected = max(0, total - connected)
+        expired = max(0, self.clients_expired)
+
+        return {
+            "connected": connected,
+            "total": total,
+            "maximum": maximum,
+            "disconnected": disconnected,
+            "expired": expired,
+        }
+
+    def get_client_counters(self) -> Dict[str, int]:
+        with self._lock:
+            return self._get_client_counters_locked()
+
     def get_stats(self) -> Dict[str, Any]:
         self.update_message_rates()
         self.update_storage()
         with self._lock:
-            actual_connected = max(0, self.connected_clients - 1)
+            client_counts = self._get_client_counters_locked()
             actual_subscriptions = max(0, self.subscriptions - 2)
             total_messages = self.message_counter.get_total_count()
             hourly_data    = self.data_storage.get_hourly_data()
             daily_messages = self.data_storage.get_daily_messages()
             stats = {
-                "total_connected_clients": actual_connected,
+                "total_connected_clients": client_counts["connected"],
                 "total_messages_received": self.format_number(total_messages),
                 "total_subscriptions": actual_subscriptions,
                 "retained_messages": self.retained_messages,
@@ -601,10 +628,10 @@ class MQTTStats:
                 "published_history": list(self.published_history),
                 "bytes_stats": hourly_data,
                 "daily_message_stats": daily_messages,
-                "clients_total": max(0, self.clients_total - 1),
-                "clients_maximum": max(0, self.clients_maximum - 1),
-                "clients_disconnected": self.clients_disconnected,
-                "clients_expired": self.clients_expired,
+                "clients_total": client_counts["total"],
+                "clients_maximum": client_counts["maximum"],
+                "clients_disconnected": client_counts["disconnected"],
+                "clients_expired": client_counts["expired"],
                 "broker_version": self.broker_version,
                 "broker_uptime": self.broker_uptime,
                 "messages_received_raw": self.messages_received_total,

@@ -151,7 +151,7 @@ class Listener(BaseModel):
     port: int
     bind_address: Optional[str] = ""
     per_listener_settings: bool = False
-    max_connections: int = -1
+    max_connections: int = 10000
     protocol: Optional[str] = None
 
 

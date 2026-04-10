@@ -23,7 +23,7 @@ interface ListenerData {
 
 interface ConfigState {
   mqttPort: number
-  maxConnections: number        // -1 = unlimited
+  maxConnections: number
   wsEnabled: boolean
   wsPort: number
   maxInflight: number           // 0 = use default (20)
@@ -117,7 +117,7 @@ function buildSavePayload(state: ConfigState) {
       port: state.wsPort,
       bind_address: '',
       per_listener_settings: false,
-      max_connections: -1,
+      max_connections: state.maxConnections,
       protocol: 'websockets',
     })
   }
@@ -397,11 +397,11 @@ export default function MosquittoConfigPage() {
               <NumberField
                 id="maxConn"
                 label="Max Connections"
-                description="Maximum simultaneous clients. Leave empty for unlimited (−1)."
+                description="Maximum simultaneous clients. Default: 10000 on a fresh broker configuration."
                 value={state.maxConnections}
-                min={-1}
-                placeholder="unlimited"
-                onChange={(v) => set('maxConnections', v < 1 ? -1 : v)}
+                min={1}
+                placeholder="10000"
+                onChange={(v) => set('maxConnections', Math.max(1, v))}
               />
 
               <Separator />

@@ -9,6 +9,7 @@ import time
 import uuid
 
 import pytest
+import services.monitor_service as monitor_svc
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,45 @@ async def test_stats_with_valid_params(client):
     assert "mqtt_connected" in body
     assert "total_connected_clients" in body
     assert "total_messages_received" in body
+
+
+async def test_stats_sanitizes_disconnected_counter(client, monkeypatch):
+    """Disconnected debe derivarse desde total-connected si el contador raw se corrompe."""
+    original = {
+        "connected_clients": monitor_svc.mqtt_stats.connected_clients,
+        "clients_total": monitor_svc.mqtt_stats.clients_total,
+        "clients_maximum": monitor_svc.mqtt_stats.clients_maximum,
+        "clients_disconnected": monitor_svc.mqtt_stats.clients_disconnected,
+        "clients_expired": monitor_svc.mqtt_stats.clients_expired,
+        "subscriptions": monitor_svc.mqtt_stats.subscriptions,
+    }
+
+    monkeypatch.setattr(monitor_svc, "read_max_connections", lambda: 10000)
+    monitor_svc.mqtt_stats.connected_clients = 6
+    monitor_svc.mqtt_stats.clients_total = 11
+    monitor_svc.mqtt_stats.clients_maximum = 11
+    monitor_svc.mqtt_stats.clients_disconnected = 4294967293
+    monitor_svc.mqtt_stats.clients_expired = 2
+    monitor_svc.mqtt_stats.subscriptions = 2
+
+    try:
+        params = {"nonce": str(uuid.uuid4()), "timestamp": time.time()}
+        resp = await client.get("/api/v1/monitor/stats", params=params)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_connected_clients"] == 5
+        assert body["clients_total"] == 10
+        assert body["clients_maximum"] == 10
+        assert body["clients_disconnected"] == 5
+        assert body["clients_expired"] == 2
+        assert body["client_max_connections"] == 10000
+    finally:
+        monitor_svc.mqtt_stats.connected_clients = original["connected_clients"]
+        monitor_svc.mqtt_stats.clients_total = original["clients_total"]
+        monitor_svc.mqtt_stats.clients_maximum = original["clients_maximum"]
+        monitor_svc.mqtt_stats.clients_disconnected = original["clients_disconnected"]
+        monitor_svc.mqtt_stats.clients_expired = original["clients_expired"]
+        monitor_svc.mqtt_stats.subscriptions = original["subscriptions"]
 
 
 async def test_stats_requires_auth(raw_client):

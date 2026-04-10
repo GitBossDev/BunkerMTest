@@ -89,13 +89,13 @@ async def get_topology_stats(limit: int = 15, api_key: str = Security(get_api_ke
     all_topics = topic_store.get_all()
     user_topics = [t for t in all_topics if not t["topic"].startswith("$")]
     top_n = sorted(user_topics, key=lambda x: x.get("count", 0), reverse=True)[:limit]
-    with mqtt_stats._lock:
-        return {
-            "top_topics": top_n,
-            "total_distinct_topics": len(user_topics),
-            "clients_disconnected": mqtt_stats.clients_disconnected,
-            "clients_expired": mqtt_stats.clients_expired,
-        }
+    client_counts = mqtt_stats.get_client_counters()
+    return {
+        "top_topics": top_n,
+        "total_distinct_topics": len(user_topics),
+        "clients_disconnected": client_counts["disconnected"],
+        "clients_expired": client_counts["expired"],
+    }
 
 
 @router.get("/stats/health")
@@ -137,6 +137,7 @@ async def get_resource_stats(api_key: str = Security(get_api_key)):
 @router.get("/stats/qos")
 async def get_qos_stats(api_key: str = Security(get_api_key)):
     """Métricas de mensajes en vuelo y almacenados."""
+    client_counts = mqtt_stats.get_client_counters()
     with mqtt_stats._lock:
         total_rx       = mqtt_stats.messages_received_total
         total_retained = mqtt_stats.retained_messages
@@ -144,8 +145,8 @@ async def get_qos_stats(api_key: str = Security(get_api_key)):
             "messages_inflight":    mqtt_stats.messages_inflight,
             "messages_stored":      mqtt_stats.messages_stored,
             "messages_store_bytes": mqtt_stats.messages_store_bytes,
-            "clients_disconnected": mqtt_stats.clients_disconnected,
-            "clients_expired":      mqtt_stats.clients_expired,
+            "clients_disconnected": client_counts["disconnected"],
+            "clients_expired":      client_counts["expired"],
             "retained_ratio":       round(total_retained / max(total_rx, 1) * 100, 1),
         }
 

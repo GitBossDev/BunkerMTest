@@ -13,7 +13,7 @@ interface StatsCardsProps {
 export function StatsCards({ stats }: StatsCardsProps) {
   const connected    = stats?.total_connected_clients ?? 0
   const disconnected = stats?.clients_disconnected ?? 0
-  const total        = connected + disconnected
+  const total        = stats?.clients_total ?? (connected + disconnected)
   const maximum      = stats?.clients_maximum ?? connected
   const subs         = stats?.total_subscriptions ?? 0
 

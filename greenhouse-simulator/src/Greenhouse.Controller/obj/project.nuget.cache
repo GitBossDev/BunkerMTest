@@ -1,19 +1,19 @@
 {
   "version": 2,
-  "dgSpecHash": "yR8sb9LYSPA=",
+  "dgSpecHash": "Z2ClWUGrxBU=",
   "success": true,
-  "projectFilePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+  "projectFilePath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\mdchuchon\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
+    "C:\\Users\\rrevilla\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
   ],
   "logs": [
     {
       "code": "NU1603",
       "level": "Warning",
-      "message": "Greenhouse.Controller depends on MQTTnet (>= 4.3.7) but MQTTnet 4.3.7 was not found. MQTTnet 4.3.7.1207 was resolved instead.",
-      "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+      "message": "Greenhouse.Controller depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
+      "projectPath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
       "warningLevel": 1,
-      "filePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
+      "filePath": "C:\\Users\\rrevilla\\Downloads\\BunkerM\\InvernaderoMQTT_EjemploFase1\\src\\Greenhouse.Controller\\Greenhouse.Controller.csproj",
       "libraryId": "MQTTnet",
       "targetGraphs": [
         "net10.0"

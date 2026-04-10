@@ -72,7 +72,7 @@ class Listener(BaseModel):
     port: int
     bind_address: Optional[str] = None
     per_listener_settings: Optional[bool] = False
-    max_connections: Optional[int] = -1
+    max_connections: Optional[int] = 10000
     protocol: Optional[str] = None   # None = MQTT/TCP (default); "websockets" = WebSocket
 
 
@@ -104,12 +104,13 @@ _REQUIRED_LOG_TYPES = ["error", "warning", "notice", "information", "subscribe"]
 DEFAULT_CONFIG = """# MQTT listener on port 1900
 listener 1900
 per_listener_settings false
-max_connections -1
+max_connections 10000
 allow_anonymous false
 
 # WebSocket listener
 listener 9001
 protocol websockets
+max_connections 10000
 
 # Dynamic Security Plugin configuration
 plugin /usr/lib/mosquitto_dynamic_security.so
@@ -178,7 +179,7 @@ def parse_mosquitto_conf() -> Dict[str, Any]:
                     "port": int(parts[1]),
                     "bind_address": parts[2] if len(parts) > 2 else "",
                     "per_listener_settings": False,
-                    "max_connections": -1,
+                    "max_connections": 10000,
                     "protocol": None,
                 }
             elif current_listener and line.startswith(

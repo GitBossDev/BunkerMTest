@@ -42,11 +42,12 @@ public class MqttClientHelper
     * Intenta conectar al broker y verifica el resultado para asegurar que la conexión fue exitosa
     * Si la conexión falla, se captura la excepción y se muestra un mensaje de error
     */
-    public async Task<IMqttClient> ConnectAsync()
+    public async Task<IMqttClient> ConnectAsync(int id_cliente)
     {
         // MqttFactory es el punto de entrada de MQTTnet
         // Nos permite crear clientes, servidores, etc.
         var factory = new MqttFactory();
+
 
         // Crear instancia de cliente MQTT
         _mqttClient = factory.CreateMqttClient();
@@ -56,7 +57,12 @@ public class MqttClientHelper
             .WithTcpServer(_settings.BrokerHost, _settings.BrokerPort) // Dirección del broker
             .WithClientId(_settings.ClientId)                          // ID único del cliente
             .WithKeepAlivePeriod(TimeSpan.FromSeconds(_settings.KeepAliveSeconds)) // Mantener conexión viva
-            .WithTimeout(TimeSpan.FromSeconds(_settings.ConnectionTimeoutSeconds)); // Timeout de conexión
+            .WithTimeout(TimeSpan.FromSeconds(_settings.ConnectionTimeoutSeconds)) // Timeout de conexión
+
+            .WithWillTopic($"lab/device/{id_cliente + 100000000}/Estatus_conexion")
+            .WithWillPayload("Desconectado")
+            .WithWillQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .WithWillRetain(true);
 
         if (!string.IsNullOrEmpty(_settings.Username))
         {
