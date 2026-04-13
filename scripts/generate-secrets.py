@@ -166,7 +166,7 @@ if __name__ == '__main__':
     # Write to .env.dev file
     env_file = Path(__file__).parent.parent / '.env.dev'
     
-    with open(env_file, 'w') as f:
+    with open(env_file, 'w', encoding='utf-8', newline='\n') as f:
         f.write(env_content)
     
     print(f"[OK] Secrets generated and saved to: {env_file}")

@@ -31,10 +31,26 @@ COMPOSE_INTERNAL = {
 }
 
 
+def read_text_with_fallbacks(path: Path) -> str:
+    """Read text files using UTF-8 first, then legacy Windows encodings."""
+    encodings = ("utf-8", "utf-8-sig", "cp1252", "latin-1")
+    last_error: UnicodeDecodeError | None = None
+
+    for encoding in encodings:
+        try:
+            return path.read_text(encoding=encoding)
+        except UnicodeDecodeError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"Could not read file: {path}")
+
+
 def parse_env_file(path: Path) -> set[str]:
     """Read .env.dev and return the set of variable names that are defined."""
     defined: set[str] = set()
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
+    for raw_line in read_text_with_fallbacks(path).splitlines():
         line = raw_line.strip()
         # Ignorar lineas en blanco y comentarios
         if not line or line.startswith("#"):
@@ -50,7 +66,7 @@ def parse_required_vars(compose_path: Path) -> list[str]:
     Scan docker-compose.dev.yml for variables referenced as ${VAR} (no :- fallback).
     Returns a deduplicated list preserving first-occurrence order.
     """
-    text = compose_path.read_text(encoding="utf-8")
+    text = read_text_with_fallbacks(compose_path)
 
     # ${VAR} — variable requerida, sin valor por defecto
     required_pattern = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
