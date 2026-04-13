@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
-import type { MosquittoConfigResponse } from '@/types/api.generated'
+import type { MosquittoConfigResponse } from '@/types'
 
 interface ListenerData {
   port: number

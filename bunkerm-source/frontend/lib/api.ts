@@ -1,12 +1,15 @@
 import { generateCacheBuster } from './utils'
-import type { MqttClient, Role, Group, MqttTopic } from '@/types'
 import type {
+  MqttClient,
+  Role,
+  Group,
+  MqttTopic,
   ClientCreate,
   ClientListResponse,
-  MonitorStatsResponse,
+  MonitorStats,
   MosquittoConfigResponse,
   AzureBridgeCreate,
-} from '@/types/api.generated'
+} from '@/types'
 
 // The Python dynsec API's list endpoints return the raw mosquitto_ctrl stdout
 // as a plain string (e.g. {"clients": "name1\nname2\n..."}).
@@ -229,7 +232,7 @@ export const dynsecApi = {
 // ─── Monitor API ─────────────────────────────────────────────────────────────
 
 export const monitorApi = {
-  getStats: () => request<MonitorStatsResponse>(buildUrl(MONITOR_API_URL, '/stats')),
+  getStats: () => request<MonitorStats>(buildUrl(MONITOR_API_URL, '/stats')),
   getBytesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/bytes?period=${period}`)),
   getMessagesForPeriod: (period: string) => request(buildUrl(MONITOR_API_URL, `/stats/messages?period=${period}`)),
   getTopologyStats: (limit = 15) => request(buildUrl(MONITOR_API_URL, `/stats/topology?limit=${limit}`)),

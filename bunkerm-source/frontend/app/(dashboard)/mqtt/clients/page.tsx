@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ClientsTable } from '@/components/mqtt/clients/ClientsTable'
 import { dynsecApi } from '@/lib/api'
-import type { MqttClient, Role, Group } from '@/types'
+import type { ClientSummary, MqttClient, Role, Group } from '@/types'
 
 const PAGE_SIZE = 50
 
@@ -37,11 +37,11 @@ export default function ClientsPage() {
         dynsecApi.getGroups(),
       ])
       // Map flat role/group string arrays to the { rolename, groupname } shape
-      const clientsList: MqttClient[] = res.clients.map((c) => ({
-        username: c.username,
-        disabled: c.disabled,
-        roles: c.roles.map((r) => ({ rolename: r })),
-        groups: c.groups.map((g) => ({ groupname: g })),
+      const clientsList: MqttClient[] = res.clients.map((client: ClientSummary) => ({
+        username: client.username,
+        disabled: client.disabled,
+        roles: client.roles.map((roleName) => ({ rolename: roleName })),
+        groups: client.groups.map((groupName) => ({ groupname: groupName })),
       }))
       setClients(clientsList)
       setTotal(res.total)

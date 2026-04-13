@@ -175,6 +175,68 @@ export interface ApiResponse<T = unknown> {
   message?: string
 }
 
+// Frontend API contract types required at build time.
+// Keep these tracked so the app compiles even if generated OpenAPI types are absent.
+export interface ClientCreate {
+  username: string
+  password: string
+  textname?: string | null
+}
+
+export interface ClientSummary {
+  username: string
+  disabled: boolean
+  roles: string[]
+  groups: string[]
+}
+
+export interface ClientListResponse {
+  clients: ClientSummary[]
+  total: number
+  page: number
+  limit: number
+  pages: number
+}
+
+export interface AwsBridgeCreate {
+  endpoint: string
+  port?: number
+  client_id?: string
+  topics: string[]
+  cert_file?: string
+  key_file?: string
+  ca_file?: string
+}
+
+export interface AzureBridgeCreate {
+  hub_name: string
+  device_id: string
+  sas_token: string
+  topics: string[]
+  api_version?: string
+}
+
+export interface ListenerConfig {
+  port: number
+  protocol?: string
+  bind_address?: string
+}
+
+export interface TlsListenerConfig {
+  port: number
+  cafile?: string
+  certfile?: string
+  keyfile?: string
+}
+
+export interface MosquittoConfigResponse {
+  config: Record<string, unknown>
+  listeners: ListenerConfig[]
+  max_inflight_messages?: number | null
+  max_queued_messages?: number | null
+  tls?: TlsListenerConfig | null
+}
+
 // MQTT Event (from clientlogs service)
 export interface MQTTEvent {
   id: string
