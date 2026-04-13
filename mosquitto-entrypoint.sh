@@ -121,6 +121,168 @@ chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
 #                    preservando el JSON recien importado; el supervisor lo reinicia.
 #
 MOSQUITTO_PID=""
+RESOURCE_STATS_PID=""
+
+start_resource_stats_collector() {
+    python3 - <<'PYEOF' &
+import json
+import os
+import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+stats_path = Path('/var/log/mosquitto/broker-resource-stats.json')
+cgroup_root = Path('/sys/fs/cgroup')
+host_cpus = os.cpu_count() or 1
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text().strip()
+    except Exception:
+        return ''
+
+
+def read_int(path: Path):
+    text = read_text(path)
+    if not text or text == 'max':
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def read_cpu_usage_usec() -> int:
+    text = read_text(cgroup_root / 'cpu.stat')
+    for line in text.splitlines():
+        key, _, value = line.partition(' ')
+        if key == 'usage_usec':
+            try:
+                return int(value)
+            except ValueError:
+                return 0
+    return 0
+
+
+def read_cpu_limit_cores():
+    raw = read_text(cgroup_root / 'cpu.max')
+    if not raw:
+        return None
+    parts = raw.split()
+    if len(parts) != 2 or parts[0] == 'max':
+        return None
+    try:
+        quota = int(parts[0])
+        period = int(parts[1])
+        if quota <= 0 or period <= 0:
+            return None
+        return quota / period
+    except ValueError:
+        return None
+
+
+def parse_cpu_limit_env():
+    raw = (os.environ.get('BROKER_CPU_LIMIT_CORES') or '').strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+        return value if value > 0 else None
+    except ValueError:
+        return None
+
+
+def parse_memory_limit_env():
+    raw = (os.environ.get('BROKER_MEMORY_LIMIT') or '').strip().lower()
+    if not raw:
+        return None
+
+    match = re.fullmatch(r'(\d+(?:\.\d+)?)([kmgtp]?i?b?)?', raw)
+    if not match:
+        return None
+
+    number = float(match.group(1))
+    unit = match.group(2) or ''
+    multipliers = {
+        '': 1,
+        'b': 1,
+        'k': 1024,
+        'kb': 1024,
+        'ki': 1024,
+        'kib': 1024,
+        'm': 1024 ** 2,
+        'mb': 1024 ** 2,
+        'mi': 1024 ** 2,
+        'mib': 1024 ** 2,
+        'g': 1024 ** 3,
+        'gb': 1024 ** 3,
+        'gi': 1024 ** 3,
+        'gib': 1024 ** 3,
+        't': 1024 ** 4,
+        'tb': 1024 ** 4,
+        'ti': 1024 ** 4,
+        'tib': 1024 ** 4,
+        'p': 1024 ** 5,
+        'pb': 1024 ** 5,
+        'pi': 1024 ** 5,
+        'pib': 1024 ** 5,
+    }
+    multiplier = multipliers.get(unit)
+    if multiplier is None:
+        return None
+    return int(number * multiplier)
+
+
+previous_usage = None
+previous_ts = None
+configured_cpu_limit_cores = parse_cpu_limit_env()
+configured_memory_limit_bytes = parse_memory_limit_env()
+
+while True:
+    now = time.time()
+    cpu_usage = read_cpu_usage_usec()
+    cpu_limit_cores = read_cpu_limit_cores() or configured_cpu_limit_cores
+    memory_bytes = read_int(cgroup_root / 'memory.current')
+    memory_limit_bytes = read_int(cgroup_root / 'memory.max') or configured_memory_limit_bytes
+
+    cpu_pct = None
+    if previous_usage is not None and previous_ts is not None and now > previous_ts:
+        usage_delta = max(0, cpu_usage - previous_usage)
+        elapsed = now - previous_ts
+        baseline_cores = cpu_limit_cores if cpu_limit_cores and cpu_limit_cores > 0 else host_cpus
+        if baseline_cores > 0 and elapsed > 0:
+            cpu_pct = max(0.0, min(usage_delta / (elapsed * 1_000_000 * baseline_cores) * 100.0, 999.0))
+
+    payload = {
+        'timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'cpu_pct': round(cpu_pct, 2) if cpu_pct is not None else None,
+        'cpu_limit_cores': round(cpu_limit_cores, 2) if cpu_limit_cores is not None else None,
+        'cpu_limit_pct': 100.0 if cpu_limit_cores is not None else None,
+        'memory_bytes': memory_bytes,
+        'memory_limit_bytes': memory_limit_bytes,
+        'memory_pct': round(memory_bytes / memory_limit_bytes * 100.0, 2)
+        if memory_bytes is not None and memory_limit_bytes not in (None, 0)
+        else None,
+    }
+
+    try:
+        tmp_path = stats_path.with_suffix('.tmp')
+        tmp_path.write_text(json.dumps(payload))
+        os.chmod(tmp_path, 0o644)
+        os.replace(tmp_path, stats_path)
+        os.chmod(stats_path, 0o644)
+    except Exception:
+        pass
+
+    previous_usage = cpu_usage
+    previous_ts = now
+    time.sleep(5)
+PYEOF
+    RESOURCE_STATS_PID=$!
+    echo "[supervisor] Resource stats collector iniciado (PID $RESOURCE_STATS_PID)"
+}
 
 start_mosquitto() {
     echo "[supervisor] Iniciando mosquitto..."
@@ -135,12 +297,14 @@ start_mosquitto() {
 # Reenviar SIGTERM/INT al subproceso mosquitto para shutdown limpio
 cleanup() {
     echo "[supervisor] Señal de shutdown recibida — deteniendo mosquitto (PID $MOSQUITTO_PID)..."
+    kill "$RESOURCE_STATS_PID" 2>/dev/null || true
     kill "$MOSQUITTO_PID" 2>/dev/null
     wait "$MOSQUITTO_PID" 2>/dev/null
     exit 0
 }
 trap cleanup TERM INT
 
+start_resource_stats_collector
 start_mosquitto
 
 # Bucle principal del supervisor

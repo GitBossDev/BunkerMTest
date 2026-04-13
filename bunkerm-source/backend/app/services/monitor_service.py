@@ -670,6 +670,16 @@ nonce_manager = NonceManager()
 mqtt_client_instance: Any = None
 
 
+def read_broker_resource_stats() -> Dict[str, Any]:
+    """Lee métricas del contenedor Mosquitto desde un archivo compartido."""
+    try:
+        with open(settings.broker_resource_stats_path, "r") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # Callbacks MQTT
 # ---------------------------------------------------------------------------

@@ -235,7 +235,15 @@ export const monitorApi = {
   getTopologyStats: (limit = 15) => request(buildUrl(MONITOR_API_URL, `/stats/topology?limit=${limit}`)),
   getHealthStats: () => request(buildUrl(MONITOR_API_URL, '/stats/health')),
   getQosStats:    () => request(buildUrl(MONITOR_API_URL, '/stats/qos')),
-  getResourceStats: () => request<{ mosquitto_cpu_pct: number | null; mosquitto_rss_bytes: number | null; mosquitto_vms_bytes: number | null }>(buildUrl(MONITOR_API_URL, '/stats/resources')),
+  getResourceStats: () => request<{
+    mosquitto_cpu_pct: number | null
+    mosquitto_rss_bytes: number | null
+    mosquitto_vms_bytes: number | null
+    mosquitto_memory_limit_bytes?: number | null
+    mosquitto_memory_pct?: number | null
+    mosquitto_cpu_limit_cores?: number | null
+    resource_timestamp?: string | null
+  }>(buildUrl(MONITOR_API_URL, '/stats/resources')),
   getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
   publishMessage: (data: { topic: string; payload: string; qos?: number; retain?: boolean }) =>
     request(buildUrl(MONITOR_API_URL, '/publish'), {

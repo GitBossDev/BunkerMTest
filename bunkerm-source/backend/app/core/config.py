@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     mosquitto_certs_dir: str = "/etc/mosquitto/certs"
     mosquitto_conf_backup_dir: str = "/nextjs/data/backups"
     broker_log_path: str = "/var/log/mosquitto/mosquitto.log"
+    broker_resource_stats_path: str = "/var/log/mosquitto/broker-resource-stats.json"
     api_log_file: str = "/nextjs/data/api.log"
 
     # --- Base de datos ---

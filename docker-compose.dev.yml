@@ -69,6 +69,8 @@ services:
       dockerfile: Dockerfile.mosquitto
     container_name: bunkerm-mosquitto
     restart: unless-stopped
+    env_file:
+      - .env.dev
     ports:
       - "1900:1900"   # MQTT (TCP) — dispositivos, clientes externos y app procesamiento
       - "9001:9001"   # MQTT sobre WebSockets (opcional)
@@ -76,6 +78,10 @@ services:
       # Credentials used by the entrypoint to reconcile admin user on every start
       - MQTT_USERNAME=${MQTT_USERNAME:-admin}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
+      - BROKER_CPU_LIMIT_CORES=${BROKER_CPU_LIMIT_CORES}
+      - BROKER_MEMORY_LIMIT=${BROKER_MEMORY_LIMIT}
+    cpus: ${BROKER_CPU_LIMIT_CORES}
+    mem_limit: ${BROKER_MEMORY_LIMIT}
     volumes:
       - mosquitto-data:/var/lib/mosquitto   # DynSec JSON + persistencia
       - mosquitto-conf:/etc/mosquitto       # mosquitto.conf + conf.d/

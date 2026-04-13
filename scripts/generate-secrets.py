@@ -78,6 +78,8 @@ MQTT_PORT=1900
 MQTT_WS_PORT=9001
 MQTT_USERNAME=admin
 MQTT_PASSWORD={mqtt_password}
+BROKER_CPU_LIMIT_CORES=2
+BROKER_MEMORY_LIMIT=4g
 
 # ------------------------------------------
 # BunkerM Backend Services

@@ -6,7 +6,6 @@ import { monitorApi } from '@/lib/api'
 import { StatsCards } from '@/components/dashboard/StatsCards'
 import { BytesChart } from '@/components/dashboard/BytesChart'
 import { MessagesChart } from '@/components/dashboard/MessagesChart'
-import { BrokerInfo } from '@/components/dashboard/BrokerInfo'
 import { BrokerHealth } from '@/components/dashboard/BrokerHealth'
 import { QoSPanel } from '@/components/dashboard/QoSPanel'
 import { TopologyPanel } from '@/components/dashboard/TopologyPanel'
@@ -119,12 +118,9 @@ export default function DashboardPage() {
         <BrokerHealth stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
       </div>
 
-      {/* ── Row 3: Message Activity (2/3) + Broker Info (1/3) ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <MessagesChart retained={stats?.retained_messages ?? 0} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
-        </div>
-        <BrokerInfo stats={stats} snapshotLabel={lastSnapshotLabel} />
+      {/* ── Row 3: Message Activity ── */}
+      <div className="grid gap-4 grid-cols-1">
+        <MessagesChart retained={stats?.retained_messages ?? 0} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
       </div>
 
       {/* ── Row 4: Topic topology + Top subscribed ── */}

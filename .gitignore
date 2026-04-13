@@ -86,3 +86,7 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+
+# Simulator env files
+greenhouse-simulator/src/Greenhouse.Sensors/mqtt-stresser.env
+greenhouse-simulator/src/Greenhouse.Sensors/mqtt-streeser.env

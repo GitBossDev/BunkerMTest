@@ -17,6 +17,7 @@ from services.monitor_service import (
     alert_engine,
     mqtt_stats,
     nonce_manager,
+    read_broker_resource_stats,
     read_alert_config,
     save_alert_config,
     topic_store,
@@ -114,7 +115,19 @@ async def get_health_stats(api_key: str = Security(get_api_key)):
 
 @router.get("/stats/resources")
 async def get_resource_stats(api_key: str = Security(get_api_key)):
-    """Recursos del proceso Mosquitto (CPU solo disponible en mismo contenedor)."""
+    """Recursos del broker Mosquitto desde cgroups o fallback local."""
+    broker_stats = read_broker_resource_stats()
+    if broker_stats:
+        return {
+            "mosquitto_cpu_pct": broker_stats.get("cpu_pct"),
+            "mosquitto_rss_bytes": broker_stats.get("memory_bytes"),
+            "mosquitto_vms_bytes": None,
+            "mosquitto_memory_limit_bytes": broker_stats.get("memory_limit_bytes"),
+            "mosquitto_memory_pct": broker_stats.get("memory_pct"),
+            "mosquitto_cpu_limit_cores": broker_stats.get("cpu_limit_cores"),
+            "resource_timestamp": broker_stats.get("timestamp"),
+        }
+
     cpu_pct = None
     try:
         import psutil
@@ -131,6 +144,10 @@ async def get_resource_stats(api_key: str = Security(get_api_key)):
         "mosquitto_cpu_pct":   cpu_pct,
         "mosquitto_rss_bytes": heap_cur if heap_cur > 0 else None,
         "mosquitto_vms_bytes": heap_max if heap_max > 0 else None,
+        "mosquitto_memory_limit_bytes": None,
+        "mosquitto_memory_pct": None,
+        "mosquitto_cpu_limit_cores": None,
+        "resource_timestamp": None,
     }
 
 

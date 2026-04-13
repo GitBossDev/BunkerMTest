@@ -10,6 +10,7 @@ import uuid
 
 import pytest
 import services.monitor_service as monitor_svc
+import routers.monitor as monitor_router
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +116,31 @@ async def test_stats_health_requires_auth(raw_client):
     """Sin autenticacion, /stats/health retorna 401 o 403."""
     resp = await raw_client.get("/api/v1/monitor/stats/health")
     assert resp.status_code in (401, 403)
+
+
+async def test_stats_resources_returns_shared_broker_stats(client, monkeypatch):
+    """El endpoint debe exponer stats del broker standalone cuando el archivo existe."""
+    monkeypatch.setattr(
+        monitor_router,
+        "read_broker_resource_stats",
+        lambda: {
+            "cpu_pct": 12.5,
+            "memory_bytes": 10485760,
+            "memory_limit_bytes": 20971520,
+            "memory_pct": 50.0,
+            "cpu_limit_cores": 1.5,
+            "timestamp": "2026-04-13T10:00:00Z",
+        },
+    )
+    resp = await client.get("/api/v1/monitor/stats/resources")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mosquitto_cpu_pct"] == 12.5
+    assert body["mosquitto_rss_bytes"] == 10485760
+    assert body["mosquitto_memory_limit_bytes"] == 20971520
+    assert body["mosquitto_memory_pct"] == 50.0
+    assert body["mosquitto_cpu_limit_cores"] == 1.5
+    assert body["resource_timestamp"] == "2026-04-13T10:00:00Z"
 
 
 # ---------------------------------------------------------------------------
