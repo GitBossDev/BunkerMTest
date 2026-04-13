@@ -54,7 +54,7 @@ export function TopSubscribedPanel() {
   }))
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-start justify-between pb-2">
         <div>
           <div className="flex items-center gap-2">
@@ -79,7 +79,7 @@ export function TopSubscribedPanel() {
           <BookMarked className="h-4 w-4 text-purple-500" />
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="h-full">
         {chartData.length === 0 ? (
           <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">
             No subscription data yet

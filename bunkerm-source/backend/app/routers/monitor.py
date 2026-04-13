@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from models.schemas import AlertConfigUpdate, PublishRequest
+from routers.clientlogs import build_activity_summary
 from services.monitor_service import (
     alert_engine,
     mqtt_stats,
@@ -42,6 +43,7 @@ async def get_mqtt_stats(request: Request, nonce: str, timestamp: float,
                             detail="Invalid nonce or timestamp")
     try:
         stats = mqtt_stats.get_stats()
+        stats.update(build_activity_summary(window_seconds=600))
         stats["mqtt_connected"] = mqtt_stats._is_connected
         if not mqtt_stats._is_connected:
             broker = os.getenv("MOSQUITTO_IP", "127.0.0.1")
@@ -60,6 +62,8 @@ async def get_mqtt_stats(request: Request, nonce: str, timestamp: float,
             "published_history": [0] * 15,
             "bytes_stats": {"timestamps": [], "bytes_received": [], "bytes_sent": []},
             "daily_message_stats": {"dates": [], "counts": []},
+            "subscribed_clients": 0,
+            "publisher_clients": 0,
         }
     return JSONResponse(content=stats)
 

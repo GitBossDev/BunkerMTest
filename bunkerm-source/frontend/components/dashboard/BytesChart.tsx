@@ -90,7 +90,7 @@ export function BytesChart({ isOffline = false, snapshotLabel }: { isOffline?: b
   }, [fetchData, period])
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
         <div>
           <div className="flex items-center gap-2">
@@ -125,7 +125,7 @@ export function BytesChart({ isOffline = false, snapshotLabel }: { isOffline?: b
           ))}
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3 h-full">
         {/* Summary stats row */}
         {!loading && chartData.length > 0 && (() => {
           const totalRx  = chartData.reduce((s, d) => s + d.received, 0)

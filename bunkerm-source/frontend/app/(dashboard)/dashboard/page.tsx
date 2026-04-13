@@ -102,32 +102,56 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── Row 1: Clients (2/3) + QoS (1/3) ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <StatsCards stats={displayStats} />
+      <section className="space-y-4">
+        <SectionHeading
+          title="Clients"
+          description="Client presence and session state only. Topic counters stay out of this section."
+        />
+        <StatsCards stats={displayStats} />
+      </section>
+
+      <section className="space-y-4">
+        <SectionHeading
+          title="Message Activity"
+          description="Traffic rates, QoS pressure and topic subscription behaviour grouped in one place."
+        />
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3 items-stretch">
+          <div className="lg:col-span-1 h-full">
+            <QoSPanel stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+          </div>
+          <div className="lg:col-span-2 h-full">
+            <MessagesChart isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+          </div>
         </div>
-        <QoSPanel stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
-      </div>
-
-      {/* ── Row 2: Bytes Transfer (2/3) + Broker Health (1/3) ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <BytesChart isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-stretch">
+          <TopologyPanel />
+          <TopSubscribedPanel />
         </div>
-        <BrokerHealth stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
-      </div>
+      </section>
 
-      {/* ── Row 3: Message Activity ── */}
-      <div className="grid gap-4 grid-cols-1">
-        <MessagesChart retained={stats?.retained_messages ?? 0} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
-      </div>
+      <section className="space-y-4">
+        <SectionHeading
+          title="Broker Health"
+          description="Broker identity, latency, container resources and byte transfer."
+        />
+        <div className="grid gap-4 grid-cols-1 lg:grid-cols-3 items-stretch">
+          <div className="lg:col-span-1 h-full">
+            <BrokerHealth stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+          </div>
+          <div className="lg:col-span-2 h-full">
+            <BytesChart isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
 
-      {/* ── Row 4: Topic topology + Top subscribed ── */}
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-        <TopologyPanel />
-        <TopSubscribedPanel />
-      </div>
+function SectionHeading({ title, description }: { title: string; description: string }) {
+  return (
+    <div>
+      <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+      <p className="text-sm text-muted-foreground mt-1">{description}</p>
     </div>
   )
 }

@@ -4,6 +4,7 @@ import type {
   Role,
   Group,
   MqttTopic,
+  ClientActivitySummary,
   ClientCreate,
   ClientListResponse,
   MonitorStats,
@@ -366,6 +367,7 @@ export const clientlogsApi = {
   getConnectedClients: () => request<{ clients: unknown[] }>(buildUrl(CLIENTLOGS_API_URL, '/connected-clients')),
   getLastConnection: () => request<{ info: Record<string, { ip_address: string; port: number; timestamp: string }> }>(buildUrl(CLIENTLOGS_API_URL, '/last-connection')),
   getTopSubscribed: (limit = 15) => request<{ top_subscribed: { topic: string; count: number }[]; total_distinct_subscribed: number }>(buildUrl(CLIENTLOGS_API_URL, `/top-subscribed?limit=${limit}`)),
+  getActivitySummary: (windowSeconds = 600) => request<ClientActivitySummary>(buildUrl(CLIENTLOGS_API_URL, `/activity-summary?window_seconds=${windowSeconds}`)),
   enableClient: (username: string) =>
     request(buildUrl(CLIENTLOGS_API_URL, `/enable/${encodeURIComponent(username)}`), { method: 'POST' }),
   disableClient: (username: string) =>

@@ -63,8 +63,6 @@ function formatUsageOverLimit(used: string, limit: string): string {
 }
 
 export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: BrokerHealthProps) {
-  const rxMsg  = stats?.load_msg_rx_1min  ?? 0
-  const txMsg  = stats?.load_msg_tx_1min  ?? 0
   const rxByte = stats?.load_bytes_rx_1min ?? 0
   const txByte = stats?.load_bytes_tx_1min ?? 0
   const latency  = stats?.latency_ms ?? -1
@@ -111,29 +109,35 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
   }, [])
 
   const latencyLabel = latency < 0 ? '—' : `${Math.round(latency)} ms`
-  const cpuUsageLabel = !connected ? '—' : cpu !== null ? `${cpu.toFixed(1)} %` : '—'
-  const cpuCombinedLabel = formatUsageOverLimit(cpuUsageLabel, cpuLimitPct !== null ? '100%' : '—')
-  const ramUsageLabel = !connected ? '—' : formatMemory(rss)
-  const ramCombinedLabel = formatUsageOverLimit(ramUsageLabel, formatMemory(memoryLimit))
+  const cpuCombinedLabel = !connected
+    ? '—'
+    : cpu !== null
+      ? (cpuLimitPct !== null ? `${cpu.toFixed(1)} % / 100%` : `${cpu.toFixed(1)} %`)
+      : '—'
+  const ramCombinedLabel = !connected
+    ? '—'
+    : rss !== null
+      ? (memoryLimit !== null ? formatUsageOverLimit(formatMemory(rss), formatMemory(memoryLimit)) : formatMemory(rss))
+      : '—'
   const cpuGaugeValue = clampPercent(connected ? cpu : null)
   const ramGaugeValue = clampPercent(connected ? memoryPct : null)
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <div>
           <div className="flex items-center gap-2">
             <CardTitle className="text-sm font-medium">Broker Health</CardTitle>
+            <span className="text-xs text-muted-foreground">Mosquitto {version}</span>
             <InfoTooltip content={
               <>
                 <p className="font-semibold text-foreground mb-1">Broker Performance</p>
                 <TipRow label="Version" text="Eclipse Mosquitto version reported by the broker." />
                 <TipRow label="Uptime" text="How long the current Mosquitto process has been running." />
-                <TipRow label="Msg RX/TX" text="Messages received/sent per second. 1-minute moving average reported by Mosquitto." />
-                <TipRow label="Bytes RX/TX" text="Data volume transferred per second, including MQTT protocol headers." />
+                <TipRow label="Broker CPU" text="Collected directly inside the Mosquitto container from cgroups, not from $SYS. If there is no explicit CPU limit, the percentage falls back to host capacity." />
+                <TipRow label="Broker RAM" text="Collected directly from the Mosquitto container cgroup memory counters, not from $SYS. If no memory limit exists, the dashboard shows current usage only." />
                 <TipRow label="Latency" text="Round-trip time: the monitor publishes a ping to the broker and measures the response time. Green &lt;50ms · Yellow &lt;200ms · Red &gt;200ms." />
-                <TipRow label="Broker CPU" text="Current CPU usage of the Mosquitto container as a percentage of its effective limit. 100% means the broker is consuming all CPU assigned to it." />
-                <TipRow label="Broker RAM" text="Current memory used by the Mosquitto container over the effective memory limit configured for the broker." />
+                <TipRow label="Bytes RX/TX" text="Current byte rate received and sent by the broker, reported by Mosquitto over the last minute." />
               </>
             } />
           </div>
@@ -145,15 +149,12 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
           <Activity className="h-4 w-4 text-emerald-500" />
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="h-full">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
-          <Metric label="Version"      value={version}                        accent="text-foreground" />
           <Metric label="Uptime"       value={uptime}                         accent="text-foreground" />
-          <Metric label="Msg RX rate"  value={`${rxMsg.toFixed(1)} msg/s`}  accent="text-blue-500" />
-          <Metric label="Msg TX rate"  value={`${txMsg.toFixed(1)} msg/s`}  accent="text-green-500" />
+          <Metric label="Latency"      value={latency < 0 ? '—' : `${Math.round(latency)} ms`} accent={latencyColor(latency)} />
           <Metric label="Bytes RX"     value={formatBytes(rxByte)}           accent="text-blue-400" />
           <Metric label="Bytes TX"     value={formatBytes(txByte)}           accent="text-green-400" />
-          <Metric label="Latency"      value={latencyLabel}                  accent={latencyColor(latency)} />
           <GaugeMetric label="CPU Usage" value={cpuCombinedLabel} percent={cpuGaugeValue} accent="bg-emerald-500" />
           <GaugeMetric label="RAM Usage" value={ramCombinedLabel} percent={ramGaugeValue} accent="bg-sky-500" />
         </div>

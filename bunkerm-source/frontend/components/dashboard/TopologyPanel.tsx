@@ -52,7 +52,7 @@ export function TopologyPanel() {
   }))
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-start justify-between pb-2">
         <div>
           <div className="flex items-center gap-2">
@@ -85,7 +85,7 @@ export function TopologyPanel() {
           <Network className="h-4 w-4 text-blue-500" />
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="h-full">
         {chartData.length === 0 ? (
           <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">
             No topic data yet

@@ -15,10 +15,11 @@ export function StatsCards({ stats }: StatsCardsProps) {
   const disconnected = stats?.clients_disconnected ?? 0
   const total        = stats?.clients_total ?? (connected + disconnected)
   const maximum      = stats?.clients_maximum ?? connected
-  const subs         = stats?.total_subscriptions ?? 0
+  const subscribedClients = stats?.subscribed_clients ?? 0
+  const publisherClients  = stats?.publisher_clients ?? 0
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <div className="flex items-center gap-2">
           <CardTitle className="text-sm font-medium">Clients</CardTitle>
@@ -29,7 +30,8 @@ export function StatsCards({ stats }: StatsCardsProps) {
               <TipRow label="Disconnected" text="Clients with a persistent session saved in the broker but no active connection at this moment." />
               <TipRow label="Active sessions" text="Connected + Disconnected (shown above). Disconnected clients retain a persistent session in the broker and receive queued QoS 1/2 messages upon reconnect." />
               <TipRow label="Max concurrent" text="Historical peak of simultaneously connected clients since the last broker restart." />
-              <TipRow label="Subscriptions" text="Total active topic subscriptions at this moment. A single client can hold multiple subscriptions." />
+              <TipRow label="Subscribed clients" text="Connected non-admin clients whose effective DynSec permissions allow subscribing right now. The admin/internal clients are intentionally excluded from this workload counter." />
+              <TipRow label="Publisher clients" text="Connected non-admin clients whose effective DynSec permissions allow publishing right now. The admin/internal clients are intentionally excluded from this workload counter." />
             </>
           } />
         </div>
@@ -37,7 +39,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
           <Users className="h-4 w-4 text-blue-500" />
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="h-full">
         <div className="flex flex-col sm:flex-row items-center gap-6">
           {/* Gauge */}
           <div className="shrink-0">
@@ -50,7 +52,8 @@ export function StatsCards({ stats }: StatsCardsProps) {
             <Stat label="Disconnected"   value={disconnected} accent="text-orange-400" />
             <Stat label="Active sessions" value={total} />
             <Stat label="Max concurrent"  value={maximum}     accent="text-orange-500" />
-            <Stat label="Subscriptions"   value={subs}        accent="text-purple-500" />
+            <Stat label="Subscribed clients" value={subscribedClients} accent="text-violet-500" />
+            <Stat label="Publisher clients"  value={publisherClients}  accent="text-emerald-500" />
           </div>
         </div>
       </CardContent>

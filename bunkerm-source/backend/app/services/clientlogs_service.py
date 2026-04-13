@@ -56,6 +56,17 @@ def _ts_to_iso(ts: str) -> str:
         return ts
 
 
+def _ts_to_epoch(ts: str) -> float:
+    """Convierte timestamp Unix o ISO 8601 a epoch UTC."""
+    if ts.isdigit():
+        return float(int(ts))
+    try:
+        dt = datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S")
+        return dt.replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        return time.time()
+
+
 # ---------------------------------------------------------------------------
 # Modelo interno de evento MQTT (no es schema de API directamente)
 # ---------------------------------------------------------------------------
@@ -87,6 +98,8 @@ class MQTTMonitor:
         self.events: deque = deque(maxlen=1000)
         self._subscription_counts: Dict[str, int] = {}
         self._last_seen: Dict[str, float] = {}
+        self._subscriber_clients_seen: Dict[str, float] = {}
+        self._publisher_clients_seen: Dict[str, float] = {}
         self._pending_ip: Dict[str, Tuple[str, int]] = {}
         self._last_connection_info: Dict[str, dict] = {}
         self._last_publish_ts: Dict[str, float] = {}
@@ -108,6 +121,19 @@ class MQTTMonitor:
 
     def _is_internal_auto_client(self, client_id: str) -> bool:
         return bool(_AUTO_CLIENT_RE.match(client_id))
+
+    def _activity_client_key(self, client_id: str, username: str) -> str:
+        if username and username not in ("unknown", "(broker-observed)"):
+            return username
+        return client_id
+
+    def get_activity_summary(self, window_seconds: int = 600) -> Dict[str, int]:
+        cutoff = time.time() - max(1, window_seconds)
+        return {
+            "subscribed_clients": sum(1 for seen_at in self._subscriber_clients_seen.values() if seen_at >= cutoff),
+            "publisher_clients": sum(1 for seen_at in self._publisher_clients_seen.values() if seen_at >= cutoff),
+            "window_seconds": window_seconds,
+        }
 
     # ── parsers individuales ──────────────────────────────────────────────────
 
@@ -242,6 +268,7 @@ class MQTTMonitor:
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
             return None
+        event_ts = _ts_to_epoch(ts_str)
         event = MQTTEvent(
             id=str(uuid.uuid4()),
             timestamp=_ts_to_iso(ts_str),
@@ -259,7 +286,8 @@ class MQTTMonitor:
             qos=int(qos_str),
         )
         self._subscription_counts[topic] = self._subscription_counts.get(topic, 0) + 1
-        self._last_seen[client_id] = time.time()
+        self._last_seen[client_id] = event_ts
+        self._subscriber_clients_seen[self._activity_client_key(client_id, username)] = event_ts
         return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -277,8 +305,10 @@ class MQTTMonitor:
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
             return None
+        event_ts = _ts_to_epoch(ts)
+        self._publisher_clients_seen[self._activity_client_key(client_id, username)] = event_ts
         key = topic
-        now_ts = time.time()
+        now_ts = event_ts
         if key in self._last_publish_ts and now_ts - self._last_publish_ts[key] < _PUBLISH_DEDUP_SECONDS:
             return None
         self._last_publish_ts[key] = now_ts
@@ -329,10 +359,11 @@ class MQTTMonitor:
                     self.events.append(event)
                 return
 
-        if not replay:
-            event = self.parse_publish_log(line)
-            if event is not None:
+        event = self.parse_publish_log(line)
+        if event is not None:
+            if not replay:
                 self.events.append(event)
+            return
 
 
 # ---------------------------------------------------------------------------

@@ -44,12 +44,11 @@ function formatLabel(ts: string, period: StatsPeriod): string {
 }
 
 interface Props {
-  retained?: number
   isOffline?: boolean
   snapshotLabel?: string
 }
 
-export function MessagesChart({ retained = 0, isOffline = false, snapshotLabel }: Props) {
+export function MessagesChart({ isOffline = false, snapshotLabel }: Props) {
   const [period, setPeriod] = useState<StatsPeriod>('1h')
   const [chartData, setChartData] = useState<{ time: string; received: number; sent: number }[]>([])
   const [loading, setLoading] = useState(true)
@@ -87,7 +86,7 @@ export function MessagesChart({ retained = 0, isOffline = false, snapshotLabel }
   const totalAll = totalRx + totalTx
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="flex flex-row items-start justify-between gap-2 pb-2">
         <div>
           <div className="flex items-center gap-2">
@@ -98,7 +97,6 @@ export function MessagesChart({ retained = 0, isOffline = false, snapshotLabel }
                 <TipRow label="Received" text="PUBLISH messages sent by clients to the broker (inbound traffic)." />
                 <TipRow label="Sent" text="Messages delivered by the broker to subscribers (outbound). Can exceed received if multiple clients subscribe to the same topic." />
                 <TipRow label="Total" text="Sum of received + sent within the selected time window. Does not include MQTT control packets (PING, CONNECT, etc.)." />
-                <TipRow label="Retained" text="Total messages currently stored with retain=true (global stat, not filtered by period)." />
                 <TipRow label="Granularity" text="Each bar represents a 3-minute interval. Data accumulates over time." />
               </>
             } />
@@ -126,13 +124,12 @@ export function MessagesChart({ retained = 0, isOffline = false, snapshotLabel }
           ))}
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-3 h-full">
         {/* Summary stats row */}
-        <div className="grid grid-cols-4 gap-2 text-center border rounded-lg p-2 bg-muted/30">
+        <div className="grid grid-cols-3 gap-2 text-center border rounded-lg p-2 bg-muted/30">
           <SumStat label="Total" value={totalAll} color="text-foreground" />
           <SumStat label="Received" value={totalRx} color="text-blue-500" />
           <SumStat label="Sent" value={totalTx} color="text-green-500" />
-          <SumStat label="Retained" value={retained} color="text-cyan-500" />
         </div>
 
         {loading ? (

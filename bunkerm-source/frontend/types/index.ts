@@ -85,6 +85,8 @@ export interface MonitorStats {
   clients_maximum?: number
   clients_disconnected?: number
   clients_expired?: number
+  subscribed_clients?: number
+  publisher_clients?: number
   // Broker info
   broker_version?: string
   broker_uptime?: string
@@ -106,6 +108,12 @@ export interface MonitorStats {
   // Configured connection limit (for gauge scale)
   client_max_connections?: number
   last_broker_sample_at?: string
+}
+
+export interface ClientActivitySummary {
+  subscribed_clients: number
+  publisher_clients: number
+  window_seconds: number
 }
 
 export interface PeriodBytesData {
