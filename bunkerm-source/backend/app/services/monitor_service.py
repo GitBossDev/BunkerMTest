@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional
 from paho.mqtt import client as mqtt_client
 
 # Importamos desde la ubicación original — no movemos ni copiamos el archivo
-from monitor.data_storage import HistoricalDataStorage, PERIODS
+from monitor.data_storage import PERIODS
+from monitor.sqlite_storage import BrokerTickSnapshot, SQLiteMonitorHistoryStorage
+from monitor.topic_sqlite_storage import topic_history_storage
 
 from core.config import settings
 
@@ -383,51 +385,6 @@ class AlertEngine:
 
 
 # ---------------------------------------------------------------------------
-# Contador de mensajes de usuario (ventana deslizante 7 días)
-# ---------------------------------------------------------------------------
-
-_MSG_COUNTS_PATH = os.getenv("MESSAGE_COUNTS_PATH", "/nextjs/data/message_counts.json")
-
-
-class MessageCounter:
-    def __init__(self):
-        self.file_path = _MSG_COUNTS_PATH
-        self.daily_counts = self._load_counts()
-
-    def _load_counts(self) -> Dict[str, int]:
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path) as fh:
-                    data = json.load(fh)
-                    return {item["timestamp"].split()[0]: item["message_counter"]
-                            for item in data}
-            except Exception:
-                pass
-        return {}
-
-    def _save_counts(self):
-        data = [
-            {"timestamp": f"{date} 00:00", "message_counter": count}
-            for date, count in self.daily_counts.items()
-        ]
-        try:
-            with open(self.file_path, "w") as fh:
-                json.dump(data, fh, indent=2)
-        except Exception as exc:
-            logger.error("Error guardando message_counts: %s", exc)
-
-    def increment_count(self):
-        today = datetime.now().date().isoformat()
-        self.daily_counts[today] = self.daily_counts.get(today, 0) + 1
-        cutoff = (datetime.now() - timedelta(days=7)).date().isoformat()
-        self.daily_counts = {d: c for d, c in self.daily_counts.items() if d >= cutoff}
-        self._save_counts()
-
-    def get_total_count(self) -> int:
-        return sum(self.daily_counts.values())
-
-
-# ---------------------------------------------------------------------------
 # Almacén de tópicos (último valor visto de cada tópico no-$SYS)
 # ---------------------------------------------------------------------------
 
@@ -437,17 +394,19 @@ class TopicStore:
         self._topics: Dict[str, dict] = {}
 
     def update(self, topic: str, payload: bytes, retained: bool = False, qos: int = 0):
+        event_ts = datetime.now(timezone.utc)
         with self._lock:
             value = payload.decode("utf-8", errors="replace") if payload else ""
             prev = self._topics.get(topic, {})
             self._topics[topic] = {
                 "topic": topic,
                 "value": value,
-                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "timestamp": event_ts.isoformat().replace("+00:00", "Z"),
                 "count": prev.get("count", 0) + 1,
                 "retained": retained,
                 "qos": qos,
             }
+        topic_history_storage.record_publish(topic, payload_bytes=len(payload or b""), event_ts=event_ts)
 
     def get_all(self) -> list:
         with self._lock:
@@ -520,8 +479,10 @@ class MQTTStats:
         self.last_broker_sample_at = ""
         self._ping_sent_at: float = 0.0
         self._is_connected: bool = False
-        self.message_counter = MessageCounter()
-        self.data_storage = HistoricalDataStorage(filename=_HIST_DATA_PATH)
+        self.data_storage = SQLiteMonitorHistoryStorage(
+            database_url=settings.database_url,
+            legacy_json_path=_HIST_DATA_PATH,
+        )
         self.last_storage_update = self._load_last_tick_time()
         self.messages_history: deque = deque(maxlen=15)
         self.published_history: deque = deque(maxlen=15)
@@ -533,14 +494,11 @@ class MQTTStats:
 
     def _load_last_tick_time(self) -> datetime:
         try:
-            data = self.data_storage.load_data()
-            ticks = data.get("bytes_ticks") or data.get("msg_ticks") or []
-            if ticks:
-                last_ts = ticks[-1].get("ts", "")
-                parsed  = datetime.fromisoformat(last_ts.rstrip("Z"))
-                age     = (datetime.now() - parsed).total_seconds()
+            last_tick = self.data_storage.get_last_tick_time()
+            if last_tick is not None:
+                age = (datetime.now(timezone.utc) - last_tick).total_seconds()
                 if 0 < age < 3600:
-                    return parsed
+                    return last_tick.replace(tzinfo=None)
         except Exception:
             pass
         return datetime.now()
@@ -552,25 +510,42 @@ class MQTTStats:
             return f"{number / 1_000:.1f}K"
         return str(number)
 
-    def increment_user_messages(self):
-        with self._lock:
-            self.message_counter.increment_count()
-
     def update_storage(self):
         """Escribe un tick de datos históricos cada 3 minutos."""
         now = datetime.now()
         if (now - self.last_storage_update).total_seconds() >= 180:
             self.last_storage_update = now
             try:
-                self.data_storage.add_hourly_data(
-                    float(self.bytes_received_15min),
-                    float(self.bytes_sent_15min),
-                )
-                self.data_storage.add_tick(
-                    bytes_received=float(self.bytes_received_15min),
-                    bytes_sent=float(self.bytes_sent_15min),
-                    msg_received=int(self.messages_received_total),
-                    msg_sent=int(self.messages_sent),
+                client_counts = self._get_client_counters_locked()
+                actual_subscriptions = max(0, self.subscriptions - 2)
+                runtime_state = self.data_storage.get_runtime_state()
+                last_rx_total = int(runtime_state.get("last_messages_received_total", 0) or 0)
+                last_tx_total = int(runtime_state.get("last_messages_sent_total", 0) or 0)
+                delta_rx = max(0, int(self.messages_received_total) - last_rx_total)
+                delta_tx = max(0, int(self.messages_sent) - last_tx_total)
+                resource_stats = read_broker_resource_stats()
+                self.data_storage.add_tick_snapshot(
+                    BrokerTickSnapshot(
+                        ts=datetime.now(timezone.utc),
+                        bytes_received_rate=float(self.bytes_received_15min),
+                        bytes_sent_rate=float(self.bytes_sent_15min),
+                        messages_received_delta=delta_rx,
+                        messages_sent_delta=delta_tx,
+                        connected_clients=client_counts["connected"],
+                        disconnected_clients=client_counts["disconnected"],
+                        active_sessions=client_counts["total"],
+                        max_concurrent=client_counts["maximum"],
+                        total_subscriptions=actual_subscriptions,
+                        retained_messages=int(self.retained_messages),
+                        messages_inflight=int(self.messages_inflight),
+                        latency_ms=float(self.latency_ms),
+                        broker_uptime=self.broker_uptime,
+                        messages_received_total=int(self.messages_received_total),
+                        messages_sent_total=int(self.messages_sent),
+                        cpu_pct=resource_stats.get("cpu_pct"),
+                        memory_bytes=resource_stats.get("memory_bytes"),
+                        memory_pct=resource_stats.get("memory_pct"),
+                    )
                 )
             except Exception as exc:
                 logger.error("Error actualizando storage: %s", exc)
@@ -617,9 +592,11 @@ class MQTTStats:
         with self._lock:
             client_counts = self._get_client_counters_locked()
             actual_subscriptions = max(0, self.subscriptions - 2)
-            total_messages = self.message_counter.get_total_count()
+            runtime_state = self.data_storage.get_runtime_state()
+            pending_messages = max(0, int(self.messages_received_total) - int(runtime_state.get("last_messages_received_total", 0) or 0))
+            total_messages = self.data_storage.get_total_message_count(days=7) + pending_messages
             hourly_data    = self.data_storage.get_hourly_data()
-            daily_messages = self.data_storage.get_daily_messages()
+            daily_messages = self.data_storage.get_daily_message_stats(days=7, pending_today=pending_messages)
             stats = {
                 "total_connected_clients": client_counts["connected"],
                 "total_messages_received": self.format_number(total_messages),
@@ -709,7 +686,6 @@ def on_message(client, userdata, msg):
         except (ValueError, AttributeError):
             pass
     elif not msg.topic.startswith("$SYS/"):
-        mqtt_stats.increment_user_messages()
         topic_store.update(msg.topic, msg.payload, getattr(msg, "retain", False), msg.qos)
 
 

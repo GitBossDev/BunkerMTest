@@ -610,15 +610,34 @@ function Invoke-Smoke {
         }
     }
 
-    # ── 4. Backend publico: /api/monitor/health ───────────────────────────────
-    Write-Host -NoNewline "  [4/5] Backend /api/monitor/health (publico) ..... "
+    # ── 4. Backend health: ruta publica legacy o ruta autenticada actual ─────
+    Write-Host -NoNewline "  [4/5] Backend monitor health ..................... "
+    $healthOk = $false
+    $healthNote = ""
     try {
         $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+        Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/health)" -ForegroundColor Green
         $passed++
+        $healthOk = $true
     } catch {
         $code = $_.Exception.Response.StatusCode.value__
-        Write-Host "FAIL HTTP $code" -ForegroundColor Red
+        $healthNote = "HTTP $code en /api/monitor/health"
+    }
+    if (-not $healthOk) {
+        if ($apiKey) {
+            try {
+                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/stats/health" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
+                Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/stats/health con API key)" -ForegroundColor Green
+                $passed++
+                $healthOk = $true
+            } catch {
+                $code = $_.Exception.Response.StatusCode.value__
+                $healthNote = "$healthNote; HTTP $code en /api/monitor/stats/health"
+            }
+        }
+    }
+    if (-not $healthOk) {
+        Write-Host "FAIL $healthNote" -ForegroundColor Red
         $failed++
     }
 

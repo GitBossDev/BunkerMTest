@@ -11,6 +11,8 @@ from typing import Any, Dict, Iterable, Set
 from fastapi import APIRouter, Security, status
 
 from core.auth import get_api_key
+from monitor.data_storage import PERIODS as _STORAGE_PERIODS
+from monitor.topic_sqlite_storage import topic_history_storage
 from services import dynsec_service as dynsec_svc
 from services.clientlogs_service import mqtt_monitor, MQTTEvent
 
@@ -184,14 +186,21 @@ async def get_last_connection(api_key: str = Security(get_api_key)):
 
 
 @router.get("/top-subscribed")
-async def get_top_subscribed(limit: int = 15, api_key: str = Security(get_api_key)):
-    """Devuelve los tópicos con más suscripciones acumuladas desde el arranque."""
-    counts = mqtt_monitor._subscription_counts
-    top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
-    return {
-        "top_subscribed": [{"topic": t, "count": c} for t, c in top],
-        "total_distinct_subscribed": len(counts),
-    }
+async def get_top_subscribed(limit: int = 15, period: str = "7d", api_key: str = Security(get_api_key)):
+    """Devuelve los tópicos con más eventos de suscripción dentro de la ventana pedida."""
+    if period not in _STORAGE_PERIODS:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid period '{period}'. Valid: {list(_STORAGE_PERIODS.keys())}")
+    data = topic_history_storage.get_top_subscribed(limit=limit, period=period)
+    if data["total_distinct_subscribed"] == 0:
+        counts = mqtt_monitor._subscription_counts
+        top = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+        return {
+            "top_subscribed": [{"topic": t, "count": c} for t, c in top],
+            "total_distinct_subscribed": len(counts),
+        }
+    return data
 
 
 @router.get("/activity-summary")

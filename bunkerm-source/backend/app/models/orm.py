@@ -5,9 +5,9 @@ y alert_config.json (configuración de alertas).
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, Integer, String, Text
+from sqlalchemy import Date, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -58,3 +58,95 @@ class BrokerBaseline(Base):
     load_1min: Mapped[float] = mapped_column(Float, default=0.0)
     load_5min: Mapped[float] = mapped_column(Float, default=0.0)
     load_15min: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class BrokerMetricTick(Base):
+    """Persisted broker snapshot bucket used by dashboard history and reports."""
+    __tablename__ = "broker_metric_ticks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, unique=True, index=True)
+    bytes_received_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    bytes_sent_rate: Mapped[float] = mapped_column(Float, default=0.0)
+    messages_received_delta: Mapped[int] = mapped_column(Integer, default=0)
+    messages_sent_delta: Mapped[int] = mapped_column(Integer, default=0)
+    connected_clients: Mapped[int] = mapped_column(Integer, default=0)
+    disconnected_clients: Mapped[int] = mapped_column(Integer, default=0)
+    active_sessions: Mapped[int] = mapped_column(Integer, default=0)
+    max_concurrent: Mapped[int] = mapped_column(Integer, default=0)
+    total_subscriptions: Mapped[int] = mapped_column(Integer, default=0)
+    retained_messages: Mapped[int] = mapped_column(Integer, default=0)
+    messages_inflight: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[float] = mapped_column(Float, default=-1.0)
+    cpu_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    memory_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    memory_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class BrokerRuntimeState(Base):
+    """Single-row operational state for continuity across app restarts."""
+    __tablename__ = "broker_runtime_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    last_tick_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_broker_uptime: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    current_max_concurrent: Mapped[int] = mapped_column(Integer, default=0)
+    lifetime_max_concurrent: Mapped[int] = mapped_column(Integer, default=0)
+    last_messages_received_total: Mapped[int] = mapped_column(Integer, default=0)
+    last_messages_sent_total: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class BrokerDailySummary(Base):
+    """Daily broker rollup for reports and longer-term queries."""
+    __tablename__ = "broker_daily_summary"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    peak_connected_clients: Mapped[int] = mapped_column(Integer, default=0)
+    peak_active_sessions: Mapped[int] = mapped_column(Integer, default=0)
+    peak_max_concurrent: Mapped[int] = mapped_column(Integer, default=0)
+    total_messages_received: Mapped[int] = mapped_column(Integer, default=0)
+    total_messages_sent: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_received_rate_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    bytes_sent_rate_sum: Mapped[float] = mapped_column(Float, default=0.0)
+    latency_samples: Mapped[int] = mapped_column(Integer, default=0)
+    latency_sum: Mapped[float] = mapped_column(Float, default=0.0)
+
+
+class TopicRegistry(Base):
+    """Catalog of topics observed by the broker for persistent topology queries."""
+    __tablename__ = "topic_registry"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic: Mapped[str] = mapped_column(String(512), nullable=False, unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="user")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class TopicPublishBucket(Base):
+    """Bucketed publish activity per topic for time-window topology reporting."""
+    __tablename__ = "topic_publish_buckets"
+    __table_args__ = (
+        UniqueConstraint("bucket_start", "bucket_minutes", "topic_id", name="uq_topic_publish_bucket"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    bucket_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    publish_count: Mapped[int] = mapped_column(Integer, default=0)
+    bytes_sum: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TopicSubscribeBucket(Base):
+    """Bucketed subscribe activity per topic for time-window subscription reporting."""
+    __tablename__ = "topic_subscribe_buckets"
+    __table_args__ = (
+        UniqueConstraint("bucket_start", "bucket_minutes", "topic_id", name="uq_topic_subscribe_bucket"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    bucket_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    subscribe_count: Mapped[int] = mapped_column(Integer, default=0)

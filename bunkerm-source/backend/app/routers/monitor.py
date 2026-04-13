@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
+from monitor.topic_sqlite_storage import topic_history_storage
 from models.schemas import AlertConfigUpdate, PublishRequest
 from routers.clientlogs import build_activity_summary
 from services.monitor_service import (
@@ -88,16 +89,32 @@ async def get_messages_for_period(period: str = "1h",
     return mqtt_stats.data_storage.get_messages_for_period(period)
 
 
+@router.get("/stats/daily-summary")
+async def get_daily_summary(days: int = 7,
+                            api_key: str = Security(get_api_key)):
+    """Resumen diario persistido del broker para reporting operativo."""
+    days = max(1, min(days, 365))
+    return mqtt_stats.data_storage.get_daily_summary(days=days)
+
+
 @router.get("/stats/topology")
-async def get_topology_stats(limit: int = 15, api_key: str = Security(get_api_key)):
+async def get_topology_stats(limit: int = 15, period: str = "7d", api_key: str = Security(get_api_key)):
     """Top tópicos por conteo de mensajes y churn de clientes."""
-    all_topics = topic_store.get_all()
-    user_topics = [t for t in all_topics if not t["topic"].startswith("$")]
-    top_n = sorted(user_topics, key=lambda x: x.get("count", 0), reverse=True)[:limit]
+    if period not in _STORAGE_PERIODS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid period '{period}'. Valid: {list(_STORAGE_PERIODS.keys())}")
+    data = topic_history_storage.get_top_published(limit=limit, period=period)
+    if data["total_distinct_topics"] == 0:
+        all_topics = topic_store.get_all()
+        user_topics = [t for t in all_topics if not t["topic"].startswith("$")]
+        data = {
+            "top_topics": sorted(user_topics, key=lambda x: x.get("count", 0), reverse=True)[:limit],
+            "total_distinct_topics": len(user_topics),
+        }
     client_counts = mqtt_stats.get_client_counters()
     return {
-        "top_topics": top_n,
-        "total_distinct_topics": len(user_topics),
+        "top_topics": data["top_topics"],
+        "total_distinct_topics": data["total_distinct_topics"],
         "clients_disconnected": client_counts["disconnected"],
         "clients_expired": client_counts["expired"],
     }

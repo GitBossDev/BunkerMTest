@@ -54,6 +54,8 @@ async def test_stats_with_valid_params(client):
     assert "mqtt_connected" in body
     assert "total_connected_clients" in body
     assert "total_messages_received" in body
+    assert "subscribed_clients" in body
+    assert "publisher_clients" in body
 
 
 async def test_stats_sanitizes_disconnected_counter(client, monkeypatch):
@@ -110,6 +112,14 @@ async def test_stats_health_returns_200(client):
     """El endpoint /stats/health retorna 200 con un campo de estado del sistema."""
     resp = await client.get("/api/v1/monitor/stats/health")
     assert resp.status_code == 200
+
+
+async def test_stats_daily_summary_returns_200(client):
+    """El resumen diario persistido debe exponer una colección de días sin fallar."""
+    resp = await client.get("/api/v1/monitor/stats/daily-summary", params={"days": 7})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "days" in body
 
 
 async def test_stats_health_requires_auth(raw_client):

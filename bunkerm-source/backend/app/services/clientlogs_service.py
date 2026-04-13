@@ -17,6 +17,7 @@ from typing import Dict, List, Optional, Tuple
 from pydantic import BaseModel
 
 from core.config import settings
+from monitor.topic_sqlite_storage import topic_history_storage
 
 # ---------------------------------------------------------------------------
 # Constantes y patrones regex
@@ -355,6 +356,8 @@ class MQTTMonitor:
         ):
             event = parser(line)
             if event is not None:
+                if parser.__name__ == "parse_subscription_log" and not replay and event.topic:
+                    topic_history_storage.record_subscribe(event.topic, event_ts=datetime.fromisoformat(event.timestamp))
                 if not replay:
                     self.events.append(event)
                 return
