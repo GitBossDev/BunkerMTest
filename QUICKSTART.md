@@ -15,6 +15,9 @@ cd c:\Projects\BunkerMTest\BunkerMTest
 
 # Genera .env.dev con secrets aleatorios y crea directorios de datos
 .\deploy.ps1 -Action setup
+
+# En caso el archivo esté bloqueado por políticas de seguridad de Windows
+Unblock-File deploy.ps1
 ```
 
 ### Paso 2: Construir imagenes

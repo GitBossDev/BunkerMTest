@@ -231,8 +231,12 @@ function Invoke-Start {
 
     # E2 -- Validar variables de entorno requeridas antes de levantar contenedores
     Write-Info "Validating environment variables..."
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     $validateOutput = & python scripts/validate-env.py 2>&1
-    if ($LASTEXITCODE -ne 0) {
+    $validateExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($validateExit -ne 0) {
         Write-Host "[ERROR] Environment validation failed:" -ForegroundColor Red
         $validateOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Red }
         Write-Host ""

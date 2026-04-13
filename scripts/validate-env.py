@@ -118,4 +118,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as exc:
+        print(f"[ERROR] Unexpected failure while validating environment: {exc}")
+        sys.exit(1)
