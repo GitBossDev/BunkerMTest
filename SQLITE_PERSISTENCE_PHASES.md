@@ -4,7 +4,7 @@
 > This file is intended to remain in the project root as the execution checklist for the next implementation stages.
 
 Last update: 2026-04-13
-Status: Phase 2 started
+Status: Phase 4 implemented
 
 ---
 
@@ -151,7 +151,7 @@ Objective: persist topic-level history so `Topic Topology` and `Top Subscribed T
 - [x] Persist publish buckets from observed broker traffic.
 - [x] Persist subscribe buckets from clientlogs parser.
 - [x] Redefine dashboard topic charts as time-window queries.
-- [ ] Add retention and aggregation strategy.
+- [x] Add retention and aggregation strategy.
 
 ### Phase 2 Progress Notes
 
@@ -228,19 +228,26 @@ Objective: persist per-client operational history for up to 30 days.
 
 ### Checklist
 
-- [ ] Synchronize `client_registry` with DynSec create/update/delete flows.
+- [x] Synchronize `client_registry` with DynSec create/update/delete flows.
 - [ ] Add periodic reconciliation against `dynamic-security.json` changes outside the API.
-- [ ] Persist connect/disconnect/auth-failure events.
-- [ ] Classify disconnections as graceful vs ungraceful when possible.
-- [ ] Persist subscribe/publish topic events.
-- [ ] Add 30-day retention for raw client events.
-- [ ] Add client detail views and filtered audit endpoints.
+- [x] Persist connect/disconnect/auth-failure events.
+- [x] Classify disconnections as graceful vs ungraceful when possible.
+- [x] Persist subscribe/publish topic events.
+- [x] Add 30-day retention for raw client events.
+- [x] Add client detail views and filtered audit endpoints.
 
 ### Notes
 
 - Do not precreate per-client event structures at client creation time.
 - Create or update only the registry entry on DynSec changes.
 - Persist activity only when events are actually observed.
+
+### Phase 3 Progress Notes
+
+- Client activity is now persisted in SQLite tables for registry, session events, topic events, observed subscriptions and daily summaries.
+- DynSec create/enable/disable/delete operations synchronize the persistent client registry.
+- A new audit endpoint is available at `/api/v1/clientlogs/activity/{username}`.
+- Periodic full reconciliation against external `dynamic-security.json` changes is still pending.
 
 ---
 
@@ -250,11 +257,19 @@ Objective: expose queryable incident and compliance views over persisted broker 
 
 ### Deliverables
 
-- [ ] Daily and weekly broker reports.
-- [ ] Per-client activity timeline.
-- [ ] Filters for ungraceful disconnects, auth failures and reconnect loops.
-- [ ] Export endpoints for CSV or JSON.
-- [ ] Data retention and purge tooling.
+- [x] Daily and weekly broker reports.
+- [x] Per-client activity timeline.
+- [x] Filters for ungraceful disconnects, auth failures and reconnect loops.
+- [x] Export endpoints for CSV or JSON.
+- [x] Data retention and purge tooling.
+
+### Phase 4 Progress Notes
+
+- Reporting API available under `/api/v1/reports` with daily and weekly broker rollups.
+- Per-client merged timeline is available at `/api/v1/reports/clients/{username}/timeline`.
+- Incident queries support ungraceful disconnects, auth failures and reconnect-loop detection.
+- CSV and JSON exports are available for broker reports and client activity timelines.
+- Retention status and manual purge tooling are available under `/api/v1/reports/retention/*`.
 
 ---
 

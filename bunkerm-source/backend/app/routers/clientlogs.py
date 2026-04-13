@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, Set
 
 from fastapi import APIRouter, Security, status
 
+from clientlogs.sqlite_activity_storage import client_activity_storage
 from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from monitor.topic_sqlite_storage import topic_history_storage
@@ -207,3 +208,15 @@ async def get_top_subscribed(limit: int = 15, period: str = "7d", api_key: str =
 async def get_activity_summary(window_seconds: int = 600, api_key: str = Security(get_api_key)):
     """Devuelve clientes activos con capacidad efectiva de subscribe o publish según DynSec."""
     return build_activity_summary(window_seconds=window_seconds)
+
+
+@router.get("/activity/{username}")
+async def get_client_activity(username: str, days: int = 30, limit: int = 200,
+                              api_key: str = Security(get_api_key)):
+    """Devuelve auditoría persistida reciente de un cliente MQTT."""
+    try:
+        data = dynsec_svc.read_dynsec()
+        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
+    except Exception:
+        pass
+    return client_activity_storage.get_client_activity(username=username, days=days, limit=limit)

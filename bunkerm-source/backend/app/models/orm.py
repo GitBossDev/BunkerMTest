@@ -150,3 +150,85 @@ class TopicSubscribeBucket(Base):
     bucket_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     subscribe_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ClientRegistry(Base):
+    """Persistent catalog of MQTT clients synchronized from DynSec."""
+    __tablename__ = "client_registry"
+
+    username: Mapped[str] = mapped_column(String(128), primary_key=True)
+    textname: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    disabled: Mapped[bool] = mapped_column(default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_dynsec_sync_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ClientSessionEvent(Base):
+    """Append-only session and auth event history for MQTT clients."""
+    __tablename__ = "client_session_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    event_ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    disconnect_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol_level: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    clean_session: Mapped[bool | None] = mapped_column(nullable=True)
+    keep_alive: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class ClientTopicEvent(Base):
+    """Append-only publish/subscribe topic event history for MQTT clients."""
+    __tablename__ = "client_topic_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    client_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    event_ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    topic: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    qos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retained: Mapped[bool | None] = mapped_column(nullable=True)
+
+
+class ClientSubscriptionState(Base):
+    """Observed subscription state by client and topic."""
+    __tablename__ = "client_subscription_state"
+    __table_args__ = (
+        UniqueConstraint("username", "topic", name="uq_client_subscription_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    topic: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    qos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    source: Mapped[str] = mapped_column(String(64), default="clientlogs")
+
+
+class ClientDailySummary(Base):
+    """Daily audit summary by username for quick reporting."""
+    __tablename__ = "client_daily_summary"
+    __table_args__ = (
+        UniqueConstraint("username", "day", name="uq_client_daily_summary"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    day: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    connects: Mapped[int] = mapped_column(Integer, default=0)
+    disconnects_graceful: Mapped[int] = mapped_column(Integer, default=0)
+    disconnects_ungraceful: Mapped[int] = mapped_column(Integer, default=0)
+    auth_failures: Mapped[int] = mapped_column(Integer, default=0)
+    publishes: Mapped[int] = mapped_column(Integer, default=0)
+    subscribes: Mapped[int] = mapped_column(Integer, default=0)
+    distinct_publish_topics: Mapped[int] = mapped_column(Integer, default=0)
+    distinct_subscribe_topics: Mapped[int] = mapped_column(Integer, default=0)

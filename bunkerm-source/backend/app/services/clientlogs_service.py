@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
+from clientlogs.sqlite_activity_storage import client_activity_storage
 from core.config import settings
 from monitor.topic_sqlite_storage import topic_history_storage
 
@@ -87,6 +88,10 @@ class MQTTEvent(BaseModel):
     port: int
     topic: Optional[str] = None
     qos: Optional[int] = None
+    payload_bytes: Optional[int] = None
+    retained: Optional[bool] = None
+    disconnect_kind: Optional[str] = None
+    reason_code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +211,7 @@ class MQTTMonitor:
         if client_id not in self.connected_clients:
             return None
         conn = self.connected_clients[client_id]
+        disconnect_kind = "graceful" if "closed its connection" in log_line else "ungraceful"
         event = MQTTEvent(
             id=str(uuid.uuid4()),
             timestamp=_ts_to_iso(ts),
@@ -219,6 +225,7 @@ class MQTTMonitor:
             username=conn.username,
             ip_address=conn.ip_address,
             port=conn.port,
+            disconnect_kind=disconnect_kind,
         )
         del self.connected_clients[client_id]
         self._last_seen.pop(client_id, None)
@@ -250,6 +257,8 @@ class MQTTMonitor:
             username="unknown",
             ip_address=ip,
             port=port,
+            disconnect_kind="auth_failure",
+            reason_code="not_authorised",
         )
 
     def parse_subscription_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -328,6 +337,7 @@ class MQTTMonitor:
             port=port,
             topic=topic,
             qos=int(qos_str),
+            payload_bytes=int(size_str),
         )
 
     # ── pipeline de procesamiento ─────────────────────────────────────────────
@@ -359,11 +369,15 @@ class MQTTMonitor:
                 if parser.__name__ == "parse_subscription_log" and not replay and event.topic:
                     topic_history_storage.record_subscribe(event.topic, event_ts=datetime.fromisoformat(event.timestamp))
                 if not replay:
+                    client_activity_storage.record_event(event)
+                if not replay:
                     self.events.append(event)
                 return
 
         event = self.parse_publish_log(line)
         if event is not None:
+            if not replay:
+                client_activity_storage.record_event(event)
             if not replay:
                 self.events.append(event)
             return

@@ -10,6 +10,12 @@ import type {
   MonitorStats,
   MosquittoConfigResponse,
   AzureBridgeCreate,
+  BrokerDailyReportResponse,
+  BrokerWeeklyReportResponse,
+  ClientTimelineResponse,
+  ClientIncidentsResponse,
+  RetentionStatusResponse,
+  RetentionPurgeResponse,
 } from '@/types'
 
 // The Python dynsec API's list endpoints return the raw mosquitto_ctrl stdout
@@ -59,6 +65,7 @@ const AWS_BRIDGE_API_URL = '/api/proxy/aws-bridge'
 const AZURE_BRIDGE_API_URL = '/api/proxy/azure-bridge'
 const CONFIG_API_URL     = '/api/proxy/config'
 const CLIENTLOGS_API_URL = '/api/proxy/clientlogs'
+const REPORTS_API_URL = '/api/proxy/reports'
 
 function buildUrl(base: string, path: string): string {
   const nonce = generateCacheBuster()
@@ -92,6 +99,22 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const text = await response.text()
   if (!text) return {} as T
   return JSON.parse(text) as T
+}
+
+async function requestBlob(url: string, options?: RequestInit): Promise<Response> {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      ...(options?.headers as Record<string, string> || {}),
+    },
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(error || `HTTP ${response.status}`)
+  }
+
+  return response
 }
 
 // ─── DynSec API ─────────────────────────────────────────────────────────────
@@ -372,6 +395,75 @@ export const clientlogsApi = {
     request(buildUrl(CLIENTLOGS_API_URL, `/enable/${encodeURIComponent(username)}`), { method: 'POST' }),
   disableClient: (username: string) =>
     request(buildUrl(CLIENTLOGS_API_URL, `/disable/${encodeURIComponent(username)}`), { method: 'POST' }),
+}
+
+export const reportsApi = {
+  getBrokerDailyReport: (days = 30) =>
+    request<BrokerDailyReportResponse>(buildUrl(REPORTS_API_URL, `/broker/daily?days=${days}`)),
+  getBrokerWeeklyReport: (weeks = 8) =>
+    request<BrokerWeeklyReportResponse>(buildUrl(REPORTS_API_URL, `/broker/weekly?weeks=${weeks}`)),
+  getClientTimeline: (params: { username: string; days?: number; limit?: number; eventTypes?: string[] }) => {
+    const qs = new URLSearchParams()
+    qs.set('days', String(params.days ?? 30))
+    qs.set('limit', String(params.limit ?? 200))
+    if (params.eventTypes && params.eventTypes.length > 0) {
+      qs.set('event_types', params.eventTypes.join(','))
+    }
+    return request<ClientTimelineResponse>(
+      buildUrl(REPORTS_API_URL, `/clients/${encodeURIComponent(params.username)}/timeline?${qs.toString()}`)
+    )
+  },
+  getClientIncidents: (params: {
+    days?: number
+    limit?: number
+    username?: string
+    incidentTypes?: string[]
+    reconnectWindowMinutes?: number
+    reconnectThreshold?: number
+  }) => {
+    const qs = new URLSearchParams()
+    qs.set('days', String(params.days ?? 30))
+    qs.set('limit', String(params.limit ?? 200))
+    if (params.username) qs.set('username', params.username)
+    if (params.incidentTypes && params.incidentTypes.length > 0) {
+      qs.set('incident_types', params.incidentTypes.join(','))
+    }
+    if (params.reconnectWindowMinutes !== undefined) {
+      qs.set('reconnect_window_minutes', String(params.reconnectWindowMinutes))
+    }
+    if (params.reconnectThreshold !== undefined) {
+      qs.set('reconnect_threshold', String(params.reconnectThreshold))
+    }
+    return request<ClientIncidentsResponse>(buildUrl(REPORTS_API_URL, `/incidents/clients?${qs.toString()}`))
+  },
+  getRetentionStatus: () =>
+    request<RetentionStatusResponse>(buildUrl(REPORTS_API_URL, '/retention/status')),
+  purgeRetention: () =>
+    request<RetentionPurgeResponse>(buildUrl(REPORTS_API_URL, '/retention/purge'), { method: 'POST' }),
+  exportBrokerReport: (params: { scope: 'daily' | 'weekly'; days?: number; weeks?: number; format: 'csv' | 'json' }) => {
+    const qs = new URLSearchParams()
+    qs.set('scope', params.scope)
+    qs.set('export_format', params.format)
+    if (params.scope === 'daily') qs.set('days', String(params.days ?? 30))
+    if (params.scope === 'weekly') qs.set('weeks', String(params.weeks ?? 8))
+    return requestBlob(buildUrl(REPORTS_API_URL, `/export/broker?${qs.toString()}`))
+  },
+  exportClientActivity: (params: {
+    username: string
+    days?: number
+    limit?: number
+    format: 'csv' | 'json'
+    eventTypes?: string[]
+  }) => {
+    const qs = new URLSearchParams()
+    qs.set('days', String(params.days ?? 30))
+    qs.set('limit', String(params.limit ?? 500))
+    qs.set('export_format', params.format)
+    if (params.eventTypes && params.eventTypes.length > 0) {
+      qs.set('event_types', params.eventTypes.join(','))
+    }
+    return requestBlob(buildUrl(REPORTS_API_URL, `/export/client-activity/${encodeURIComponent(params.username)}?${qs.toString()}`))
+  },
 }
 
 // ─── Smart Anomaly Detection API ─────────────────────────────────────────────

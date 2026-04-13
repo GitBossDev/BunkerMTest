@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request, Security, status
 from pydantic import BaseModel
 
+from clientlogs.sqlite_activity_storage import client_activity_storage
 from core.auth import get_api_key
 from models.schemas import (
     ACLRequest,
@@ -186,6 +187,7 @@ async def list_clients(
     """Lista clientes desde dynamic-security.json con paginación y búsqueda."""
     try:
         data = dynsec_svc.read_dynsec()
+        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         raw_clients = data.get("clients", [])
 
         if search:
@@ -228,6 +230,7 @@ async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
     """Devuelve el mapa disabled y la lista de usernames para Connected Clients."""
     try:
         data = dynsec_svc.read_dynsec()
+        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         clients = data.get("clients", [])
         disabled_map = {
             c["username"]: c.get("disabled", False)
@@ -248,6 +251,7 @@ async def get_client(username: str, api_key: str = Security(get_api_key)):
     """Devuelve los detalles de un cliente específico."""
     try:
         data = dynsec_svc.read_dynsec()
+        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         client = dynsec_svc.find_client(data, username)
         if client is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -286,6 +290,7 @@ async def create_client(client: ClientCreate, api_key: str = Security(get_api_ke
             _write_or_raise(data, ["deleteClient", client.username], f"create_client:{client.username}")
     except HTTPException:
         raise
+    client_activity_storage.upsert_client(client.username, disabled=False)
     return {"message": f"Client {client.username} created successfully"}
 
 
@@ -302,6 +307,7 @@ async def enable_client(username: str, api_key: str = Security(get_api_key)):
             _write_or_raise(data, ["disableClient", username], f"enable_client:{username}")
     except HTTPException:
         raise
+    client_activity_storage.upsert_client(username, disabled=False)
     return {"message": f"Client {username} enabled successfully"}
 
 
@@ -318,6 +324,7 @@ async def disable_client(username: str, api_key: str = Security(get_api_key)):
             _write_or_raise(data, ["enableClient", username], f"disable_client:{username}")
     except HTTPException:
         raise
+    client_activity_storage.upsert_client(username, disabled=True)
     return {"message": f"Client {username} disabled successfully"}
 
 
@@ -333,6 +340,7 @@ async def delete_client(username: str, api_key: str = Security(get_api_key)):
             _write_or_raise(data, None, f"delete_client:{username}")
     except HTTPException:
         raise
+    client_activity_storage.mark_client_deleted(username)
     return {"message": f"Client {username} removed successfully"}
 
 

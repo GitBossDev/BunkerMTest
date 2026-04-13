@@ -195,6 +195,7 @@ app.add_middleware(
 from routers.dynsec import router as dynsec_router
 from routers.monitor import router as monitor_router
 from routers.clientlogs import router as clientlogs_router
+from routers.reporting import router as reporting_router
 from routers.config_mosquitto import router as config_mosquitto_router
 from routers.config_dynsec import router as config_dynsec_router
 from routers.aws_bridge import router as aws_bridge_router
@@ -203,6 +204,7 @@ from routers.azure_bridge import router as azure_bridge_router
 app.include_router(dynsec_router)
 app.include_router(monitor_router)
 app.include_router(clientlogs_router)
+app.include_router(reporting_router)
 app.include_router(config_mosquitto_router)
 app.include_router(config_dynsec_router)
 app.include_router(aws_bridge_router)

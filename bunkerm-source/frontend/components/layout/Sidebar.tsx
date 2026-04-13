@@ -19,6 +19,7 @@ import {
   Radio,
   KeyRound,
   UserCog,
+  BarChart3,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
@@ -64,6 +65,7 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     title: 'Monitoring',
     items: [
       { label: 'Alerts', href: '/ai/monitoring', icon: Activity },
+      { label: 'Reports', href: '/reports', icon: BarChart3 },
     ],
   },
   {

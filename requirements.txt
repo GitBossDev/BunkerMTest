@@ -7,3 +7,4 @@ requests>=2.31.0           # HTTP library
 # Optional for advanced features
 paho-mqtt>=1.6.1          # MQTT client (for testing)
 python-dotenv>=1.0.0      # Environment variables
+python-multipart>=0.0.20  # FastAPI form/file uploads used by backend routers

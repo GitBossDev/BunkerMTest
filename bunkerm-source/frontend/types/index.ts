@@ -263,6 +263,145 @@ export interface MQTTEvent {
   qos?: number     // Subscribe and Publish events
 }
 
+export interface BrokerDailyReportItem {
+  day: string
+  peak_connected_clients: number
+  peak_active_sessions: number
+  peak_max_concurrent: number
+  total_messages_received: number
+  total_messages_sent: number
+  bytes_received_rate_sum: number
+  bytes_sent_rate_sum: number
+  latency_samples: number
+  avg_latency_ms: number | null
+}
+
+export interface BrokerDailyReportResponse {
+  period: { kind: 'daily'; days: number }
+  items: BrokerDailyReportItem[]
+  totals: {
+    days: number
+    total_messages_received: number
+    total_messages_sent: number
+    peak_connected_clients: number
+    peak_active_sessions: number
+    peak_max_concurrent: number
+    bytes_received_rate_sum: number
+    bytes_sent_rate_sum: number
+    avg_latency_ms: number | null
+  }
+}
+
+export interface BrokerWeeklyReportItem {
+  week_start: string
+  week_end: string
+  days_covered: number
+  peak_connected_clients: number
+  peak_active_sessions: number
+  peak_max_concurrent: number
+  total_messages_received: number
+  total_messages_sent: number
+  bytes_received_rate_sum: number
+  bytes_sent_rate_sum: number
+  avg_latency_ms: number | null
+}
+
+export interface BrokerWeeklyReportResponse {
+  period: { kind: 'weekly'; weeks: number }
+  items: BrokerWeeklyReportItem[]
+  totals: {
+    weeks: number
+    total_messages_received: number
+    total_messages_sent: number
+    peak_connected_clients: number
+    peak_active_sessions: number
+    peak_max_concurrent: number
+  }
+}
+
+export interface ClientRegistryEntry {
+  username: string
+  textname?: string | null
+  disabled: boolean
+  created_at: string
+  deleted_at?: string | null
+  last_dynsec_sync_at: string
+}
+
+export interface ClientTimelineEvent {
+  event_ts: string
+  event_type: string
+  client_id: string
+  ip_address?: string | null
+  port?: number | null
+  protocol_level?: string | null
+  clean_session?: boolean | null
+  keep_alive?: number | null
+  disconnect_kind?: string | null
+  reason_code?: string | null
+  topic?: string | null
+  qos?: number | null
+  payload_bytes?: number | null
+  retained?: boolean | null
+}
+
+export interface ClientTimelineResponse {
+  client: ClientRegistryEntry | null
+  filters: {
+    days: number
+    limit: number
+    event_types: string[]
+  }
+  timeline: ClientTimelineEvent[]
+}
+
+export interface ClientIncident {
+  incident_type: 'ungraceful_disconnect' | 'auth_failure' | 'reconnect_loop'
+  username: string
+  client_id: string
+  event_ts: string
+  details: {
+    disconnect_kind?: string | null
+    reason_code?: string | null
+    ip_address?: string | null
+    port?: number | null
+    attempts?: number
+    start_ts?: string
+    end_ts?: string
+  }
+}
+
+export interface ClientIncidentsResponse {
+  filters: {
+    days: number
+    limit: number
+    username?: string | null
+    incident_types: string[]
+    reconnect_window_minutes: number
+    reconnect_threshold: number
+  }
+  incidents: ClientIncident[]
+  total: number
+}
+
+export interface RetentionStatusResponse {
+  retention_days: {
+    broker_raw: number
+    broker_daily: number
+    client: number
+    topic: number
+  }
+  rows_past_retention: Record<string, number>
+  total_rows_past_retention: number
+}
+
+export interface RetentionPurgeResponse {
+  status: string
+  deleted_rows: number
+  before: RetentionStatusResponse
+  after: RetentionStatusResponse
+}
+
 // MQTT Explorer types
 export interface MqttTopic {
   topic: string
