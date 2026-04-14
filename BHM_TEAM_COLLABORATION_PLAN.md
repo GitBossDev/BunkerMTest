@@ -1,0 +1,365 @@
+# BHM - Plan de Trabajo Colaborativo
+
+> Proyecto: BHM (Broker Health Manager)
+> Objetivo: Coordinar el trabajo paralelo de dos compañeros sin solapamientos, reduciendo conflictos de merge y evitando trabajo duplicado.
+> Tipo de documento: Archivo vivo de coordinación
+> Última actualización: 2026-04-14
+
+---
+
+## Propósito
+
+Este documento organiza el trabajo en paralelo de dos responsables:
+
+- Compañero A: migración a microservicios, arquitectura objetivo, evolución de persistencia y contratos entre frontend y backend.
+- Compañero B: funcionalidades de producto, refinamiento funcional, historial, alertas, logs, estilos y UI.
+
+El objetivo principal es que ambos puedan trabajar en paralelo con un criterio claro de ownership, dependencias y puntos de integración, usando este archivo como referencia compartida y como contexto para sus respectivos agentes.
+
+---
+
+## Reglas transversales obligatorias
+
+Estas reglas aplican a ambos compañeros y a cualquier agente que trabaje sobre el repositorio.
+
+- [ ] Mantener buenas prácticas de arquitectura, diseño y revisión de cambios.
+- [ ] Escribir el código en inglés.
+- [ ] Escribir comentarios, documentación técnica y notas operativas en español.
+- [ ] No usar emojis en código, comentarios ni mensajes técnicos persistidos, de preferencia a inicio de archivo o bloque de código.
+- [ ] No reintroducir acoplamientos que contradigan el plan de migración a microservicios.
+- [ ] Mantener la comunicación frontend-backend mediante APIs y contratos claros.
+- [ ] Evitar cambios oportunistas en áreas ajenas sin coordinación previa.
+- [ ] Actualizar este archivo cuando una tarea cambie de estado, se desbloquee o cambie de dependencia.
+
+---
+
+## Principio de no solapamiento
+
+Para no pisarnos los pies, el criterio principal es este:
+
+- El Compañero A tiene ownership sobre arquitectura, persistencia, contratos backend/frontend y topología de despliegue de la migración.
+- El Compañero B tiene ownership sobre funcionalidades del producto, experiencia de usuario y refinamiento funcional.
+- Si una funcionalidad depende de cambios estructurales de A, B debe evitar implementar una solución definitiva que quede obsoleta al migrar.
+- Si B necesita avanzar antes de que A termine una dependencia, debe limitarse a trabajo seguro: UI desacoplada, contratos provisionales acordados, mocks locales o refinamientos que no comprometan la arquitectura final.
+
+---
+
+## Ownership por compañero
+
+### Compañero A - Arquitectura y plataforma
+
+Responsabilidades principales:
+
+- arquitectura de microservicios
+- separación de responsabilidades backend, reconciliación, persistencia y despliegue
+- migración de lógica de base de datos de SQLite a PostgreSQL
+- definición e implementación de APIs entre frontend y backend
+- evolución Compose-first conforme al plan de microservicios
+- decisiones técnicas que afecten ownership de datos y contratos de integración
+- control-plane del broker y futura reconciliación
+
+Áreas del repo donde A tiene prioridad:
+
+- `docker-compose.dev.yml`
+- `deploy.ps1`
+- `config/`
+- `scripts/migrate-to-postgres.py`
+- `bunkerm-source/backend/app/core/`
+- `bunkerm-source/backend/app/models/`
+- `bunkerm-source/backend/app/routers/`
+- `bunkerm-source/backend/app/services/` cuando afecte persistencia, integración o arquitectura
+- `docs/adr/`
+- `docs/BHM_TARGET_ARCHITECTURE.md`
+- `BHM_MICROSERVICES_MIGRATION_PLAN.md`
+
+### Compañero B - Funcionalidades de producto
+
+Responsabilidades principales:
+
+- whitelist por IP
+- refinamiento del histórico de actividades de clientes
+- historial para dashboard
+- historial de topics
+- alertas por correo y redes
+- histórico de logs de broker y clientes
+- estilos y UI
+- experiencia de usuario y mejoras visuales
+
+Áreas del repo donde B tiene prioridad:
+
+- `bunkerm-source/frontend/`
+- `bunkerm-source/backend/app/routers/` cuando el cambio sea funcional y no estructural
+- `bunkerm-source/backend/app/services/` cuando el cambio sea funcional y no arquitectónico
+- `bunkerm-source/backend/app/tests/` en cobertura funcional
+- documentación de uso, funcionalidad y UI
+
+---
+
+## Reglas prácticas para evitar conflictos de merge
+
+- [ ] No editar simultáneamente el mismo archivo sin avisar.
+- [ ] Si un cambio afecta contratos API o esquema de datos, A debe anunciarlo antes de que B lo consuma.
+- [ ] Si B necesita un endpoint nuevo, debe acordar primero contrato, payload y naming con A.
+- [ ] Si A cambia una respuesta API, debe notificar qué frontend queda afectado y si habrá compatibilidad temporal.
+- [ ] Si B toca backend, debe evitar refactors estructurales fuera de su alcance funcional.
+- [ ] Si A toca frontend, debe limitarse a lo necesario para soportar contratos o integración.
+- [ ] Cada PR o bloque de trabajo debe indicar explícitamente si introduce dependencia para el otro compañero.
+
+---
+
+## Dependencias importantes entre A y B
+
+Esta sección es la más importante para evitar doble trabajo.
+
+### Dependencias críticas actuales
+
+#### 1. Migración SQLite -> PostgreSQL
+
+Impacta a B en:
+
+- histórico de actividades de clientes
+- historial para dashboard
+- historia de topics
+- histórico de logs de broker y clientes
+- alertas si persisten configuración, historial o entregas
+
+Regla:
+
+- B no debe consolidar nueva persistencia definitiva si A va a mover esa lógica a PostgreSQL.
+- B sí puede trabajar en reglas de negocio, UX, payloads, filtros, tablas, vistas y contratos esperados, siempre que el almacenamiento final quede desacoplado.
+
+#### 2. APIs frontend-backend
+
+Impacta a B en:
+
+- todas las funcionalidades nuevas que necesiten datos o acciones persistentes
+
+Regla:
+
+- B puede avanzar en UI usando contratos acordados o mocks temporales.
+- La implementación definitiva del endpoint, shape de respuesta y compatibilidad de contratos la lidera A cuando afecta arquitectura o persistencia.
+
+#### 3. Arquitectura Compose-first y separación de servicios
+
+Impacta a B en:
+
+- alertas por correo y redes si requieren workers o servicios auxiliares
+- logs históricos si cambian fuentes de observabilidad
+- cualquier funcionalidad que dependa del acceso directo a archivos del broker
+
+Regla:
+
+- B debe evitar implementar soluciones que dependan de shared volumes como contrato final.
+- Si necesita una solución temporal, debe dejarla claramente marcada como transicional y validada con A.
+
+#### 4. Control-plane del broker
+
+Impacta a B en:
+
+- whitelist por IP si se implementa como configuración de broker o política asociada
+- configuraciones futuras que toquen ACLs, DynSec o parámetros efectivos del broker
+
+Regla:
+
+- B no debe fijar una implementación final de whitelist que contradiga el modelo futuro de estado deseado + reconciliación.
+- Si whitelist se implementa antes del control-plane nuevo, debe quedar encapsulada y preparada para migración posterior.
+
+---
+
+## Estado de dependencias para el Compañero B
+
+### Puede avanzar ya con riesgo bajo
+
+- [ ] Diseño UI de pantallas nuevas
+- [ ] Refinamiento visual de dashboard y vistas existentes
+- [ ] Composición de tablas, filtros y navegación de históricos
+- [ ] Definición de payloads esperados y estados vacíos/error/loading
+- [ ] Tests funcionales de frontend desacoplados de persistencia final
+- [ ] Documentación funcional de features pendientes
+
+### Puede avanzar, pero coordinando contrato con A
+
+- [ ] Histórico de actividades de clientes
+- [ ] Historial para dashboard
+- [ ] Historia de topics
+- [ ] Histórico de logs de broker y clientes
+- [ ] Alertas por correo y redes
+
+### Debe esperar definición o implementación previa de A
+
+- [ ] Persistencia definitiva de las features históricas en PostgreSQL
+- [ ] Endpoints finales que dependan de nueva arquitectura de datos
+- [ ] Funcionalidades que dependan de reconciliación del broker
+- [ ] Solución final de whitelist si requiere tocar configuración efectiva del broker
+
+---
+
+## Checklist de trabajo - Compañero A
+
+### Arquitectura y migración
+
+- [ ] Mantener actualizado `BHM_MICROSERVICES_MIGRATION_PLAN.md`.
+- [ ] Mantener actualizada la arquitectura objetivo en `docs/BHM_TARGET_ARCHITECTURE.md`.
+- [ ] Definir la topología inicial Compose-first que se implementará primero.
+- [ ] Diseñar el recorte entre `bhm-api` y `bhm-reconciler`.
+- [ ] Revisar `docker-compose.dev.yml` según la arquitectura objetivo.
+
+### Persistencia y base de datos
+
+- [ ] Diseñar la estrategia de migración de SQLite a PostgreSQL.
+- [ ] Definir el esquema PostgreSQL del bounded context de BHM.
+- [ ] Definir estrategia de compatibilidad temporal para features ya persistidas en SQLite.
+- [ ] Implementar la capa de persistencia portable o repositorios de transición.
+- [ ] Coordinar con B qué endpoints y payloads cambiarán por la migración.
+
+### APIs y contratos
+
+- [ ] Definir contratos API para features que B necesita implementar o refinar.
+- [ ] Implementar o adaptar endpoints backend necesarios para frontend.
+- [ ] Documentar breaking changes o compatibilidad temporal.
+- [ ] Mantener tests de integración para endpoints afectados.
+
+### Coordinación
+
+- [ ] Notificar a B cuando una dependencia quede desbloqueada.
+- [ ] Marcar en este documento qué tareas ya pueden ejecutarse sin riesgo.
+
+---
+
+## Checklist de trabajo - Compañero B
+
+### Funcionalidades pendientes
+
+- [ ] Implementar o diseñar whitelist por IP.
+- [ ] Refinar el histórico de actividades de clientes.
+- [ ] Refinar o ampliar historial para dashboard.
+- [ ] Refinar o ampliar historia de topics.
+- [ ] Implementar alertas por correo.
+- [ ] Implementar alertas por redes o webhooks.
+- [ ] Refinar histórico de logs de broker.
+- [ ] Refinar histórico de logs de clientes.
+- [ ] Mejorar estilos y UI donde aplique.
+
+### Trabajo seguro sin bloquearse
+
+- [ ] Diseñar UX y estados UI para funcionalidades dependientes de nuevas APIs.
+- [ ] Definir con A los contratos de datos antes de consumirlos.
+- [ ] Evitar fijar almacenamiento definitivo si A aún no cerró la capa PostgreSQL.
+- [ ] Añadir tests funcionales y de interfaz donde no haya dependencia estructural pendiente.
+
+### Coordinación
+
+- [ ] Notificar a A si una feature requiere endpoint nuevo o cambio de contrato.
+- [ ] Marcar en este documento qué tareas quedaron bloqueadas por dependencia estructural.
+- [ ] Evitar cambios de arquitectura o persistencia fuera del alcance funcional.
+
+---
+
+## Matriz rápida de dependencias por feature
+
+| Feature | Responsable principal | Dependencia de A | Puede avanzar B ya | Nota |
+|--------|------------------------|------------------|--------------------|------|
+| Whitelist por IP | B | Alta | Parcial | Diseñar UX y reglas; validar antes la forma final de aplicación al broker |
+| Histórico actividad clientes | B | Alta | Parcial | Ya existe base en SQLite; no cerrar persistencia final sin A |
+| Historial dashboard | B | Alta | Parcial | Puede avanzar en UI y consultas esperadas |
+| Historia de topics | B | Alta | Parcial | Ya existe base en SQLite; evitar rehacer persistencia final |
+| Alertas por correo | B | Media/Alta | Parcial | Requiere validar delivery, configuración y quizá worker |
+| Alertas por redes/webhooks | B | Media/Alta | Parcial | Igual que correo; mejor acordar contrato técnico antes |
+| Histórico logs broker | B | Alta | Parcial | Afectado por futura observabilidad desacoplada |
+| Histórico logs clientes | B | Alta | Parcial | Afectado por persistencia y observabilidad |
+| Estilos y UI | B | Baja | Sí | Puede avanzar salvo pantallas atadas a contratos inestables |
+| PostgreSQL migration | A | N/A | No | Ownership de A |
+| APIs frontend-backend | A | N/A | No, salvo mocks | Ownership de A cuando el cambio es estructural |
+| Compose-first topology | A | N/A | No | Ownership de A |
+
+---
+
+## Criterios de coordinación antes de implementar una tarea
+
+Antes de empezar una tarea, cada compañero debe responder:
+
+- [ ] ¿La tarea toca persistencia, contratos API o despliegue?
+- [ ] ¿La tarea modifica archivos con ownership principal del otro compañero?
+- [ ] ¿La implementación definitiva depende de PostgreSQL o de la nueva arquitectura?
+- [ ] ¿Se puede hacer una parte segura sin bloquear la implementación final?
+- [ ] ¿Es necesario acordar un contrato o una estructura de datos primero?
+
+Si cualquiera de esas respuestas implica dependencia fuerte, la tarea debe coordinarse antes de implementarse.
+
+---
+
+## Convenciones para ramas, commits y PRs
+
+Recomendado para ambos:
+
+- Usar ramas separadas por responsabilidad.
+- Nombrar ramas con prefijo claro, por ejemplo:
+  - `a/compose-postgres-migration`
+  - `a/api-contracts-reports`
+  - `b/alerts-email-ui`
+  - `b/client-history-refinement`
+- Mantener PRs pequeñas y orientadas a una capacidad concreta.
+- Indicar en el PR:
+  - area tocada
+  - dependencia generada
+  - si rompe o cambia contratos
+  - qué debe saber el otro compañero
+
+---
+
+## Uso de este archivo con agentes
+
+### Contexto mínimo para el agente del Compañero A
+
+- Trabajas en BHM.
+- Tu ownership principal es arquitectura, migración a microservicios, PostgreSQL, Compose-first y contratos API.
+- Debes evitar cambios funcionales que invadan el ownership del compañero B salvo que sean necesarios para habilitar una dependencia.
+- El código va en inglés, comentarios y documentación técnica en español, y sin emojis en código.
+- Antes de cambiar contratos o persistencia, revisa este archivo y actualiza dependencias si desbloqueas trabajo para B.
+
+### Contexto mínimo para el agente del Compañero B
+
+- Trabajas en BHM.
+- Tu ownership principal es funcionalidades de producto, históricos, alertas, logs, estilos y UI.
+- Debes evitar refactors estructurales de arquitectura, persistencia o despliegue sin coordinación con A.
+- Si una feature depende de PostgreSQL, APIs nuevas o cambios de arquitectura, debes dejar constancia aquí y evitar hacer trabajo definitivo duplicado.
+- El código va en inglés, comentarios y documentación técnica en español, y sin emojis en código.
+
+---
+
+## Bloqueos y decisiones pendientes
+
+Usar esta sección como tablero rápido de coordinación.
+
+### Bloqueos actuales
+
+- [ ] Definir si whitelist por IP vivirá como política de broker, capa de aplicación o ambas.
+- [ ] Definir qué endpoints históricos pasarán primero a PostgreSQL.
+- [ ] Definir el contrato para alertas con canales externos.
+- [ ] Definir si el histórico de logs se alimentará de la fuente actual o de la futura capa de observabilidad.
+
+### Decisiones que deben tomarse con prioridad
+
+- [ ] Prioridad de features de B que necesitan soporte temprano de A.
+- [ ] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
+- [ ] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend.
+
+---
+
+## Definición de hecho compartida
+
+Una tarea se considera realmente terminada cuando:
+
+- [ ] respeta las convenciones del proyecto
+- [ ] no invade ownership ajeno sin coordinación
+- [ ] incluye validación o tests razonables si aplica
+- [ ] actualiza documentación si cambia el comportamiento
+- [ ] deja claro si habilita, bloquea o modifica trabajo del otro compañero
+
+---
+
+## Notas finales
+
+La regla más importante de este documento es simple: B no debe cerrar soluciones definitivas en áreas cuya base estructural aún depende de A, y A debe exponer cuanto antes contratos y decisiones suficientes para que B no quede bloqueado innecesariamente.
+
+Este archivo debe mantenerse vivo. Si cambia una dependencia, cambia el estado de una tarea o se redefine un ownership, se actualiza aquí antes de seguir acumulando trabajo paralelo.

@@ -138,6 +138,7 @@ Acceder en **http://localhost:2000**
 | Documento | Descripción |
 |-----------|-------------|
 | [BHM_MICROSERVICES_MIGRATION_PLAN.md](./BHM_MICROSERVICES_MIGRATION_PLAN.md) | Documento canónico para la migración actual a microservicios |
+| [BHM_TEAM_COLLABORATION_PLAN.md](./BHM_TEAM_COLLABORATION_PLAN.md) | Guía viva de coordinación entre trabajo de arquitectura y trabajo de funcionalidades |
 | [docs/adr/README.md](./docs/adr/README.md) | Registro de decisiones de arquitectura de BHM |
 | [ROADMAP.md](./ROADMAP.md) | Plan, fases y especificaciones |
 | [QUICKSTART.md](./QUICKSTART.md) | Inicio rápido detallado |
