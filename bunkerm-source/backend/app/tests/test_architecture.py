@@ -6,7 +6,7 @@ no sean revertidas inadvertidamente en cambios futuros.
 
 Invariantes que se verifican:
   - El backend unificado escucha en el puerto 9001 (no en los puertos legacy 1000-1005).
-  - Los 7 routers del backend unificado estan registrados en main.py.
+    - Los routers activos del backend unificado estan registrados en main.py.
   - No hay imports circulares en el paquete core/.
   - core/config.py puede instanciarse con variables minimas sin explotar.
 """
@@ -65,14 +65,12 @@ EXPECTED_ROUTERS = [
     "routers.clientlogs",
     "routers.config_mosquitto",
     "routers.config_dynsec",
-    "routers.aws_bridge",
-    "routers.azure_bridge",
 ]
 
 
 def test_all_routers_registered_in_main():
     """
-    Importa main.py y verifica que los 7 routers del backend unificado
+    Importa main.py y verifica que los routers activos del backend unificado
     estan incluidos en la aplicacion FastAPI.
     """
     from main import app
@@ -81,7 +79,7 @@ def test_all_routers_registered_in_main():
     registered_prefixes = {route.path.split("/")[1] for route in app.routes if hasattr(route, "path")}
 
     # Los tags declarados en cada router deben aparecer en alguna ruta
-    expected_tags = {"dynsec", "monitor", "clientlogs", "config-mosquitto", "config-dynsec", "aws-bridge", "azure-bridge"}
+    expected_tags = {"dynsec", "monitor", "clientlogs", "config-mosquitto", "config-dynsec"}
     registered_tags: set[str] = set()
     for route in app.routes:
         if hasattr(route, "tags") and route.tags:

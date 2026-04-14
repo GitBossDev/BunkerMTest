@@ -12,8 +12,6 @@ const SERVICES: Record<string, string> = {
   monitor:        `${UNIFIED_API_BASE}/monitor`,
   clientlogs:     `${UNIFIED_API_BASE}/clientlogs`,
   reports:        `${UNIFIED_API_BASE}/reports`,
-  'aws-bridge':   `${UNIFIED_API_BASE}/aws-bridge`,
-  'azure-bridge': `${UNIFIED_API_BASE}/azure-bridge`,
   config:         `${UNIFIED_API_BASE}/config`,
   // Smart-anomaly también está montado en el backend unificado.
   ai:             `${UNIFIED_API_BASE}/ai`,

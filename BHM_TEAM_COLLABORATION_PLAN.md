@@ -201,8 +201,15 @@ Regla:
 - [ ] Mantener actualizado `BHM_MICROSERVICES_MIGRATION_PLAN.md`.
 - [ ] Mantener actualizada la arquitectura objetivo en `docs/BHM_TARGET_ARCHITECTURE.md`.
 - [x] Definir la topología inicial Compose-first que se implementará primero.
-- [ ] Diseñar el recorte entre `bhm-api` y `bhm-reconciler`.
+- [x] Diseñar el recorte entre `bhm-api` y `bhm-reconciler` mediante una costura explícita de reconciliación broker-facing dentro del proceso actual.
 - [x] Evaluar si conviene introducir un laboratorio local de Kubernetes durante Fase 3.
+- [x] Extender el primer corte de control-plane a clientes DynSec, enable/disable y asignación de roles.
+- [x] Extender el patrón de control-plane al resto de entidades principales de DynSec: delete client, roles, ACLs, grupos y memberships.
+- [x] Extender el patrón de control-plane a `mosquitto.conf`, incluyendo save/reset/remove listener y estado auditable.
+- [x] Extraer un reconciliador explícito broker-facing y mover allí la aplicación efectiva de `defaultACLAccess`, `roles`, `groups`, `mosquitto.conf` y cert store TLS.
+- [x] Mover también el lifecycle principal de clientes DynSec al reconciliador explícito broker-facing sin persistir passwords de creación en el desired state.
+- [x] Mover también las memberships `group-client` DynSec al reconciliador explícito broker-facing, persistiendo además su prioridad en el estado deseado/observado.
+- [x] Introducir un adapter local de runtime broker-facing para preparar el recorte futuro entre `bhm-api` y `bhm-reconciler`.
 - [x] Revisar `docker-compose.dev.yml` según la arquitectura objetivo.
 
 ### Baseline Compose-first
@@ -230,6 +237,28 @@ Regla:
 - [ ] Implementar o adaptar endpoints backend necesarios para frontend.
 - [ ] Documentar breaking changes o compatibilidad temporal.
 - [ ] Mantener tests de integración para endpoints afectados.
+
+Estado actual ya disponible para coordinación con B:
+
+- `GET /api/v1/dynsec/default-acl/status` expone estado deseado/aplicado/observado del primer slice de control-plane.
+- `GET /api/v1/dynsec/clients/{username}/status` expone estado deseado/aplicado/observado por cliente DynSec.
+- Las operaciones de create client, enable/disable y roles de cliente ya no dual-escriben el JSON desde el router.
+- La aplicación broker-facing de create/enable/disable/delete/roles de cliente ya pasa por `services/broker_reconciler.py`; el password de creación se usa solo como dato efímero de reconciliación.
+- Las memberships `group-client` DynSec también ya delegan `addGroupClient/removeGroupClient` al reconciliador explícito en vez de ejecutarlo desde HTTP, y su prioridad ya forma parte del estado deseado/observado normalizado.
+- `GET /api/v1/dynsec/roles/{role_name}/status` y `GET /api/v1/dynsec/groups/{group_name}/status` ya exponen estado deseado/aplicado/observado por entidad.
+- La gestión principal de roles, ACLs, grupos y memberships DynSec ya no muta `dynamic-security.json` directamente desde la capa HTTP.
+- `GET /api/v1/config/mosquitto-config/status` ya expone estado deseado/aplicado/observado del archivo base de configuración del broker.
+- `GET /api/v1/config/dynsec-json/status` ya expone estado deseado/aplicado/observado del documento DynSec completo.
+- `POST /api/v1/config/mosquitto-config`, `POST /api/v1/config/reset-mosquitto-config` y `POST /api/v1/config/remove-mosquitto-listener` ya usan control-plane transicional en vez de escritura directa desde el router.
+- `POST /api/v1/config/import-dynsec-json`, `POST /api/v1/config/import-acl` y `POST /api/v1/config/reset-dynsec-json` ya usan también control-plane transicional en vez de escritura directa de `dynamic-security.json` desde el router.
+- `services/broker_runtime.py` y `services/broker_reconciler.py` ya definen una costura explícita broker-facing para seguir separando `bhm-api` del reconciliador futuro sin cambiar todavía de proceso.
+- El build local del runtime `bunkerm-platform` ya volvió a ser reproducible en Windows + Podman tras excluir `frontend/node_modules` del contexto de imagen.
+- La integración real de cliente DynSec ya valida tanto el `status` auditable del control-plane como el `dynamic-security.json` efectivo del broker sobre el stack activo.
+- Las rutas DynSec de `roles` y `groups` ya no ejecutan comandos broker-facing directamente desde el router; delegan al reconciliador explícito y elevan error HTTP si la reconciliación falla.
+- Existe una prueba de integración ligera en `tests/test_broker_reconciler_integration.py` para validar la costura broker-facing con filesystem temporal y comandos DynSec simulados.
+- Existe también una prueba de integración real en `tests/test_broker_reconciler_real_integration.py` para validar create/disable/delete de cliente contra el stack Podman activo y el broker real.
+- El flujo de importación/sync de `mosquitto_passwd` ya no escribe `dynamic-security.json` directamente; ahora genera desired state del documento DynSec completo y lo delega al reconciliador explícito.
+- La integración real sobre el stack Podman activo ya cubre también import/reset del documento DynSec y el sync desde `mosquitto_passwd`, no solo el lifecycle principal de clientes.
 
 ### Coordinación
 
@@ -389,6 +418,19 @@ Usar esta sección como tablero rápido de coordinación.
 - [ ] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
 - [ ] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend.
 - [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; si se usa más adelante, será solo como validación opcional.
+
+### Actualización operativa reciente
+
+- A ya movió `defaultACLAccess` y el lifecycle básico de clientes DynSec al patrón de estado deseado + reconciliación.
+- A ya movió también roles, ACLs, grupos y memberships DynSec al mismo patrón transicional.
+- A ya movió también el archivo base `mosquitto.conf` al mismo patrón transicional para las operaciones principales de configuración.
+- A ya introdujo un reconciliador explícito broker-facing y empezó a sacar del router la aplicación efectiva del broker para `roles` y `groups`.
+- A ya movió también el lifecycle principal de clientes DynSec a ese reconciliador explícito, incluyendo `create` con password efímero no persistido y rollback básico sobre fallos de escritura del JSON.
+- A ya movió además las memberships `group-client` al mismo reconciliador explícito, con prioridad persistida en el estado deseado/observado y reconciliación de drift cuando cambia.
+- A ya dejó validadas tanto una integración ligera como una integración real sobre esa costura broker-facing, y además recuperó la reconstrucción reproducible del runtime local sobre Podman para seguir iterando Fase 3 sin depender de un stack viejo.
+- A ya movió también import/reset del documento DynSec y el sync desde `mosquitto_passwd` al mismo patrón transicional, cerrando la escritura directa activa de `dynamic-security.json` desde la superficie HTTP del producto.
+- A ya dejó validadas esas rutas también sobre el runtime real reconstruido, con restauración automática del documento DynSec y del `mosquitto_passwd` para no contaminar el stack activo.
+- B debe seguir considerando estos contratos como transicionales, pero ya puede apoyarse en endpoints de estado para UI técnica o debugging si los necesita.
 
 ---
 

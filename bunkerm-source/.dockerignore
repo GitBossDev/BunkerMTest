@@ -1,5 +1,9 @@
 # Ignore node_modules directories
 node_modules
+frontend/node_modules
+frontend/node_modules/**
+backend/node_modules
+backend/node_modules/**
 **/node_modules
 
 # Ignore development and version control files
@@ -16,11 +20,13 @@ yarn-error.log
 **/build
 **/.next
 **/.nuxt
+frontend/.next
+frontend/.next/**
+frontend/.turbo
+frontend/.turbo/**
 
 # Ignore Docker files
 .dockerignore
 Dockerfile
 docker-compose*.yml
-
-./frontend/node_modules/*
 

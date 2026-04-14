@@ -5,9 +5,12 @@ Cubre los endpoints criticos de gestion de clientes, roles y grupos MQTT.
 Los servicios externos (mosquitto_ctrl, dynamic-security.json) se mockean
 para que los tests no dependan del broker en ejecucion.
 """
+import json
+
 import pytest
 import services.dynsec_service as dynsec_svc
 from services import broker_desired_state_service as desired_state_svc
+import services.broker_reconciler as broker_reconciler
 from config.dynsec_config import merge_dynsec_configs
 
 # Estructura minima valida de dynamic-security.json para los mocks
@@ -218,6 +221,17 @@ async def test_get_client_normalizes_role_and_group_entries(client, monkeypatch)
     assert body["groups"] == [{"groupname": "plantas", "name": "plantas", "priority": 3}]
 
 
+async def test_get_client_status_returns_unmanaged_without_desired_state(client, monkeypatch):
+    """Sin desired state persistido, el estado del cliente refleja solo lo observado."""
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
+    resp = await client.get("/api/v1/dynsec/clients/sensor-01/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "unmanaged"
+    assert body["observed"]["username"] == "sensor-01"
+    assert body["observed"]["disabled"] is False
+
+
 async def test_get_client_not_found(client, monkeypatch):
     """Buscar un cliente inexistente retorna 404."""
     monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
@@ -238,6 +252,130 @@ async def test_create_client_success(client, monkeypatch):
     payload = {"username": "nuevo-sensor", "password": "SecurePass123"}
     resp = await client.post("/api/v1/dynsec/clients", json=payload)
     assert resp.status_code == 201
+    body = resp.json()
+    assert body["controlPlane"]["status"] == "applied"
+
+    status_resp = await client.get("/api/v1/dynsec/clients/nuevo-sensor/status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body["desired"]["username"] == "nuevo-sensor"
+    assert status_body["desired"]["disabled"] is False
+    assert status_body["observed"]["username"] == "nuevo-sensor"
+
+
+async def test_disable_client_updates_desired_state_and_status(client, monkeypatch):
+    """Disable debe persistir desired state del cliente y reconciliar el JSON."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {
+                "username": "sensor-01",
+                "textname": "Sensor de prueba",
+                "groups": [],
+                "roles": [{"rolename": "sensors"}],
+                "disabled": False,
+            }
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    resp = await client.put("/api/v1/dynsec/clients/sensor-01/disable")
+    assert resp.status_code == 200
+    assert resp.json()["controlPlane"]["status"] == "applied"
+
+    status_resp = await client.get("/api/v1/dynsec/clients/sensor-01/status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body["desired"]["disabled"] is True
+    assert status_body["observed"]["disabled"] is True
+
+
+async def test_add_and_remove_client_role_updates_control_plane_state(client, monkeypatch):
+    """La asignacion y remocion de roles debe pasar por desired state del cliente."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {
+                "username": "sensor-01",
+                "textname": "Sensor de prueba",
+                "groups": [],
+                "roles": [{"rolename": "sensors", "priority": 1}],
+                "disabled": False,
+            }
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    add_resp = await client.post(
+        "/api/v1/dynsec/clients/sensor-01/roles",
+        json={"role_name": "operators", "priority": 5},
+    )
+    assert add_resp.status_code == 200
+    add_status = await client.get("/api/v1/dynsec/clients/sensor-01/status")
+    assert add_status.status_code == 200
+    add_body = add_status.json()
+    assert any(role["rolename"] == "operators" for role in add_body["desired"]["roles"])
+
+    remove_resp = await client.delete("/api/v1/dynsec/clients/sensor-01/roles/operators")
+    assert remove_resp.status_code == 200
+    remove_status = await client.get("/api/v1/dynsec/clients/sensor-01/status")
+    assert remove_status.status_code == 200
+    remove_body = remove_status.json()
+    assert all(role["rolename"] != "operators" for role in remove_body["desired"]["roles"])
+
+
+async def test_sync_passwd_to_dynsec_uses_control_plane_and_updates_dynsec_json(client, monkeypatch, tmp_path):
+    """El sync desde mosquitto_passwd debe reconciliar DynSec vía control-plane."""
+    dynsec_path = tmp_path / "dynamic-security.json"
+    passwd_path = tmp_path / "mosquitto_passwd"
+    dynsec_path.write_text(json.dumps(SAMPLE_DYNSEC), encoding="utf-8")
+    passwd_path.write_text("sensor-01:$7$existing\nsensor-99:$7$newhash\n", encoding="utf-8")
+
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+    monkeypatch.setattr(dynsec_svc.settings, "mosquitto_passwd_path", str(passwd_path))
+    monkeypatch.setattr(broker_reconciler, "_signal_dynsec_reload", lambda: None)
+
+    resp = await client.post("/api/v1/dynsec/sync-passwd-to-dynsec")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["count"] == 1
+    assert body["controlPlane"]["scope"] == desired_state_svc.DYNSEC_CONFIG_SCOPE
+    assert body["controlPlane"]["status"] == "applied"
+
+    stored = json.loads(dynsec_path.read_text(encoding="utf-8"))
+    assert any(client_entry["username"] == "sensor-99" for client_entry in stored["clients"])
+
+
+async def test_delete_client_marks_desired_state_as_deleted(client, monkeypatch):
+    """Delete client debe persistir un desired state borrado y observar ausencia en DynSec."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "clients": [
+            {
+                "username": "sensor-01",
+                "textname": "Sensor de prueba",
+                "groups": [],
+                "roles": [{"rolename": "sensors", "priority": 1}],
+                "disabled": False,
+            }
+        ],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    resp = await client.delete("/api/v1/dynsec/clients/sensor-01")
+    assert resp.status_code == 200
+    status_resp = await client.get("/api/v1/dynsec/clients/sensor-01/status")
+    assert status_resp.status_code == 200
+    body = status_resp.json()
+    assert body["desired"]["deleted"] is True
+    assert body["observed"] is None
 
 
 async def test_create_client_invalid_username(client, monkeypatch):
@@ -276,6 +414,39 @@ async def test_create_role_success(client, monkeypatch):
     payload = {"name": "operadores"}
     resp = await client.post("/api/v1/dynsec/roles", json=payload)
     assert resp.status_code == 201
+    status_resp = await client.get("/api/v1/dynsec/roles/operadores/status")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["desired"]["rolename"] == "operadores"
+
+
+async def test_add_and_remove_role_acl_updates_control_plane_state(client, monkeypatch):
+    """Las ACLs de rol deben persistirse como desired state antes de reconciliar."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "roles": [{"rolename": "sensors", "acls": []}],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    add_resp = await client.post(
+        "/api/v1/dynsec/roles/sensors/acls",
+        json={"topic": "plants/#", "aclType": "publishClientSend", "permission": "allow"},
+    )
+    assert add_resp.status_code == 200
+    add_status = await client.get("/api/v1/dynsec/roles/sensors/status")
+    assert add_status.status_code == 200
+    assert any(entry["topic"] == "plants/#" for entry in add_status.json()["desired"]["acls"])
+
+    remove_resp = await client.request(
+        "DELETE",
+        "/api/v1/dynsec/roles/sensors/acls",
+        params={"acl_type": "publishClientSend", "topic": "plants/#"},
+    )
+    assert remove_resp.status_code == 200
+    remove_status = await client.get("/api/v1/dynsec/roles/sensors/status")
+    assert remove_status.status_code == 200
+    assert all(entry["topic"] != "plants/#" for entry in remove_status.json()["desired"]["acls"])
 
 
 # ---------------------------------------------------------------------------
@@ -300,3 +471,55 @@ async def test_list_groups_returns_200(client, monkeypatch):
     resp = await client.get("/api/v1/dynsec/groups")
     assert resp.status_code == 200
     assert "groups" in resp.json()
+
+
+async def test_create_group_and_membership_updates_control_plane_state(client, monkeypatch):
+    """Create group y sus memberships deben pasar por desired state del grupo."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "groups": [{"groupname": "plantas", "roles": [], "clients": []}],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    create_resp = await client.post("/api/v1/dynsec/groups", json={"name": "operacion"})
+    assert create_resp.status_code == 201
+
+    add_role_resp = await client.post(
+        "/api/v1/dynsec/groups/operacion/roles",
+        json={"role_name": "sensors", "priority": 2},
+    )
+    assert add_role_resp.status_code == 200
+
+    add_client_resp = await client.post(
+        "/api/v1/dynsec/groups/operacion/clients",
+        json={"username": "sensor-01", "priority": 4},
+    )
+    assert add_client_resp.status_code == 200
+
+    status_resp = await client.get("/api/v1/dynsec/groups/operacion/status")
+    assert status_resp.status_code == 200
+    body = status_resp.json()
+    assert any(role["rolename"] == "sensors" for role in body["desired"]["roles"])
+    assert any(entry["username"] == "sensor-01" and entry.get("priority") == 4 for entry in body["desired"]["clients"])
+    assert any(entry["username"] == "sensor-01" and entry.get("priority") == 4 for entry in body["observed"]["clients"])
+
+
+async def test_delete_group_marks_desired_state_as_deleted(client, monkeypatch):
+    """Delete group debe dejar desired deleted y observed ausente."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "groups": [{"groupname": "plantas", "roles": [], "clients": []}],
+    }
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
+
+    resp = await client.delete("/api/v1/dynsec/groups/plantas")
+    assert resp.status_code == 200
+    status_resp = await client.get("/api/v1/dynsec/groups/plantas/status")
+    assert status_resp.status_code == 200
+    body = status_resp.json()
+    assert body["desired"]["deleted"] is True
+    assert body["observed"] is None
