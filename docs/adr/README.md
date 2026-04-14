@@ -10,6 +10,7 @@ Su objetivo es dejar registradas las decisiones estructurales del proyecto para 
 - [ADR-0002](./0002-compose-first-kubernetes-ready.md) - Compose-first con portabilidad a Kubernetes.
 - [ADR-0003](./0003-broker-control-plane-desired-state.md) - Control-plane del broker basado en estado deseado y reconciliacion.
 - [ADR-0004](./0004-postgresql-per-bounded-context.md) - PostgreSQL separado por bounded context para BHM.
+- [ADR-0005](./0005-compose-first-service-topology.md) - Topologia de servicios objetivo para Compose-first.
 
 ## Reglas de uso
 

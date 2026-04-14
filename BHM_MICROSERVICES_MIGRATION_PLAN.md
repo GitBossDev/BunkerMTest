@@ -35,6 +35,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] ADR-0002 - Compose-first con portabilidad a Kubernetes.
 - [x] ADR-0003 - Control-plane del broker basado en estado deseado y reconciliación.
 - [x] ADR-0004 - PostgreSQL separado por bounded context para BHM.
+- [x] ADR-0005 - Topología de servicios objetivo para Compose-first.
 
 ---
 
@@ -134,29 +135,34 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Actividades
 
-- [ ] Definir formalmente que BHM es el producto de gestión del broker.
-- [ ] Definir el bounded context de BHM: configuración del broker, DynSec/ACL, estado operativo, reporting técnico, auditoría y salud del broker.
-- [ ] Definir el bounded context del producto externo de reporting/transformación de datos.
-- [ ] Documentar contratos de integración entre BHM y el otro producto vía APIs y, si aplica más adelante, eventos.
-- [ ] Decidir qué datos pertenecen solo a BHM y cuáles se expondrán al otro producto.
-- [ ] Definir los servicios iniciales de la topología Compose-first.
-- [ ] Identificar acoplamientos actuales que deben eliminarse: shared volumes de control, escrituras cruzadas, log tailing directo, rutas hardcodeadas.
-- [ ] Definir ADRs mínimos para decisiones críticas de arquitectura.
+- [x] Definir formalmente que BHM es el producto de gestión del broker.
+- [x] Definir el bounded context de BHM: configuración del broker, DynSec/ACL, estado operativo, reporting técnico, auditoría y salud del broker.
+- [x] Definir el bounded context del producto externo de reporting/transformación de datos.
+- [x] Documentar contratos de integración entre BHM y el otro producto vía APIs y, si aplica más adelante, eventos.
+- [x] Decidir qué datos pertenecen solo a BHM y cuáles se expondrán al otro producto.
+- [x] Definir los servicios iniciales de la topología Compose-first.
+- [x] Identificar acoplamientos actuales que deben eliminarse: shared volumes de control, escrituras cruzadas, log tailing directo, rutas hardcodeadas.
+- [x] Definir ADRs mínimos para decisiones críticas de arquitectura.
+
+### Artefactos producidos
+
+- [x] `docs/BHM_TARGET_ARCHITECTURE.md` como documento de arquitectura objetivo.
+- [x] `docs/adr/0005-compose-first-service-topology.md` como decisión de topología de servicios para Compose-first.
 
 ### Verificaciones
 
-- [ ] Existe una definición clara de ownership de datos por producto.
-- [ ] Se evita el acceso directo del producto externo a la base de datos interna de BHM.
-- [ ] Los servicios candidatos a microservicio y sus responsabilidades están listados.
+- [x] Existe una definición clara de ownership de datos por producto.
+- [x] Se evita el acceso directo del producto externo a la base de datos interna de BHM.
+- [x] Los servicios candidatos a microservicio y sus responsabilidades están listados.
 
 ### Tests
 
-- [ ] Revisión técnica del diagrama objetivo.
-- [ ] Revisión de contratos API propuestos y su versionado.
+- [x] Revisión técnica del diagrama objetivo.
+- [x] Revisión de contratos API propuestos y su versionado.
 
 ### Criterio de salida
 
-- [ ] La arquitectura objetivo está documentada y sirve de referencia para las fases siguientes.
+- [x] La arquitectura objetivo está documentada y sirve de referencia para las fases siguientes.
 
 ---
 
