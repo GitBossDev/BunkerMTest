@@ -18,6 +18,20 @@ function getSecret(): Uint8Array {
 const TOKEN_EXPIRY = '24h'
 export const COOKIE_NAME = 'bunkerm_token'
 
+function shouldUseSecureCookies(): boolean {
+  const frontendUrl = process.env.FRONTEND_URL
+
+  if (frontendUrl) {
+    try {
+      return new URL(frontendUrl).protocol === 'https:'
+    } catch {
+      // Si FRONTEND_URL es invalida, se usa el fallback basado en entorno.
+    }
+  }
+
+  return process.env.NODE_ENV === 'production'
+}
+
 export async function signToken(user: User): Promise<string> {
   return new SignJWT({
     id: user.id,
@@ -51,7 +65,7 @@ export async function verifyToken(token: string): Promise<User | null> {
 export function cookieOptions(maxAge?: number) {
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: shouldUseSecureCookies(),
     sameSite: 'strict' as const,
     path: '/',
     maxAge: maxAge ?? 60 * 60 * 24, // 24h

@@ -1,6 +1,6 @@
 # version obsoleta eliminada (Compose v2 no la requiere)
 #
-# ARQUITECTURA: Broker standalone + BunkerM
+# ARQUITECTURA: Compose-first baseline de BHM
 #
 #   ┌──────────────────────────────────────────────────────────────────┐
 #   │  bunkerm-network                                                 │
@@ -11,7 +11,7 @@
 #   │  └─────────────────────────┘    └───────────────────────────┘   │
 #   └──────────────────────────────────────────────────────────────────┘
 #
-# El broker sobrevive reinicios del monolito BunkerM (ciclos de vida independientes).
+# El broker sobrevive reinicios de la plataforma de gestion (ciclos de vida independientes).
 # Volúmenes compartidos (mismas rutas en ambos contenedores):
 #   mosquitto-data  → /var/lib/mosquitto  (DynSec JSON, persistencia)
 #   mosquitto-conf  → /etc/mosquitto      (mosquitto.conf + conf.d/)
@@ -20,14 +20,14 @@
 # Para desarrollar nuevas funcionalidades:
 #   - Backend: editar bunkerm-source/backend/app/
 #   - Frontend: editar bunkerm-source/frontend/
-#   - Rebuild BunkerM:  .\deploy.ps1 -Action build
+#   - Rebuild BHM platform:  .\deploy.ps1 -Action build
 #   - Rebuild mosquitto: .\deploy.ps1 -Action build-mosquitto
 
 services:
   # ==========================================
-  # PostgreSQL - Reservado para Fase 3-4
-  # BunkerM usa SQLite internamente. Este postgres es para los
-  # nuevos microservicios propios que se desarrollen en Fase 3-4.
+  # PostgreSQL - Baseline de persistencia para la migracion de BHM
+  # La adopcion funcional sigue siendo progresiva, pero este servicio
+  # ya forma parte del baseline Compose-first de la arquitectura objetivo.
   # Para activarlo: .\deploy.ps1 -Action start -WithTools
   # ==========================================
   postgres:
@@ -47,7 +47,9 @@ services:
       - postgres-data:/var/lib/postgresql/data
       - ./config/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
-      - bunkerm-network
+      bunkerm-network:
+        aliases:
+          - bhm-postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -61,7 +63,7 @@ services:
   #
   # Ciclo de vida separado del monolito BunkerM. Los dispositivos y la
   # app de procesamiento conectan aquí directamente (puerto 1900).
-  # BunkerM también conecta a este broker para monitorización y DynSec.
+  # BHM conecta a este broker para monitorizacion y gestion transicional.
   # ==========================================
   mosquitto:
     build:
@@ -87,7 +89,9 @@ services:
       - mosquitto-conf:/etc/mosquitto       # mosquitto.conf + conf.d/
       - mosquitto-log:/var/log/mosquitto    # logs (leídos también por BunkerM/clientlogs)
     networks:
-      - bunkerm-network
+      bunkerm-network:
+        aliases:
+          - bhm-broker
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 1900 || exit 1"]
       interval: 10s
@@ -96,7 +100,8 @@ services:
       start_period: 15s
 
   # ==========================================
-  # BunkerM - Plataforma IoT Completa (monolito sin broker propio)
+  # BHM platform - Servicio transicional consolidado
+  # En esta fase representa temporalmente bhm-web + bhm-api.
   # ==========================================
   bunkerm:
     build:
@@ -151,7 +156,7 @@ services:
       - API_LOG_FILE=/var/log/api/api_activity.log
       - BROKER_LOG_PATH=/var/log/mosquitto/mosquitto.log
       - CLIENT_LOG_PATH=/var/log/api/api_activity.log
-      # Paths internos de BunkerM (compartidos con mosquitto via volúmenes)
+      # Paths internos heredados de la plataforma actual
       - DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
       - MAX_UPLOAD_SIZE=10485760
       - SSL_CERT_PATH=/app/certs/cert.pem
@@ -160,18 +165,23 @@ services:
       # UI + APIs accesibles en http://localhost:2000 (nginx interno del contenedor)
       - "2000:2000"
     volumes:
-      # Datos exclusivos de BunkerM
+      # Datos exclusivos de la plataforma BHM actual
       - bunkerm-nextjs:/nextjs/data
       - bunkerm-logs-api:/var/log/api
       - bunkerm-logs-nginx:/var/log/nginx
-      # Volúmenes compartidos con el contenedor mosquitto (mismas rutas)
+      # Volumenes compartidos heredados con mosquitto
+      # Se mantienen por compatibilidad transicional y no deben ampliarse.
       - mosquitto-data:/var/lib/mosquitto   # DynSec JSON (config-api lo lee/escribe)
       - mosquitto-conf:/etc/mosquitto       # mosquitto.conf (config-api lo edita)
       - mosquitto-log:/var/log/mosquitto    # logs del broker (clientlogs los parsea)
     networks:
-      - bunkerm-network
+      bunkerm-network:
+        aliases:
+          - bhm-platform
+          - bhm-api
+          - bhm-web
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:2000/api/v1/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:2000/api/monitor/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -179,7 +189,7 @@ services:
 
   # ==========================================
   # Nginx Reverse Proxy - DESACTIVADO
-  # BunkerM ya incluye su propio nginx interno en el puerto 2000.
+  # La plataforma actual ya incluye su propio nginx interno en el puerto 2000.
   # Se reactivara en Fase 3-4 cuando se agreguen microservicios propios.
   # ==========================================
   # nginx:

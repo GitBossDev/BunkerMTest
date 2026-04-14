@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -232,3 +232,20 @@ class ClientDailySummary(Base):
     subscribes: Mapped[int] = mapped_column(Integer, default=0)
     distinct_publish_topics: Mapped[int] = mapped_column(Integer, default=0)
     distinct_subscribe_topics: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class BrokerDesiredState(Base):
+    """Estado deseado/aplicado/observado para cortes transicionales del control-plane."""
+    __tablename__ = "broker_desired_state"
+
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    desired_payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    applied_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconcile_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    drift_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    desired_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

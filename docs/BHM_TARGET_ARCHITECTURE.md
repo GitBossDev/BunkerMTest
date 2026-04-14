@@ -194,6 +194,12 @@ Responsabilidad:
 - detectar drift
 - registrar estado aplicado y observado
 
+Estado actual del primer corte:
+
+- el primer slice real de este rol ya empezo dentro del backend unificado para `defaultACLAccess` de DynSec
+- el endpoint de gestion ya no dual-escribe directamente ese caso; primero persiste estado deseado y luego delega la reconciliacion al servicio de control-plane
+- este primer corte sigue conviviendo en el mismo proceso que `bhm-api`, pero marca la separacion semantica que luego debe extraerse a un servicio dedicado
+
 ### 4. `bhm-postgres`
 
 Responsabilidad:
@@ -289,6 +295,11 @@ Optional path:
 - El broker mantiene su persistencia propia.
 - BHM no debe depender de mounts compartidos con el broker para funcionar.
 
+Nota de transicion ya implementada:
+
+- mientras PostgreSQL aun no es el datastore operativo del control-plane, el primer slice de estado deseado usa persistencia transicional en SQLite mediante la tabla `broker_desired_state`
+- esto no cambia el objetivo final de mover el ownership durable del control-plane a PostgreSQL en la fase correspondiente
+
 ### Configuracion y secretos
 
 - Variables de entorno por servicio, limitadas a su responsabilidad.
@@ -321,6 +332,7 @@ Estas decisiones se permiten como paso intermedio mientras no contradigan la arq
 - mantener frontend y API dentro de una misma imagen o contenedor si el contrato sigue siendo API-only
 - mantener `bunkerm-mosquitto` como nombre tecnico del broker mientras no exista renombre operativo controlado
 - mantener `postgres` como nombre de servicio de Compose aunque el dominio sea BHM
+- alojar el primer slice de reconciliacion dentro del backend unificado mientras se define y extrae `bhm-reconciler` como proceso o servicio independiente
 
 Estas decisiones no se permiten como estado final:
 

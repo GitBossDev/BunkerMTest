@@ -10,11 +10,13 @@ import os
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from clientlogs.sqlite_activity_storage import client_activity_storage
 from core.auth import get_api_key
+from core.database import get_db
 from models.schemas import (
     ACLRequest,
     ACLType,
@@ -24,6 +26,7 @@ from models.schemas import (
     RoleCreate,
     VALID_ACL_TYPES,
 )
+from services import broker_desired_state_service as desired_state_svc
 from services import dynsec_service as dynsec_svc
 
 logger = logging.getLogger(__name__)
@@ -670,30 +673,56 @@ async def get_default_acl(api_key: str = Security(get_api_key)):
                             detail=f"Failed to load defaultACLAccess: {exc}")
 
 
+@router.get("/default-acl/status")
+async def get_default_acl_status(
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await desired_state_svc.get_default_acl_status(db)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load default ACL status: {exc}",
+        )
+
+
 @router.put("/default-acl")
 async def set_default_acl(acl_config: DefaultACLConfig,
-                          api_key: str = Security(get_api_key)):
+                          api_key: str = Security(get_api_key),
+                          db: AsyncSession = Depends(get_db)):
     updates = {
         "publishClientSend":    acl_config.publishClientSend,
         "publishClientReceive": acl_config.publishClientReceive,
         "subscribe":            acl_config.subscribe,
         "unsubscribe":          acl_config.unsubscribe,
     }
-    errors = []
-    for acl_type, allow in updates.items():
-        r = dynsec_svc.execute_mosquitto_command(
-            ["setDefaultACLAccess", acl_type, "allow" if allow else "deny"]
-        )
-        if not r["success"]:
-            errors.append(f"{acl_type}: {r['error_output']}")
-    if errors:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="; ".join(errors))
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            data["defaultACLAccess"] = updates
-            _write_or_raise(data, None, "set_default_acl")
+        state = await desired_state_svc.set_default_acl_desired(db, updates)
+        state = await desired_state_svc.reconcile_default_acl(db)
     except HTTPException:
         raise
-    return {"message": "Default ACL access updated successfully", "config": updates}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reconcile default ACL access: {exc}",
+        )
+
+    if state.reconcile_status == "error":
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=state.last_error or "Failed to reconcile default ACL access",
+        )
+
+    return {
+        "message": "Default ACL access updated successfully",
+        "config": desired_state_svc.normalize_default_acl(updates),
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }

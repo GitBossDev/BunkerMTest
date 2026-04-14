@@ -37,7 +37,7 @@ fi
 # password that is no longer known.  No MQTT connection needed.
 sync_admin_credentials() {
     python3 - <<'PYEOF'
-import json, hashlib, base64, os, secrets, sys
+import base64, hashlib, hmac, json, os, secrets, sys
 
 username = os.environ.get('MQTT_USERNAME', 'admin')
 password = os.environ.get('MQTT_PASSWORD', 'Usuario@1')
@@ -52,16 +52,71 @@ except Exception as e:
 
 clients = data.get('clients', [])
 
-salt_bytes = secrets.token_bytes(12)
-salt_b64   = base64.b64encode(salt_bytes).decode()
-dk         = hashlib.pbkdf2_hmac('sha512', password.encode('utf-8'), salt_bytes, 101)
-hash_b64   = base64.b64encode(dk).decode()
+def derive_hash_b64(raw_password: str, salt_bytes: bytes, iterations: int) -> str:
+    dk = hashlib.pbkdf2_hmac('sha512', raw_password.encode('utf-8'), salt_bytes, iterations)
+    return base64.b64encode(dk).decode()
 
-def patch_client(c):
-    c['username']   = username
-    c['password']   = hash_b64
-    c['salt']       = salt_b64
-    c['iterations'] = 101
+
+def generate_credentials(raw_password: str, iterations: int = 101):
+    salt_bytes = secrets.token_bytes(12)
+    salt_b64 = base64.b64encode(salt_bytes).decode()
+    hash_b64 = derive_hash_b64(raw_password, salt_bytes, iterations)
+    encoded_password = f'$7${iterations}${salt_b64}${hash_b64}'
+    return hash_b64, salt_b64, iterations, encoded_password
+
+
+def parse_iterations(value, default: int = 101) -> int:
+    try:
+        parsed = int(value)
+        return parsed if parsed > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def password_matches(client) -> bool:
+    salt_b64 = client.get('salt')
+    stored_hash = client.get('password')
+    iterations = parse_iterations(client.get('iterations'))
+
+    if salt_b64 and stored_hash:
+        try:
+            salt_bytes = base64.b64decode(salt_b64)
+            candidate_hash = derive_hash_b64(password, salt_bytes, iterations)
+            if hmac.compare_digest(candidate_hash, stored_hash):
+                return True
+        except Exception:
+            pass
+
+    encoded_password = client.get('encoded_password')
+    if encoded_password:
+        parts = encoded_password.split('$')
+        if len(parts) == 5 and parts[1] == '7':
+            try:
+                encoded_iterations = parse_iterations(parts[2])
+                encoded_salt_bytes = base64.b64decode(parts[3])
+                candidate_hash = derive_hash_b64(password, encoded_salt_bytes, encoded_iterations)
+                if hmac.compare_digest(candidate_hash, parts[4]):
+                    return True
+            except Exception:
+                pass
+
+    return False
+
+
+def ensure_admin_role(client) -> bool:
+    roles = client.setdefault('roles', [])
+    if any(role.get('rolename') == 'admin' for role in roles):
+        return False
+    roles.append({'rolename': 'admin'})
+    return True
+
+
+def apply_credentials(client):
+    hash_b64, salt_b64, iterations, encoded_password = generate_credentials(password)
+    client['password'] = hash_b64
+    client['salt'] = salt_b64
+    client['iterations'] = iterations
+    client['encoded_password'] = encoded_password
 
 legacy_names = {'bunker', 'admin'}
 target_idx   = None
@@ -74,29 +129,54 @@ for i, c in enumerate(clients):
     if c.get('username') in legacy_names and legacy_idx is None:
         legacy_idx = i
 
+changed = False
+
 if target_idx is not None:
-    patch_client(clients[target_idx])
-    print('[sync-creds] Updated password for {}'.format(username))
+    target_client = clients[target_idx]
+    if target_client.get('textname') != 'Dynsec admin user':
+        target_client['textname'] = 'Dynsec admin user'
+        changed = True
+    if ensure_admin_role(target_client):
+        changed = True
+    if not password_matches(target_client):
+        apply_credentials(target_client)
+        changed = True
+    if changed:
+        print('[sync-creds] Updated credentials for {}'.format(username))
+    else:
+        print('[sync-creds] Credentials already synchronized for {}'.format(username))
 elif legacy_idx is not None:
-    old_name = clients[legacy_idx]['username']
-    patch_client(clients[legacy_idx])
+    legacy_client = clients[legacy_idx]
+    old_name = legacy_client.get('username', '<unknown>')
+    if legacy_client.get('username') != username:
+        legacy_client['username'] = username
+        changed = True
+    if legacy_client.get('textname') != 'Dynsec admin user':
+        legacy_client['textname'] = 'Dynsec admin user'
+        changed = True
+    if ensure_admin_role(legacy_client):
+        changed = True
+    if not password_matches(legacy_client):
+        apply_credentials(legacy_client)
+        changed = True
     print('[sync-creds] Migrated {} -> {}'.format(old_name, username))
 else:
     new_client = {
         'username':   username,
         'textname':   'Dynsec admin user',
         'roles':      [{'rolename': 'admin'}],
-        'password':   hash_b64,
-        'salt':       salt_b64,
-        'iterations': 101,
     }
+    apply_credentials(new_client)
     clients.append(new_client)
+    changed = True
     print('[sync-creds] Created new admin client {}'.format(username))
 
-data['clients'] = clients
-with open(path, 'w') as f:
-    json.dump(data, f, indent='\t')
-print('[sync-creds] Credentials synced for {}'.format(username))
+if changed:
+    data['clients'] = clients
+    with open(path, 'w') as f:
+        json.dump(data, f, indent='\t')
+        f.write('\n')
+    print('[sync-creds] Credentials persisted for {}'.format(username))
 PYEOF
 }
 sync_admin_credentials || echo "[sync-creds] WARNING: credential sync failed — mosquitto may reject connections"

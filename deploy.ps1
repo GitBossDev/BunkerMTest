@@ -614,25 +614,47 @@ function Invoke-Smoke {
     Write-Host -NoNewline "  [4/5] Backend monitor health ..................... "
     $healthOk = $false
     $healthNote = ""
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/health)" -ForegroundColor Green
-        $passed++
-        $healthOk = $true
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        $healthNote = "HTTP $code en /api/monitor/health"
+    foreach ($attempt in 1..3) {
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+            Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/health)" -ForegroundColor Green
+            $passed++
+            $healthOk = $true
+            break
+        } catch {
+            $code = $_.Exception.Response.StatusCode.value__
+            if ($code) {
+                $healthNote = "HTTP $code en /api/monitor/health"
+            } elseif ($_.Exception.Message) {
+                $healthNote = "$($_.Exception.Message) en /api/monitor/health"
+            }
+
+            if ($attempt -lt 3) {
+                Start-Sleep -Seconds 2
+            }
+        }
     }
     if (-not $healthOk) {
         if ($apiKey) {
-            try {
-                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/stats/health" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
-                Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/stats/health con API key)" -ForegroundColor Green
-                $passed++
-                $healthOk = $true
-            } catch {
-                $code = $_.Exception.Response.StatusCode.value__
-                $healthNote = "$healthNote; HTTP $code en /api/monitor/stats/health"
+            foreach ($attempt in 1..3) {
+                try {
+                    $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/stats/health" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
+                    Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/stats/health con API key)" -ForegroundColor Green
+                    $passed++
+                    $healthOk = $true
+                    break
+                } catch {
+                    $code = $_.Exception.Response.StatusCode.value__
+                    if ($code) {
+                        $healthNote = "$healthNote; HTTP $code en /api/monitor/stats/health"
+                    } elseif ($_.Exception.Message) {
+                        $healthNote = "$healthNote; $($_.Exception.Message) en /api/monitor/stats/health"
+                    }
+
+                    if ($attempt -lt 3) {
+                        Start-Sleep -Seconds 2
+                    }
+                }
             }
         }
     }
@@ -644,13 +666,33 @@ function Invoke-Smoke {
     # ── 5. Backend autenticado: /api/dynsec/clients ──────────────────────────
     if ($apiKey) {
         Write-Host -NoNewline "  [5/5] Backend /api/dynsec/clients (API key) ..... "
-        try {
-            $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/clients" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
-            Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
-            $passed++
-        } catch {
-            $code = $_.Exception.Response.StatusCode.value__
-            Write-Host "FAIL HTTP $code" -ForegroundColor Red
+        $dynsecOk = $false
+        $dynsecError = ""
+        foreach ($attempt in 1..5) {
+            try {
+                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/clients?page=1&limit=1" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
+                Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
+                $passed++
+                $dynsecOk = $true
+                break
+            } catch {
+                $code = $_.Exception.Response.StatusCode.value__
+                if ($code) {
+                    $dynsecError = "HTTP $code"
+                } elseif ($_.Exception.Message) {
+                    $dynsecError = $_.Exception.Message
+                } else {
+                    $dynsecError = "error no especificado"
+                }
+
+                if ($attempt -lt 5) {
+                    Start-Sleep -Seconds 3
+                }
+            }
+        }
+
+        if (-not $dynsecOk) {
+            Write-Host "FAIL $dynsecError" -ForegroundColor Red
             $failed++
         }
     } else {

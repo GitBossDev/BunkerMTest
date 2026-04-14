@@ -172,28 +172,58 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Actividades
 
-- [ ] Diseñar la topología inicial de servicios desacoplados para Docker/Podman Compose.
-- [ ] Separar claramente frontend, backend de gestión, broker y persistencia.
-- [ ] Identificar si se necesita un servicio adicional de reconciliación desde esta fase o si entra en la siguiente.
-- [ ] Revisar variables de entorno y configuración para que cada servicio tenga responsabilidades claras.
+- [x] Diseñar la topología inicial de servicios desacoplados para Docker/Podman Compose.
+- [x] Separar claramente frontend, backend de gestión, broker y persistencia.
+- [x] Identificar si se necesita un servicio adicional de reconciliación desde esta fase o si entra en la siguiente.
+- [x] Revisar variables de entorno y configuración para que cada servicio tenga responsabilidades claras.
 - [ ] Eliminar dependencias no necesarias entre contenedores.
-- [ ] Revisar healthchecks, readiness y orden de arranque.
-- [ ] Garantizar que la aplicación puede levantarse completa con un flujo reproducible de `build`, `start`, `stop` y `restart`.
-- [ ] Asegurar que la topología en Compose no introduzca decisiones incompatibles con una futura migración a Kubernetes.
+- [x] Revisar healthchecks, readiness y orden de arranque.
+- [x] Garantizar que la aplicación puede levantarse completa con un flujo reproducible de `build`, `start`, `stop` y `restart`.
+- [x] Asegurar que la topología en Compose no introduzca decisiones incompatibles con una futura migración a Kubernetes.
+
+### Artefactos producidos
+
+- [x] `docs/BHM_COMPOSE_FIRST_BASELINE.md` como baseline operativo de Fase 2.
+- [x] `docker-compose.dev.yml` alineado con nombres lógicos de servicio y comentarios de transición Compose-first.
 
 ### Verificaciones
 
-- [ ] `docker compose` o `podman compose` levantan todos los servicios requeridos.
-- [ ] Cada contenedor expone solo los puertos realmente necesarios.
-- [ ] El frontend funciona consumiendo exclusivamente la API.
+- [x] `docker compose` o `podman compose` levantan todos los servicios requeridos.
+- [x] Cada contenedor expone solo los puertos realmente necesarios.
+- [x] El frontend funciona consumiendo exclusivamente la API.
 - [ ] El backend de gestión no depende de escribir directamente en archivos del broker para arrancar.
 
 ### Tests
 
-- [ ] Smoke test de arranque completo del stack.
-- [ ] Smoke test de login y navegación principal.
-- [ ] Smoke test de endpoints críticos de gestión y monitoring.
-- [ ] Test de reinicio controlado de servicios sin corrupción de estado.
+- [x] Validación estática de Compose con `podman compose --env-file .env.dev -f docker-compose.dev.yml config`.
+- [x] Smoke test de arranque completo del stack.
+- [x] Smoke test de login y navegación principal.
+- [x] Smoke test de endpoints críticos de gestión y monitoring.
+- [x] Test de reinicio controlado de servicios sin corrupción de estado.
+
+### Evidencia reciente
+
+- [x] `podman compose --env-file .env.dev -f docker-compose.dev.yml up -d` recreó el stack sin errores.
+- [x] `bunkerm-mosquitto` quedó `healthy` y `bunkerm-platform` pasó a `healthy` tras corregir el healthcheck hacia `/api/monitor/health`.
+- [x] `GET /api/monitor/health` respondió `200 OK` en el runtime expuesto por nginx.
+- [x] `GET /api/auth/me` mantuvo `401 Unauthorized`, confirmando que el ajuste del healthcheck no abrió rutas protegidas.
+- [x] El alias lógico `bhm-broker` resolvió correctamente dentro del contenedor `bunkerm-platform`.
+- [x] `deploy.ps1 -Action stop` y `deploy.ps1 -Action start` completaron correctamente y dejaron el stack operativo otra vez.
+- [x] `deploy.ps1 -Action restart` reconstruyó el runtime y dejó `bunkerm-mosquitto` y `bunkerm-platform` en estado `healthy`.
+- [x] `deploy.ps1 -Action build` construyó correctamente `bunkermtest-mosquitto:latest` y `bunkermtest-bunkerm:latest`.
+- [x] `deploy.ps1 -Action smoke` terminó en `5/5 OK` después de endurecer el check autenticado de DynSec frente a timing de arranque.
+- [x] `GET /login` respondió `200 OK` y devolvió la pantalla de autenticación de Next.js.
+- [x] `POST /api/auth/login` con las credenciales iniciales dejó una cookie de sesión reutilizable en `http://localhost:2000` tras ajustar la política `Secure` al esquema real de `FRONTEND_URL`.
+- [x] `GET /api/auth/me` respondió `200 OK` con sesión autenticada y `GET /dashboard` devolvió contenido autenticado del dashboard.
+- [x] El runtime activo expone `2000/tcp` para la plataforma y `1900/tcp`, `9001/tcp` para el broker.
+- [x] Dos reinicios controlados mantuvieron estable el hash de `dynamic-security.json`, confirmando que el entrypoint del broker dejó de reescribir el archivo cuando no hay cambios efectivos de credenciales.
+- [x] El broker registró `Credentials already synchronized for admin`, confirmando sincronización idempotente en arranque.
+
+### Hallazgos abiertos
+
+- [ ] El backend actual sigue acoplado a `dynamic-security.json`, `mosquitto.conf` y logs compartidos; la verificación de arranque sin escritura/lectura directa del filesystem del broker sigue pendiente y se resolverá en Fase 3.
+- [x] El smoke test de `deploy.ps1` fue endurecido con reintentos en la llamada autenticada a DynSec porque el hot-patch posterior al arranque puede introducir una ventana corta de falso negativo.
+- [x] La cookie de autenticación del frontend ya no fuerza `Secure` en el baseline HTTP local; se usa cookie segura automáticamente cuando `FRONTEND_URL` es `https`.
 
 ### Criterio de salida
 
@@ -215,12 +245,21 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Rediseñar los endpoints de gestión para que soliciten cambios en lugar de escribir archivos directamente.
 - [ ] Definir estrategia de aplicación de cambios en Docker/Podman Compose.
 - [ ] Definir equivalencia conceptual para Kubernetes, aunque la implementación llegue más adelante.
+- [x] Evaluar si un laboratorio local de Kubernetes agrega valor en Fase 3 o si debe mantenerse fuera del camino crítico.
 - [ ] Replantear la gestión de bridges y certificados dentro del mismo modelo de reconciliación.
 - [ ] Definir rollback para cambios fallidos al broker.
 
+### Primer corte implementado
+
+- [x] Se introdujo la tabla transicional `broker_desired_state` para persistir estado deseado/aplicado/observado del control-plane antes de la migración a PostgreSQL.
+- [x] `PUT /api/v1/dynsec/default-acl` dejó de dual-escribir desde el router y ahora registra estado deseado antes de reconciliar.
+- [x] Se implementó un primer reconciliador de aplicación para `defaultACLAccess`, encapsulado en servicio y con detección básica de drift.
+- [x] Se añadió `GET /api/v1/dynsec/default-acl/status` para auditar `desired`, `applied`, `observed`, `status`, `version` y `lastError`.
+- [x] El primer corte usa SQLite transicional como soporte de estado deseado; PostgreSQL sigue siendo el destino definitivo de Fase 4.
+
 ### Consideraciones Docker/Podman ahora
 
-- [ ] El reconciliador debe ser compatible con un entorno Compose-first.
+- [x] El primer reconciliador de `defaultACLAccess` es compatible con el runtime Compose-first actual.
 - [ ] La solución no debe depender de que el backend principal comparta ownership del filesystem del broker.
 - [ ] Si existe un volumen persistente del broker, su manipulación efectiva debe quedar encapsulada en el componente que aplica cambios.
 
@@ -229,20 +268,33 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] El modelo de estado deseado debe poder mapearse a ConfigMaps, Secrets, CRDs o un operador más adelante.
 - [ ] La semántica de reconciliación no debe depender de comandos ad hoc imposibles de portar a Kubernetes.
 - [ ] La aplicación de certificados y bridges debe poder evolucionar a secretos gestionados por la plataforma.
+- [x] Se documentó que un clúster local de Kubernetes puede usarse más adelante como carril opcional de validación, pero no como baseline obligatorio de Fase 3.
+
+### Decisión aplicada en esta fase
+
+- [x] Se evaluó el uso de un clúster local de Kubernetes sobre Docker/Podman.
+- [x] Se decidió no incorporarlo ahora como entorno principal porque no resuelve la deuda del control-plane y añade complejidad operativa en Windows + Podman remoto.
+- [x] Si se habilita una validación temprana de Kubernetes antes de Fase 8, la opción preferida será `kind` como laboratorio efímero y no `minikube` con driver Podman.
 
 ### Verificaciones
 
-- [ ] Un cambio de configuración puede solicitarse desde la API sin escritura directa del backend sobre rutas internas del broker.
-- [ ] El estado aplicado y el estado observado pueden auditarse.
+- [x] Un cambio de configuración puede solicitarse desde la API sin escritura directa del backend sobre rutas internas del broker para el caso de `defaultACLAccess`.
+- [x] El estado aplicado y el estado observado pueden auditarse para `defaultACLAccess` mediante `GET /api/v1/dynsec/default-acl/status`.
 - [ ] Existe trazabilidad de cambios y rollback básico.
 
 ### Tests
 
-- [ ] Test unitario del modelo de estado deseado.
-- [ ] Test unitario del reconciliador.
+- [x] Test unitario del modelo de estado deseado para `defaultACLAccess`.
+- [x] Test unitario del reconciliador de `defaultACLAccess`.
 - [ ] Test de integración de aplicación de cambios al broker.
 - [ ] Test de rollback cuando la reconciliación falla.
-- [ ] Test de drift detection.
+- [x] Test de drift detection para `defaultACLAccess`.
+
+### Evidencia reciente
+
+- [x] Se añadió `services/broker_desired_state_service.py` como primer servicio transicional de control-plane.
+- [x] Se añadió el modelo ORM `BrokerDesiredState` en el backend unificado.
+- [x] La suite enfocada `pytest tests/test_dynsec.py -q` terminó en `18 passed`.
 
 ### Criterio de salida
 

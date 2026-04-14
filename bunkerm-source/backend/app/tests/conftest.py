@@ -86,7 +86,7 @@ async def client():
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
-        base_url="http://test",
+        base_url="http://localhost",
         headers={"X-API-Key": TEST_API_KEY},
     ) as ac:
         yield ac
@@ -113,7 +113,7 @@ async def raw_client():
 
     async with AsyncClient(
         transport=ASGITransport(app=app),
-        base_url="http://test",
+        base_url="http://localhost",
     ) as ac:
         yield ac
 

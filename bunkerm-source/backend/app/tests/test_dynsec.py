@@ -7,6 +7,7 @@ para que los tests no dependan del broker en ejecucion.
 """
 import pytest
 import services.dynsec_service as dynsec_svc
+from services import broker_desired_state_service as desired_state_svc
 from config.dynsec_config import merge_dynsec_configs
 
 # Estructura minima valida de dynamic-security.json para los mocks
@@ -103,6 +104,57 @@ async def test_get_default_acl_reads_json_directly(client, monkeypatch):
     assert resp.json() == SAMPLE_DYNSEC["defaultACLAccess"]
 
 
+async def test_get_default_acl_status_returns_unmanaged_without_desired_state(client, monkeypatch):
+    """Sin estado deseado persistido, el control-plane expone el estado observado actual."""
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
+    resp = await client.get("/api/v1/dynsec/default-acl/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "unmanaged"
+    assert body["observed"] == SAMPLE_DYNSEC["defaultACLAccess"]
+
+
+async def test_set_default_acl_uses_desired_state_and_returns_control_plane_metadata(client, monkeypatch):
+    """El PUT persiste desired state y delega la reconciliación al servicio."""
+    dynsec_doc = {
+        **SAMPLE_DYNSEC,
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+    }
+
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+
+    def _write_dynsec(data):
+        dynsec_doc["defaultACLAccess"] = data["defaultACLAccess"]
+
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", _write_dynsec)
+
+    payload = {
+        "publishClientSend": False,
+        "publishClientReceive": False,
+        "subscribe": True,
+        "unsubscribe": False,
+    }
+    resp = await client.put("/api/v1/dynsec/default-acl", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["config"] == payload
+    assert body["controlPlane"]["scope"] == desired_state_svc.DEFAULT_ACL_SCOPE
+    assert body["controlPlane"]["status"] == "applied"
+
+    status_resp = await client.get("/api/v1/dynsec/default-acl/status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body["desired"] == payload
+    assert status_body["observed"] == payload
+    assert status_body["driftDetected"] is False
+
+
 def test_merge_dynsec_configs_preserves_imported_default_acl(monkeypatch):
     """La importación debe conservar defaultACLAccess del JSON subido."""
     imported = {
@@ -180,6 +232,9 @@ async def test_get_client_not_found(client, monkeypatch):
 async def test_create_client_success(client, monkeypatch):
     """Crear cliente con datos validos: retorna 201."""
     monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    dynsec_doc = {**SAMPLE_DYNSEC, "clients": list(SAMPLE_DYNSEC["clients"])}
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
     payload = {"username": "nuevo-sensor", "password": "SecurePass123"}
     resp = await client.post("/api/v1/dynsec/clients", json=payload)
     assert resp.status_code == 201
@@ -215,6 +270,9 @@ async def test_create_client_requires_auth(raw_client):
 async def test_create_role_success(client, monkeypatch):
     """Crear rol con nombre valido: retorna 201."""
     monkeypatch.setattr(dynsec_svc, "execute_mosquitto_command", lambda *a, **kw: CMD_OK)
+    dynsec_doc = {**SAMPLE_DYNSEC, "roles": list(SAMPLE_DYNSEC["roles"])}
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec_doc)
+    monkeypatch.setattr(dynsec_svc, "write_dynsec", lambda data: dynsec_doc.update(data))
     payload = {"name": "operadores"}
     resp = await client.post("/api/v1/dynsec/roles", json=payload)
     assert resp.status_code == 201

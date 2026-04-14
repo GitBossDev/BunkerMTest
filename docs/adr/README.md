@@ -11,6 +11,7 @@ Su objetivo es dejar registradas las decisiones estructurales del proyecto para 
 - [ADR-0003](./0003-broker-control-plane-desired-state.md) - Control-plane del broker basado en estado deseado y reconciliacion.
 - [ADR-0004](./0004-postgresql-per-bounded-context.md) - PostgreSQL separado por bounded context para BHM.
 - [ADR-0005](./0005-compose-first-service-topology.md) - Topologia de servicios objetivo para Compose-first.
+- [ADR-0006](./0006-local-kubernetes-lab-strategy.md) - Laboratorio local de Kubernetes como validacion opcional.
 
 ## Reglas de uso
 

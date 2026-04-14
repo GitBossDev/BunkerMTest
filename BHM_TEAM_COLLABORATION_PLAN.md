@@ -200,9 +200,21 @@ Regla:
 
 - [ ] Mantener actualizado `BHM_MICROSERVICES_MIGRATION_PLAN.md`.
 - [ ] Mantener actualizada la arquitectura objetivo en `docs/BHM_TARGET_ARCHITECTURE.md`.
-- [ ] Definir la topología inicial Compose-first que se implementará primero.
+- [x] Definir la topología inicial Compose-first que se implementará primero.
 - [ ] Diseñar el recorte entre `bhm-api` y `bhm-reconciler`.
-- [ ] Revisar `docker-compose.dev.yml` según la arquitectura objetivo.
+- [x] Evaluar si conviene introducir un laboratorio local de Kubernetes durante Fase 3.
+- [x] Revisar `docker-compose.dev.yml` según la arquitectura objetivo.
+
+### Baseline Compose-first
+
+- [x] Crear `docs/BHM_COMPOSE_FIRST_BASELINE.md`.
+- [x] Alinear aliases lógicos de servicio en `docker-compose.dev.yml`.
+- [x] Validar estáticamente el compose con `podman compose ... config`.
+- [x] Ejecutar validación runtime del baseline Compose-first.
+- [x] Validar flujo operativo `stop/start/restart` con `deploy.ps1`.
+- [x] Validar el paso `build` del ciclo de vida con `deploy.ps1`.
+- [x] Validar login y navegación autenticada principal sobre el baseline local.
+- [x] Resolver la mutación de `dynamic-security.json` en cada reinicio antes de cerrar el test de reinicio sin corrupción de estado.
 
 ### Persistencia y base de datos
 
@@ -376,6 +388,7 @@ Usar esta sección como tablero rápido de coordinación.
 - [ ] Prioridad de features de B que necesitan soporte temprano de A.
 - [ ] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
 - [ ] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend.
+- [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; si se usa más adelante, será solo como validación opcional.
 
 ---
 
