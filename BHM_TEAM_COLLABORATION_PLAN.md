@@ -288,22 +288,53 @@ Si cualquiera de esas respuestas implica dependencia fuerte, la tarea debe coord
 
 ---
 
-## Convenciones para ramas, commits y PRs
+## Convenciones de trabajo, commits y PRs
 
 Recomendado para ambos:
 
-- Usar ramas separadas por responsabilidad.
-- Nombrar ramas con prefijo claro, por ejemplo:
-  - `a/compose-postgres-migration`
-  - `a/api-contracts-reports`
-  - `b/alerts-email-ui`
-  - `b/client-history-refinement`
-- Mantener PRs pequeñas y orientadas a una capacidad concreta.
-- Indicar en el PR:
+- Trabajar directamente sobre `main` manteniendo cambios pequeños y frecuentes.
+- Evitar acumular grandes bloques de cambios sin sincronización.
+- Mantener commits pequeños y orientados a una capacidad concreta.
+- Indicar en cada commit o PR interno de seguimiento:
   - area tocada
   - dependencia generada
   - si rompe o cambia contratos
   - qué debe saber el otro compañero
+
+---
+
+## Estrategia para mantener este archivo vivo
+
+La estrategia acordada es trabajar directamente sobre `main`.
+
+Esto se hace asi porque puede haber cambios implementados por uno de los compañeros que el otro necesite tener presentes inmediatamente, y se prioriza que este archivo y el estado general del proyecto reflejen siempre la situacion mas reciente.
+
+### Flujo acordado
+
+- Ambos compañeros trabajan sobre `main`.
+- Los cambios deben ser pequeños, acotados y frecuentes.
+- Si un cambio afecta coordinación, dependencias, bloqueos o desbloqueos, este archivo se actualiza en el mismo bloque de trabajo o inmediatamente después.
+- Antes de empezar una tarea dependiente, revisar la última versión de este archivo.
+- Si ambos necesitan tocar el mismo archivo técnico, deben coordinarse antes de editarlo.
+
+### Ventajas de esta estrategia
+
+- el archivo sigue realmente vivo en el estado más reciente del repositorio
+- ambos ven inmediatamente cambios estructurales o funcionales del otro
+- se evita olvidar sincronizaciones entre ramas
+
+### Riesgos a controlar
+
+- mayor riesgo de pisarse en archivos de código si no hay comunicación
+- mayor necesidad de hacer commits pequeños y frecuentes
+- mayor necesidad de respetar ownership y avisar antes de tocar áreas sensibles
+
+### Regla práctica para esta modalidad
+
+- [ ] No acumular cambios grandes sin compartirlos.
+- [ ] Avisar antes de editar archivos con alta probabilidad de conflicto.
+- [ ] Actualizar este archivo al cambiar una dependencia relevante.
+- [ ] Priorizar commits pequeños y trazables.
 
 ---
 
@@ -316,6 +347,7 @@ Recomendado para ambos:
 - Debes evitar cambios funcionales que invadan el ownership del compañero B salvo que sean necesarios para habilitar una dependencia.
 - El código va en inglés, comentarios y documentación técnica en español, y sin emojis en código.
 - Antes de cambiar contratos o persistencia, revisa este archivo y actualiza dependencias si desbloqueas trabajo para B.
+- Estás trabajando sobre `main`, por lo que debes extremar cuidado para no mezclar cambios innecesarios ni tocar áreas del compañero B sin coordinación.
 
 ### Contexto mínimo para el agente del Compañero B
 
@@ -324,6 +356,7 @@ Recomendado para ambos:
 - Debes evitar refactors estructurales de arquitectura, persistencia o despliegue sin coordinación con A.
 - Si una feature depende de PostgreSQL, APIs nuevas o cambios de arquitectura, debes dejar constancia aquí y evitar hacer trabajo definitivo duplicado.
 - El código va en inglés, comentarios y documentación técnica en español, y sin emojis en código.
+- Estás trabajando sobre `main`, por lo que debes extremar cuidado para no mezclar cambios innecesarios ni tocar áreas del compañero A sin coordinación.
 
 ---
 
