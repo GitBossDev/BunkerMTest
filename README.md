@@ -1,4 +1,4 @@
-﻿# BPM — Broker Panel Manager
+﻿# BHM — Broker Health Manager
 
 **Monitoreo y gestión de broker MQTT para entornos IoT industriales**
 
@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB.svg)](https://www.python.org/)
 [![C#](https://img.shields.io/badge/C%23-10.0+-239120.svg)](https://docs.microsoft.com/en-us/dotnet/csharp/)
 
-BPM (Broker Panel Manager) es una plataforma web de gestión y monitoreo de brokers MQTT diseñada para equipos que trabajan con dispositivos IoT industriales. Al igual que los BPM en medicina miden el ritmo cardíaco de un paciente, BPM mide el pulso de tu infraestructura de mensajería: conexiones activas, latencia, caudal de mensajes, fallos de autenticación y capacidad del broker, todo en tiempo real desde un único panel.
+BHM (Broker Health Manager) es una plataforma web de gestión y monitoreo de brokers MQTT diseñada para equipos que trabajan con dispositivos IoT industriales. La plataforma mide el pulso de tu infraestructura de mensajería: conexiones activas, latencia, caudal de mensajes, fallos de autenticación y capacidad del broker, todo en tiempo real desde un único panel.
 
 El objetivo es proporcionar una herramienta de operaciones completa que cubra el ciclo entero: desde la configuración del broker y la gestión de credenciales MQTT hasta la detección de anomalías, pruebas de estrés con simuladores industriales y alertas tempranas ante comportamientos anómalos.
 
@@ -88,7 +88,7 @@ cd BunkerMTest
 # 2. Setup: genera .env.dev con credenciales y parchea el seed de Mosquitto
 .\deploy.ps1 -Action setup
 
-# 3. Build: construye las imágenes de BunkerM y Mosquitto
+# 3. Build: construye las imágenes de BHM y Mosquitto
 .\deploy.ps1 -Action build
 
 # 4. Start
@@ -116,7 +116,7 @@ Acceder en **http://localhost:2000**
 
 ```powershell
 .\deploy.ps1 -Action setup             # Configuración inicial
-.\deploy.ps1 -Action build             # Construir imágenes (BunkerM + Mosquitto)
+.\deploy.ps1 -Action build             # Construir imágenes (BHM + Mosquitto)
 .\deploy.ps1 -Action start             # Iniciar servicios
 .\deploy.ps1 -Action stop              # Detener
 .\deploy.ps1 -Action restart           # Reiniciar
@@ -137,6 +137,8 @@ Acceder en **http://localhost:2000**
 
 | Documento | Descripción |
 |-----------|-------------|
+| [BHM_MICROSERVICES_MIGRATION_PLAN.md](./BHM_MICROSERVICES_MIGRATION_PLAN.md) | Documento canónico para la migración actual a microservicios |
+| [docs/adr/README.md](./docs/adr/README.md) | Registro de decisiones de arquitectura de BHM |
 | [ROADMAP.md](./ROADMAP.md) | Plan, fases y especificaciones |
 | [QUICKSTART.md](./QUICKSTART.md) | Inicio rápido detallado |
 | [ACL_GUIDE.md](./ACL_GUIDE.md) | Guía de ACL MQTT |

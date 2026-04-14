@@ -1,6 +1,6 @@
-# ROADMAP: Plataforma de Gestión MQTT - BunkerM Extended
+# ROADMAP: Plataforma de Gestión MQTT - BHM
 
-**Proyecto**: Fork de BunkerM con funcionalidades empresariales propias  
+**Proyecto**: BHM (Broker Health Manager), basado en un fork de BunkerM con funcionalidades empresariales propias  
 **Fecha de creación**: 25 de marzo de 2026  
 **Licencia**: Apache 2.0  
 **Objetivo**: Plataforma de gestión avanzada de broker MQTT con simulación industrial realista
@@ -58,7 +58,7 @@ Estas convenciones aseguran consistencia, mantenibilidad y facilitan la colabora
 
 ## Resumen Ejecutivo
 
-Desarrollo de una plataforma de gestión de broker MQTT basada en BunkerM (https://github.com/bunkeriot/BunkerM), extendida con 6 funcionalidades propias de valor empresarial y una simulación completa de planta de tratamiento de aguas para pruebas realistas.
+Desarrollo de BHM, una plataforma de gestión de broker MQTT basada en un fork de BunkerM (https://github.com/bunkeriot/BunkerM), extendida con funcionalidades propias de valor empresarial y una simulación completa de planta de tratamiento de aguas para pruebas realistas.
 
 ### Stack Tecnológico
 
@@ -129,7 +129,7 @@ Desarrollo de una plataforma de gestión de broker MQTT basada en BunkerM (https
 
 ## Estado Actual del Proyecto
 
-- [x] Investigación y análisis de BunkerM
+- [x] Investigación y análisis del proyecto base BunkerM
 - [x] Diseño de arquitectura extendida
 - [x] Selección de industria para simulación (Planta de Tratamiento de Aguas)
 - [x] **FASE 1**: Preparación del Entorno Base [COMPLETO]
@@ -200,7 +200,7 @@ BunkerMTest/
 MQTT_USERNAME=bunker
 MQTT_PASSWORD=<GENERADO_POR_SETUP>
 
-# BunkerM Backend
+# BHM Backend
 API_KEY=<GENERAR_UUID_ALEATORIO>
 JWT_SECRET=<GENERAR_SECRET_ALEATORIO>
 AUTH_SECRET=<GENERAR_SECRET_ALEATORIO>
@@ -259,7 +259,7 @@ PGADMIN_DEFAULT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 #### 1.6 Criterios de Éxito Fase 1
 
 - [x] `podman ps` muestra bunkerm-platform en estado "Up"
-- [x] BunkerM UI accesible en http://localhost:2000
+- [x] BHM UI accesible en http://localhost:2000
 - [x] Mosquitto funcionando en puerto 1901 (externo)
 - [x] Nginx proxy en puerto 2000
 - [x] Script deploy.ps1 con acciones: setup, build, start, stop, restart, status, logs, clean, patch-backend, patch-frontend

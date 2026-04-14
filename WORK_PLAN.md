@@ -1,4 +1,4 @@
-# BunkerM — Plan de Trabajo Post-Reestructuración
+# BHM — Plan de Trabajo Post-Reestructuración
 
 > **Contexto**: Las Fases 1–4 de `bunkerm-source/` han sido completadas (ver `bunkerm-source/RESTRUCTURE_PLAN.md`).
 > Este documento cubre las dos tareas pendientes: verificar que la integración funciona de extremo a extremo,
@@ -58,7 +58,7 @@
 | # | Estado | Comando / Acción |
 |---|--------|-----------------|
 | V3.1 | ✅ | `.\deploy.ps1 -Action start` — `bunkerm-mosquitto` (healthy) + `bunkerm-platform` (healthy) arrancados |
-| V3.2 | ✅ | `podman ps` — ambos Up y healthy. Puertos externos: `:2000` (BunkerM), `:1900` (MQTT). |
+| V3.2 | ✅ | `podman ps` — ambos Up y healthy. Puertos externos: `:2000` (BHM), `:1900` (MQTT). |
 | V3.3 | ✅ | `GET http://localhost:2000` → 200 (Next.js sirviendo) |
 | V3.4 | ✅ | `GET http://localhost:2000/api/auth/me` → 401 (sin autenticación, correcto) |
 | V3.5 | ✅ | `GET http://localhost:2000/api/dynsec/clients` con `X-API-Key` → 200 |

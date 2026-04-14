@@ -1,4 +1,4 @@
-# BunkerM — Plan de Calidad para Desarrollo Limpio
+# BHM — Plan de Calidad para Desarrollo Limpio
 
 > **Contexto**: Tras completar las Fases 1-4 de reestructuracion y la limpieza del workspace (Partes V y C
 > de WORK_PLAN.md), este documento define las capas de proteccion necesarias para que los proximos cambios

@@ -23,7 +23,7 @@ Unblock-File deploy.ps1
 ### Paso 2: Construir imagenes
 
 ```powershell
-# Construir imagen principal de BunkerM (primera vez o cuando haya cambios de codigo)
+# Construir imagen principal de BHM (primera vez o cuando haya cambios de codigo)
 .\deploy.ps1 -Action build
 
 # Reconstruir imagen de Mosquitto (solo necesario cuando cambie Dockerfile.mosquitto)
@@ -33,7 +33,7 @@ Unblock-File deploy.ps1
 ### Paso 3: Iniciar servicios
 
 ```powershell
-# Iniciar plataforma BunkerM (sin PostgreSQL — no es necesario)
+# Iniciar plataforma BHM (sin PostgreSQL — no es necesario)
 .\deploy.ps1 -Action start
 
 # Opcional: iniciar con PostgreSQL + pgAdmin (Fase 3-4)

@@ -1,9 +1,11 @@
-# BunkerM — Architecture Reference
+# BHM — Architecture Reference
 
 > **Audience**: Developers contributing to this repository.  
 > **Purpose**: Document the port topology, authentication flow, immovable design decisions,
 > and shared volume layout that resulted from the Phase 1-4 consolidation. Reading this
 > document prevents accidentally reverting those decisions.
+
+> **Naming note**: The active product name is BHM (Broker Health Manager). Runtime names such as `bunkerm-platform`, `bunkerm-mosquitto`, `bunkerm-*` volumes and `bunkerm-source/` remain in place for now as technical identifiers until a dedicated rename phase is executed.
 
 ---
 
@@ -122,7 +124,7 @@ port conflicts, and inconsistent configuration across multiple processes.
 
 ### 2. Broker is a separate container (bunkerm-mosquitto)
 
-Mosquitto runs in its own container with its own lifecycle. BunkerM platform connects to
+Mosquitto runs in its own container with its own lifecycle. BHM platform connects to
 the broker via the internal Docker/Podman network (`MQTT_BROKER=mosquitto`). The platform
 container never runs a Mosquitto process internally.
 
@@ -132,7 +134,7 @@ while the platform is being updated.
 ### 3. Shared volumes between containers
 
 The DynSec JSON file and `mosquitto.conf` are mounted in **both** containers at the same
-internal paths. Any write by BunkerM's config API is immediately visible to Mosquitto.
+internal paths. Any write by BHM's config API is immediately visible to Mosquitto.
 
 ### 4. No direct database access from the frontend
 
