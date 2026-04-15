@@ -646,14 +646,74 @@ nonce_manager = NonceManager()
 # Referencia al cliente MQTT activo (inicializada en el lifespan de main.py)
 mqtt_client_instance: Any = None
 
+_resource_source_lock = threading.Lock()
+_resource_source_status: Dict[str, object] = {
+    "enabled": settings.broker_resource_stats_file_enabled,
+    "path": settings.broker_resource_stats_path,
+    "available": False,
+    "mode": "uninitialized",
+    "lastError": None,
+    "lastReadAt": None,
+}
+
+
+def _update_resource_source_status(**changes: object) -> None:
+    with _resource_source_lock:
+        _resource_source_status.update(changes)
+
+
+def get_broker_resource_source_status() -> Dict[str, object]:
+    with _resource_source_lock:
+        return dict(_resource_source_status)
+
 
 def read_broker_resource_stats() -> Dict[str, Any]:
     """Lee métricas del contenedor Mosquitto desde un archivo compartido."""
+    stats_path = settings.broker_resource_stats_path
+    _update_resource_source_status(
+        enabled=settings.broker_resource_stats_file_enabled,
+        path=stats_path,
+    )
+
+    if not settings.broker_resource_stats_file_enabled:
+        _update_resource_source_status(
+            available=False,
+            mode="disabled",
+            lastError="disabled_by_config",
+        )
+        return {}
+
+    if not os.path.isfile(stats_path):
+        _update_resource_source_status(
+            available=False,
+            mode="shared-file",
+            lastError="stats_file_not_found",
+        )
+        return {}
+
     try:
-        with open(settings.broker_resource_stats_path, "r") as fh:
+        with open(stats_path, "r") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except Exception:
+        if isinstance(data, dict):
+            _update_resource_source_status(
+                available=True,
+                mode="shared-file",
+                lastError=None,
+                lastReadAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            )
+            return data
+        _update_resource_source_status(
+            available=True,
+            mode="shared-file",
+            lastError="invalid_stats_payload",
+        )
+        return {}
+    except Exception as exc:
+        _update_resource_source_status(
+            available=False,
+            mode="shared-file",
+            lastError=str(exc),
+        )
         return {}
 
 

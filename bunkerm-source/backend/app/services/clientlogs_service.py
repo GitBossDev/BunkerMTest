@@ -10,6 +10,7 @@ import re
 import subprocess
 import time
 import uuid
+import threading
 from collections import deque
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -389,6 +390,41 @@ class MQTTMonitor:
 
 mqtt_monitor = MQTTMonitor()
 
+_source_status_lock = threading.Lock()
+_source_status: Dict[str, Dict[str, object]] = {
+    "logTail": {
+        "enabled": settings.broker_log_tail_enabled,
+        "running": False,
+        "available": False,
+        "path": settings.broker_log_path,
+        "lastError": None,
+        "lastEventAt": None,
+        "replayCompleted": False,
+    },
+    "mqttPublish": {
+        "enabled": settings.broker_publish_monitor_enabled,
+        "running": False,
+        "broker": settings.mqtt_broker,
+        "port": settings.mqtt_port,
+        "lastError": None,
+        "lastEventAt": None,
+    },
+}
+
+
+def _update_source_status(source_name: str, **changes: object) -> None:
+    with _source_status_lock:
+        state = _source_status[source_name]
+        state.update(changes)
+
+
+def get_clientlogs_source_status() -> Dict[str, Dict[str, object]]:
+    with _source_status_lock:
+        return {
+            source_name: dict(source_state)
+            for source_name, source_state in _source_status.items()
+        }
+
 
 # ---------------------------------------------------------------------------
 # Funciones de fondo (se ejecutan como hilos daemon en el lifespan)
@@ -397,7 +433,28 @@ mqtt_monitor = MQTTMonitor()
 def monitor_mosquitto_logs() -> None:
     """Lee el log de Mosquitto en tiempo real y alimenta el MQTTMonitor."""
     log_file = os.getenv("BROKER_LOG_PATH", settings.broker_log_path)
+    _update_source_status(
+        "logTail",
+        enabled=settings.broker_log_tail_enabled,
+        path=log_file,
+        running=False,
+        available=False,
+        replayCompleted=False,
+        lastError=None,
+    )
+
+    if not settings.broker_log_tail_enabled:
+        print("Monitoreo de logs de Mosquitto deshabilitado por configuración.")
+        _update_source_status("logTail", lastError="disabled_by_config")
+        return
+
+    if not os.path.isfile(log_file):
+        print(f"Monitoreo de logs no iniciado: archivo no encontrado en {log_file}")
+        _update_source_status("logTail", lastError="log_file_not_found")
+        return
+
     print("Iniciando monitoreo de logs de Mosquitto...")
+    _update_source_status("logTail", available=True)
 
     # Replay de arranque: reconstruye el estado de conexiones y suscripciones
     try:
@@ -420,6 +477,7 @@ def monitor_mosquitto_logs() -> None:
         )
     except Exception as exc:
         print(f"Replay de arranque falló: {exc}")
+        _update_source_status("logTail", lastError=f"startup_replay_failed: {exc}")
 
     try:
         result_sub = subprocess.run(
@@ -434,6 +492,7 @@ def monitor_mosquitto_logs() -> None:
         print(f"Replay de suscripciones: {len(mqtt_monitor._subscription_counts)} tópicos distintos.")
     except Exception as exc:
         print(f"Replay de suscripciones falló: {exc}")
+        _update_source_status("logTail", lastError=f"subscription_replay_failed: {exc}")
 
     # Detección de reinicio de Mosquitto: si el broker terminó después de la última conexión,
     # los clientes "conectados" son fantasmas — los limpiamos
@@ -462,19 +521,46 @@ def monitor_mosquitto_logs() -> None:
                     print(f"Arranque: reinicio detectado — eliminados {stale} clientes obsoletos.")
     except Exception as exc:
         print(f"Arranque: detección de reinicio falló: {exc}")
+        _update_source_status("logTail", lastError=f"restart_detection_failed: {exc}")
+
+    _update_source_status("logTail", replayCompleted=True)
 
     # Lectura continua con tail -f
-    process = subprocess.Popen(
-        ["tail", "-f", log_file],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
-    )
+    try:
+        process = subprocess.Popen(
+            ["tail", "-f", log_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
+    except Exception as exc:
+        _update_source_status("logTail", lastError=f"tail_start_failed: {exc}")
+        print(f"Monitoreo continuo de logs no pudo iniciarse: {exc}")
+        return
+
     print("Monitoreo continuo de logs iniciado.")
+    _update_source_status("logTail", running=True, lastError=None)
     while True:
         line = process.stdout.readline()
         if line:
             mqtt_monitor.process_line(line.strip())
+            _update_source_status(
+                "logTail",
+                lastEventAt=datetime.now(tz=timezone.utc).isoformat(),
+            )
+            continue
+
+        if process.poll() is not None:
+            stderr_output = ""
+            if process.stderr is not None:
+                stderr_output = process.stderr.read().strip()
+            _update_source_status(
+                "logTail",
+                running=False,
+                lastError=stderr_output or f"tail_exited:{process.returncode}",
+            )
+            print(f"Monitoreo continuo de logs finalizó: {stderr_output or process.returncode}")
+            return
 
 
 def monitor_mqtt_publishes() -> None:
@@ -486,19 +572,35 @@ def monitor_mqtt_publishes() -> None:
         import paho.mqtt.client as paho_mqtt
     except ImportError:
         print("paho-mqtt no disponible; monitoreo de publishes deshabilitado.")
+        _update_source_status("mqttPublish", running=False, lastError="paho_mqtt_not_available")
+        return
+
+    if not settings.broker_publish_monitor_enabled:
+        print("Monitoreo MQTT de publishes deshabilitado por configuración.")
+        _update_source_status("mqttPublish", running=False, lastError="disabled_by_config")
         return
 
     broker_host = os.getenv("MOSQUITTO_IP", settings.mqtt_broker)
     broker_port = int(os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port)))
     username    = os.getenv("MOSQUITTO_ADMIN_USERNAME", settings.mqtt_username)
     password    = os.getenv("MOSQUITTO_ADMIN_PASSWORD", settings.mqtt_password)
+    _update_source_status(
+        "mqttPublish",
+        enabled=settings.broker_publish_monitor_enabled,
+        broker=broker_host,
+        port=broker_port,
+        running=False,
+        lastError=None,
+    )
 
     def _on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             client.subscribe("#", 0)
             print("Monitor de publishes MQTT: suscrito a #")
+            _update_source_status("mqttPublish", running=True, lastError=None)
         else:
             print(f"Monitor de publishes MQTT: error de conexión rc={rc}")
+            _update_source_status("mqttPublish", running=False, lastError=f"connect_rc={rc}")
 
     def _on_message(client, userdata, message):
         if any(message.topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
@@ -525,6 +627,10 @@ def monitor_mqtt_publishes() -> None:
             qos=message.qos,
         )
         mqtt_monitor.events.append(event)
+        _update_source_status(
+            "mqttPublish",
+            lastEventAt=datetime.now(tz=timezone.utc).isoformat(),
+        )
 
     client = paho_mqtt.Client(
         client_id="bunkerm-publish-monitor",
@@ -539,5 +645,6 @@ def monitor_mqtt_publishes() -> None:
             client.connect(broker_host, broker_port, keepalive=60)
             client.loop_forever()
         except Exception as exc:
+            _update_source_status("mqttPublish", running=False, lastError=str(exc))
             print(f"Monitor de publishes MQTT error: {exc}. Reconectando en 10 s…")
             time.sleep(10)

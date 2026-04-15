@@ -1,14 +1,18 @@
 """Servicios transicionales de control-plane para broker desired state."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import base64
 import hashlib
 import copy
-from datetime import datetime, timezone
-from typing import Any, Dict, List
+import re
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable, Dict, List
 
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.mosquitto_config import (
@@ -19,13 +23,17 @@ from config.mosquitto_config import (
 )
 from config.dynsec_config import DEFAULT_CONFIG as DEFAULT_DYNSEC_CONFIG, validate_dynsec_json
 from core.config import settings
+from core.database import AsyncSessionLocal
 from models.orm import BrokerDesiredState
 from services import broker_reconciler as broker_reconciler_svc
 from services import dynsec_service
 
 MOSQUITTO_CONFIG_SCOPE = "broker.mosquitto_config"
+MOSQUITTO_PASSWD_SCOPE = "broker.mosquitto_passwd"
 TLS_CERT_STORE_SCOPE = "broker.tls_certs"
 DYNSEC_CONFIG_SCOPE = "broker.dynsec_config"
+BROKER_RELOAD_SCOPE = "broker.reload_signal"
+BRIDGE_BUNDLE_SCOPE = "broker.bridge_bundle"
 DEFAULT_ACL_SCOPE = "dynsec.default_acl"
 CLIENT_SCOPE_PREFIX = "dynsec.client."
 ROLE_SCOPE_PREFIX = "dynsec.role."
@@ -38,8 +46,11 @@ DEFAULT_ACL_KEYS = (
 )
 _MOSQUITTO_CONF_PATH: str = settings.mosquitto_conf_path
 _BACKUP_DIR: str = settings.mosquitto_conf_backup_dir
+_MOSQUITTO_PASSWD_PATH: str = settings.mosquitto_passwd_path
 _CERTS_DIR: str = settings.mosquitto_certs_dir
+_BROKER_RECONCILE_SECRET_DIR: str = settings.broker_reconcile_secret_dir
 _ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
+_MOSQUITTO_PASSWD_LINE_PATTERN = re.compile(r"^[^:]+:\$\d+\$[^:]+$")
 _broker_reconciler = broker_reconciler_svc.BrokerReconciler()
 
 
@@ -50,6 +61,20 @@ def _utcnow() -> datetime:
 def normalize_default_acl(payload: Dict[str, Any] | None) -> Dict[str, bool]:
     source = payload or {}
     return {key: bool(source.get(key, True)) for key in DEFAULT_ACL_KEYS}
+
+
+def normalize_broker_reload_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    source = payload or {}
+    requested_at = source.get("requestedAt")
+    reason = str(source.get("reason") or "manual")
+    requested_by = str(source.get("requestedBy") or "api")
+    if not isinstance(requested_at, str) or not requested_at.strip():
+        requested_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "requestedAt": requested_at,
+        "reason": reason,
+        "requestedBy": requested_by,
+    }
 
 
 def _dump_payload(payload: Dict[str, bool]) -> str:
@@ -79,8 +104,200 @@ def normalize_dynsec_config_payload(payload: Dict[str, Any] | None) -> Dict[str,
     return json.loads(json.dumps(validated, sort_keys=True))
 
 
+def normalize_bridge_bundle_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    source = payload or {}
+    bridges: List[Dict[str, Any]] = []
+    for entry in source.get("bridges") or []:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        bridges.append(
+            {
+                "name": name,
+                "provider": str(entry.get("provider") or "generic").strip().lower(),
+                "enabled": bool(entry.get("enabled", False)),
+                "topics": [str(topic) for topic in entry.get("topics") or [] if str(topic).strip()],
+                "certRefs": [str(ref) for ref in entry.get("certRefs") or [] if str(ref).strip()],
+            }
+        )
+
+    return {
+        "status": str(source.get("status") or "deferred"),
+        "requestedBy": str(source.get("requestedBy") or "api"),
+        "notes": str(source.get("notes") or "legacy bridge surface removed from active product"),
+        "bridges": bridges,
+    }
+
+
 def get_broker_reconciler() -> broker_reconciler_svc.BrokerReconciler:
     return _broker_reconciler
+
+
+def is_daemon_reconcile_mode() -> bool:
+    return settings.broker_reconcile_mode.strip().lower() == "daemon"
+
+
+async def wait_for_scope_settlement(
+    scope: str,
+    minimum_version: int,
+    timeout_seconds: float | None = None,
+    poll_interval_seconds: float | None = None,
+) -> BrokerDesiredState | None:
+    timeout = timeout_seconds if timeout_seconds is not None else settings.broker_reconcile_wait_timeout_seconds
+    poll_interval = (
+        poll_interval_seconds
+        if poll_interval_seconds is not None
+        else settings.broker_reconcile_poll_interval_seconds
+    )
+    deadline = time.monotonic() + max(timeout, 0.0)
+    latest_state: BrokerDesiredState | None = None
+
+    while True:
+        async with AsyncSessionLocal() as wait_session:
+            latest_state = await wait_session.get(BrokerDesiredState, scope)
+
+        if (
+            latest_state is not None
+            and latest_state.version >= minimum_version
+            and latest_state.reconcile_status != "pending"
+        ):
+            return latest_state
+
+        if time.monotonic() >= deadline:
+            return latest_state
+
+        await asyncio.sleep(max(poll_interval, 0.05))
+
+
+async def reconcile_or_wait(
+    state: BrokerDesiredState,
+    reconcile_action: Callable[..., Awaitable[BrokerDesiredState]],
+    session: AsyncSession,
+    *args: Any,
+    force_inline: bool = False,
+    **kwargs: Any,
+) -> BrokerDesiredState:
+    if force_inline or not is_daemon_reconcile_mode():
+        return await reconcile_action(session, *args, **kwargs)
+
+    settled_state = await wait_for_scope_settlement(state.scope, state.version)
+    return settled_state or state
+
+
+def _reconcile_secret_cipher() -> Fernet:
+    key_material = f"{settings.auth_secret}:{settings.jwt_secret}".encode("utf-8")
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(key_material).digest()))
+
+
+def _client_creation_secret_path(username: str, version: int) -> str:
+    secret_key = hashlib.sha256(f"{_client_scope(username)}:{version}".encode("utf-8")).hexdigest()
+    return os.path.join(_BROKER_RECONCILE_SECRET_DIR, f"{secret_key}.token")
+
+
+def _safe_remove_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        return
+
+
+def _load_staged_client_creation_secret_payload(secret_path: str) -> Dict[str, Any] | None:
+    try:
+        with open(secret_path, "rb") as handle:
+            encrypted_payload = handle.read()
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return None
+
+    try:
+        decrypted_payload = _reconcile_secret_cipher().decrypt(encrypted_payload)
+        payload = json.loads(decrypted_payload.decode("utf-8"))
+    except (InvalidToken, json.JSONDecodeError, UnicodeDecodeError):
+        _safe_remove_file(secret_path)
+        return None
+
+    expires_at_raw = payload.get("expiresAt")
+    try:
+        expires_at = datetime.fromisoformat(expires_at_raw) if isinstance(expires_at_raw, str) else None
+    except ValueError:
+        expires_at = None
+
+    if expires_at is None:
+        _safe_remove_file(secret_path)
+        return None
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if expires_at <= datetime.now(timezone.utc):
+        _safe_remove_file(secret_path)
+        return None
+
+    return payload
+
+
+def cleanup_staged_client_creation_secrets() -> None:
+    if not os.path.isdir(_BROKER_RECONCILE_SECRET_DIR):
+        return
+
+    for entry_name in os.listdir(_BROKER_RECONCILE_SECRET_DIR):
+        if not entry_name.endswith(".token"):
+            continue
+        _load_staged_client_creation_secret_payload(os.path.join(_BROKER_RECONCILE_SECRET_DIR, entry_name))
+
+
+def stage_client_creation_secret(username: str, version: int, creation_password: str) -> None:
+    if not creation_password:
+        raise ValueError("Client creation password is required")
+
+    os.makedirs(_BROKER_RECONCILE_SECRET_DIR, exist_ok=True)
+    cleanup_staged_client_creation_secrets()
+
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        seconds=max(settings.broker_reconcile_secret_ttl_seconds, 5.0)
+    )
+    payload = {
+        "username": username,
+        "version": version,
+        "password": creation_password,
+        "expiresAt": expires_at.isoformat(),
+    }
+    encrypted_payload = _reconcile_secret_cipher().encrypt(_dump_json(payload).encode("utf-8"))
+    secret_path = _client_creation_secret_path(username, version)
+    temp_path = f"{secret_path}.tmp"
+
+    with open(temp_path, "wb") as handle:
+        handle.write(encrypted_payload)
+
+    try:
+        os.chmod(temp_path, 0o600)
+    except OSError:
+        pass
+
+    os.replace(temp_path, secret_path)
+
+    try:
+        os.chmod(secret_path, 0o600)
+    except OSError:
+        pass
+
+
+def get_staged_client_creation_secret(username: str, version: int) -> str | None:
+    cleanup_staged_client_creation_secrets()
+    payload = _load_staged_client_creation_secret_payload(_client_creation_secret_path(username, version))
+    if payload is None:
+        return None
+    if payload.get("username") != username or int(payload.get("version", -1)) != version:
+        return None
+    password = payload.get("password")
+    return password if isinstance(password, str) and password else None
+
+
+def clear_staged_client_creation_secret(username: str, version: int) -> None:
+    _safe_remove_file(_client_creation_secret_path(username, version))
 
 
 def _client_scope(username: str) -> str:
@@ -240,6 +457,184 @@ async def get_mosquitto_config_state(session: AsyncSession) -> BrokerDesiredStat
     return await session.get(BrokerDesiredState, MOSQUITTO_CONFIG_SCOPE)
 
 
+async def get_broker_reload_state(session: AsyncSession) -> BrokerDesiredState | None:
+    return await session.get(BrokerDesiredState, BROKER_RELOAD_SCOPE)
+
+
+async def get_bridge_bundle_state(session: AsyncSession) -> BrokerDesiredState | None:
+    return await session.get(BrokerDesiredState, BRIDGE_BUNDLE_SCOPE)
+
+
+async def set_broker_reload_desired(
+    session: AsyncSession,
+    payload: Dict[str, Any] | None = None,
+) -> BrokerDesiredState:
+    desired = normalize_broker_reload_payload(payload)
+    state = await get_broker_reload_state(session)
+    now = _utcnow()
+
+    if state is None:
+        state = BrokerDesiredState(
+            scope=BROKER_RELOAD_SCOPE,
+            version=1,
+            desired_payload_json=_dump_json(desired),
+            reconcile_status="pending",
+            drift_detected=False,
+            desired_updated_at=now,
+        )
+        session.add(state)
+    else:
+        state.version += 1
+        state.desired_payload_json = _dump_json(desired)
+        state.reconcile_status = "pending"
+        state.drift_detected = False
+        state.last_error = None
+        state.desired_updated_at = now
+
+    await session.commit()
+    await session.refresh(state)
+    return state
+
+
+async def reconcile_broker_reload_signal(session: AsyncSession) -> BrokerDesiredState:
+    state = await get_broker_reload_state(session)
+    if state is None:
+        raise ValueError("No desired state found for broker reload signal")
+
+    desired = normalize_broker_reload_payload(_load_json(state.desired_payload_json))
+    errors = get_broker_reconciler().signal_mosquitto_reload()
+    now = _utcnow()
+    observed = None if errors else {**desired, "signaled": True}
+
+    state.observed_payload_json = _dump_json(observed or {})
+    state.reconciled_at = now
+
+    if errors:
+        state.reconcile_status = "error"
+        state.drift_detected = False
+        state.last_error = "; ".join(errors)
+    else:
+        state.applied_payload_json = _dump_json(desired)
+        state.applied_at = now
+        state.drift_detected = False
+        state.reconcile_status = "applied"
+        state.last_error = None
+
+    await session.commit()
+    await session.refresh(state)
+    return state
+
+
+async def get_broker_reload_status(session: AsyncSession) -> Dict[str, Any]:
+    state = await get_broker_reload_state(session)
+    if state is None:
+        return {
+            "scope": BROKER_RELOAD_SCOPE,
+            "version": 0,
+            "status": "unmanaged",
+            "desired": None,
+            "applied": None,
+            "observed": None,
+            "driftDetected": False,
+            "lastError": None,
+            "desiredUpdatedAt": None,
+            "reconciledAt": None,
+            "appliedAt": None,
+        }
+
+    desired = normalize_broker_reload_payload(_load_json(state.desired_payload_json))
+    applied_raw = _load_json(state.applied_payload_json)
+    observed_raw = _load_json(state.observed_payload_json)
+    applied = normalize_broker_reload_payload(applied_raw) if applied_raw else None
+    observed = observed_raw or None
+
+    return {
+        "scope": state.scope,
+        "version": state.version,
+        "status": state.reconcile_status,
+        "desired": desired,
+        "applied": applied,
+        "observed": observed,
+        "driftDetected": state.drift_detected,
+        "lastError": state.last_error,
+        "desiredUpdatedAt": state.desired_updated_at.isoformat() if state.desired_updated_at else None,
+        "reconciledAt": state.reconciled_at.isoformat() if state.reconciled_at else None,
+        "appliedAt": state.applied_at.isoformat() if state.applied_at else None,
+    }
+
+
+async def set_bridge_bundle_desired(
+    session: AsyncSession,
+    payload: Dict[str, Any] | None = None,
+) -> BrokerDesiredState:
+    desired = normalize_bridge_bundle_payload(payload)
+    state = await get_bridge_bundle_state(session)
+    now = _utcnow()
+
+    if state is None:
+        state = BrokerDesiredState(
+            scope=BRIDGE_BUNDLE_SCOPE,
+            version=1,
+            desired_payload_json=_dump_json(desired),
+            reconcile_status="deferred",
+            drift_detected=False,
+            desired_updated_at=now,
+            last_error="bridge scope defined but not active in product surface",
+        )
+        session.add(state)
+    else:
+        state.version += 1
+        state.desired_payload_json = _dump_json(desired)
+        state.reconcile_status = "deferred"
+        state.drift_detected = False
+        state.last_error = "bridge scope defined but not active in product surface"
+        state.desired_updated_at = now
+
+    await session.commit()
+    await session.refresh(state)
+    return state
+
+
+async def get_bridge_bundle_status(session: AsyncSession) -> Dict[str, Any]:
+    state = await get_bridge_bundle_state(session)
+    if state is None:
+        return {
+            "scope": BRIDGE_BUNDLE_SCOPE,
+            "version": 0,
+            "status": "unmanaged",
+            "desired": None,
+            "applied": None,
+            "observed": None,
+            "driftDetected": False,
+            "lastError": None,
+            "desiredUpdatedAt": None,
+            "reconciledAt": None,
+            "appliedAt": None,
+            "activeInProductSurface": False,
+        }
+
+    desired = normalize_bridge_bundle_payload(_load_json(state.desired_payload_json))
+    applied_raw = _load_json(state.applied_payload_json)
+    observed_raw = _load_json(state.observed_payload_json)
+    applied = normalize_bridge_bundle_payload(applied_raw) if applied_raw else None
+    observed = normalize_bridge_bundle_payload(observed_raw) if observed_raw else None
+
+    return {
+        "scope": state.scope,
+        "version": state.version,
+        "status": state.reconcile_status,
+        "desired": desired,
+        "applied": applied,
+        "observed": observed,
+        "driftDetected": state.drift_detected,
+        "lastError": state.last_error,
+        "desiredUpdatedAt": state.desired_updated_at.isoformat() if state.desired_updated_at else None,
+        "reconciledAt": state.reconciled_at.isoformat() if state.reconciled_at else None,
+        "appliedAt": state.applied_at.isoformat() if state.applied_at else None,
+        "activeInProductSurface": False,
+    }
+
+
 async def _store_mosquitto_config_desired(
     session: AsyncSession,
     desired: Dict[str, Any],
@@ -366,6 +761,211 @@ async def get_mosquitto_config_status(session: AsyncSession) -> Dict[str, Any]:
         "desired": desired,
         "applied": applied,
         "observed": observed,
+        "driftDetected": state.drift_detected,
+        "lastError": state.last_error,
+        "desiredUpdatedAt": state.desired_updated_at.isoformat() if state.desired_updated_at else None,
+        "reconciledAt": state.reconciled_at.isoformat() if state.reconciled_at else None,
+        "appliedAt": state.applied_at.isoformat() if state.applied_at else None,
+    }
+
+
+def _normalize_mosquitto_passwd_content(content: str) -> str:
+    normalized = content.replace("\r\n", "\n")
+    if normalized and not normalized.endswith("\n"):
+        normalized += "\n"
+    return normalized
+
+
+def _parse_mosquitto_passwd_users(content: str) -> List[str]:
+    usernames: List[str] = []
+    for index, raw_line in enumerate(content.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if not _MOSQUITTO_PASSWD_LINE_PATTERN.match(line):
+            raise ValueError(f"Invalid mosquitto_passwd format at line {index}: {line}")
+        usernames.append(line.split(":", 1)[0])
+    if not usernames:
+        raise ValueError("mosquitto_passwd content is empty")
+    return usernames
+
+
+def normalize_mosquitto_passwd_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    source = payload or {}
+    content = source.get("content")
+    if not isinstance(content, str):
+        raise ValueError("Mosquitto passwd desired state requires file content")
+
+    normalized_content = _normalize_mosquitto_passwd_content(content)
+    usernames = _parse_mosquitto_passwd_users(normalized_content)
+    raw_bytes = normalized_content.encode("utf-8")
+    return {
+        "exists": True,
+        "content": normalized_content,
+        "users": usernames,
+        "userCount": len(usernames),
+        "sizeBytes": len(raw_bytes),
+        "sha256": _sha256_bytes(raw_bytes),
+    }
+
+
+def _public_mosquitto_passwd_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    source = payload or {}
+    return {
+        "exists": bool(source.get("exists", False)),
+        "users": list(source.get("users", [])),
+        "userCount": int(source.get("userCount", 0)),
+        "sizeBytes": int(source.get("sizeBytes", 0)),
+        "sha256": source.get("sha256"),
+    }
+
+
+def get_observed_mosquitto_passwd() -> Dict[str, Any]:
+    if not os.path.exists(_MOSQUITTO_PASSWD_PATH):
+        return {
+            "exists": False,
+            "content": "",
+            "users": [],
+            "userCount": 0,
+            "sizeBytes": 0,
+            "sha256": None,
+        }
+
+    with open(_MOSQUITTO_PASSWD_PATH, "r", encoding="utf-8") as handle:
+        content = _normalize_mosquitto_passwd_content(handle.read())
+
+    usernames = _parse_mosquitto_passwd_users(content)
+    raw_bytes = content.encode("utf-8")
+    return {
+        "exists": True,
+        "content": content,
+        "users": usernames,
+        "userCount": len(usernames),
+        "sizeBytes": len(raw_bytes),
+        "sha256": _sha256_bytes(raw_bytes),
+    }
+
+
+async def get_mosquitto_passwd_state(session: AsyncSession) -> BrokerDesiredState | None:
+    return await session.get(BrokerDesiredState, MOSQUITTO_PASSWD_SCOPE)
+
+
+async def _store_mosquitto_passwd_desired(
+    session: AsyncSession,
+    desired: Dict[str, Any],
+) -> BrokerDesiredState:
+    state = await get_mosquitto_passwd_state(session)
+    now = _utcnow()
+
+    if state is None:
+        state = BrokerDesiredState(
+            scope=MOSQUITTO_PASSWD_SCOPE,
+            version=1,
+            desired_payload_json=_dump_json(desired),
+            reconcile_status="pending",
+            drift_detected=False,
+            desired_updated_at=now,
+        )
+        session.add(state)
+    else:
+        state.version += 1
+        state.desired_payload_json = _dump_json(desired)
+        state.reconcile_status = "pending"
+        state.drift_detected = False
+        state.last_error = None
+        state.desired_updated_at = now
+
+    await session.commit()
+    await session.refresh(state)
+    return state
+
+
+async def set_mosquitto_passwd_desired(session: AsyncSession, payload: Dict[str, Any]) -> BrokerDesiredState:
+    desired = normalize_mosquitto_passwd_payload(payload)
+    return await _store_mosquitto_passwd_desired(session, desired)
+
+
+async def set_mosquitto_passwd_desired_from_content(session: AsyncSession, content: str) -> BrokerDesiredState:
+    return await set_mosquitto_passwd_desired(session, {"content": content})
+
+
+async def reconcile_mosquitto_passwd(session: AsyncSession) -> BrokerDesiredState:
+    state = await get_mosquitto_passwd_state(session)
+    if state is None:
+        raise ValueError("No desired state found for mosquitto passwd")
+
+    desired = _load_json(state.desired_payload_json)
+    if desired is None:
+        raise ValueError("Desired mosquitto passwd state payload is empty")
+
+    apply_result = get_broker_reconciler().apply_mosquitto_passwd(desired["content"])
+    errors = apply_result["errors"]
+    rollback_note = apply_result.get("rollbackNote")
+
+    observed = get_observed_mosquitto_passwd()
+    desired_content = desired.get("content", "")
+    observed_content = observed.get("content", "")
+    now = _utcnow()
+
+    state.observed_payload_json = _dump_json(observed)
+    state.reconciled_at = now
+
+    if errors:
+        state.reconcile_status = "error"
+        state.drift_detected = desired_content != observed_content
+        state.last_error = "; ".join(errors + ([rollback_note] if rollback_note else []))
+    else:
+        state.applied_payload_json = _dump_json(desired)
+        state.applied_at = now
+        state.drift_detected = desired_content != observed_content
+        state.reconcile_status = "drift" if state.drift_detected else "applied"
+        state.last_error = None
+
+    await session.commit()
+    await session.refresh(state)
+    return state
+
+
+async def get_mosquitto_passwd_status(session: AsyncSession) -> Dict[str, Any]:
+    state = await get_mosquitto_passwd_state(session)
+    observed = get_observed_mosquitto_passwd()
+    observed_public = _public_mosquitto_passwd_payload(observed)
+
+    if state is None:
+        return {
+            "scope": MOSQUITTO_PASSWD_SCOPE,
+            "version": 0,
+            "status": "unmanaged",
+            "desired": observed_public,
+            "applied": None,
+            "observed": observed_public,
+            "driftDetected": False,
+            "lastError": None,
+            "desiredUpdatedAt": None,
+            "reconciledAt": None,
+            "appliedAt": None,
+        }
+
+    desired = _load_json(state.desired_payload_json)
+    applied = _load_json(state.applied_payload_json) if state.applied_payload_json else None
+    desired_public = _public_mosquitto_passwd_payload(desired)
+    applied_public = _public_mosquitto_passwd_payload(applied) if applied else None
+    drift_detected = (desired or {}).get("content", "") != observed.get("content", "")
+
+    if drift_detected != state.drift_detected:
+        state.drift_detected = drift_detected
+        if state.reconcile_status == "applied" and drift_detected:
+            state.reconcile_status = "drift"
+        await session.commit()
+        await session.refresh(state)
+
+    return {
+        "scope": state.scope,
+        "version": state.version,
+        "status": state.reconcile_status,
+        "desired": desired_public,
+        "applied": applied_public,
+        "observed": observed_public,
         "driftDetected": state.drift_detected,
         "lastError": state.last_error,
         "desiredUpdatedAt": state.desired_updated_at.isoformat() if state.desired_updated_at else None,
@@ -793,10 +1393,14 @@ async def reconcile_client(
     if desired is None:
         raise ValueError("Desired client state payload is empty")
 
+    staged_creation_password = creation_password
+    if staged_creation_password is None and not desired.get("deleted", False):
+        staged_creation_password = get_staged_client_creation_secret(username, state.version)
+
     errors = get_broker_reconciler().apply_client_projection(
         username,
         desired,
-        creation_password=creation_password,
+        creation_password=staged_creation_password,
     )
 
     observed = get_observed_client(username)
@@ -815,6 +1419,8 @@ async def reconcile_client(
         state.drift_detected = desired != observed
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
+        if creation_password is None and staged_creation_password is not None:
+            clear_staged_client_creation_secret(username, state.version)
 
     await session.commit()
     await session.refresh(state)

@@ -15,7 +15,7 @@ from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from monitor.topic_sqlite_storage import topic_history_storage
 from services import dynsec_service as dynsec_svc
-from services.clientlogs_service import mqtt_monitor, MQTTEvent
+from services.clientlogs_service import mqtt_monitor, MQTTEvent, get_clientlogs_source_status
 
 router = APIRouter(prefix="/api/v1/clientlogs", tags=["clientlogs"])
 
@@ -96,7 +96,10 @@ def _entry_names(items: Iterable[Any], key: str) -> Set[str]:
 
 
 def _build_client_capability_map() -> Dict[str, Dict[str, bool]]:
-    data = dynsec_svc.read_dynsec()
+    try:
+        data = dynsec_svc.read_dynsec()
+    except Exception:
+        return {}
     default_acl = data.get("defaultACLAccess", {})
     default_publish = bool(default_acl.get("publishClientSend", True))
     default_subscribe = bool(default_acl.get("subscribe", True))
@@ -208,6 +211,12 @@ async def get_top_subscribed(limit: int = 15, period: str = "7d", api_key: str =
 async def get_activity_summary(window_seconds: int = 600, api_key: str = Security(get_api_key)):
     """Devuelve clientes activos con capacidad efectiva de subscribe o publish según DynSec."""
     return build_activity_summary(window_seconds=window_seconds)
+
+
+@router.get("/source-status")
+async def get_source_status(api_key: str = Security(get_api_key)):
+    """Expone el estado operativo de las fuentes que alimentan ClientLogs."""
+    return {"sources": get_clientlogs_source_status()}
 
 
 @router.get("/activity/{username}")

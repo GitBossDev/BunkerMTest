@@ -3,7 +3,7 @@
 > Proyecto: BHM (Broker Health Manager)
 > Objetivo: Coordinar el trabajo paralelo de dos compañeros sin solapamientos, reduciendo conflictos de merge y evitando trabajo duplicado.
 > Tipo de documento: Archivo vivo de coordinación
-> Última actualización: 2026-04-14
+> Última actualización: 2026-04-15
 
 ---
 
@@ -248,17 +248,30 @@ Estado actual ya disponible para coordinación con B:
 - `GET /api/v1/dynsec/roles/{role_name}/status` y `GET /api/v1/dynsec/groups/{group_name}/status` ya exponen estado deseado/aplicado/observado por entidad.
 - La gestión principal de roles, ACLs, grupos y memberships DynSec ya no muta `dynamic-security.json` directamente desde la capa HTTP.
 - `GET /api/v1/config/mosquitto-config/status` ya expone estado deseado/aplicado/observado del archivo base de configuración del broker.
+- `GET /api/v1/dynsec/password-file-status` ya expone estado deseado/aplicado/observado del nuevo scope `broker.mosquitto_passwd`, además de los metadatos legacy del fichero.
 - `GET /api/v1/config/dynsec-json/status` ya expone estado deseado/aplicado/observado del documento DynSec completo.
 - `POST /api/v1/config/mosquitto-config`, `POST /api/v1/config/reset-mosquitto-config` y `POST /api/v1/config/remove-mosquitto-listener` ya usan control-plane transicional en vez de escritura directa desde el router.
 - `POST /api/v1/config/import-dynsec-json`, `POST /api/v1/config/import-acl` y `POST /api/v1/config/reset-dynsec-json` ya usan también control-plane transicional en vez de escritura directa de `dynamic-security.json` desde el router.
+- `POST /api/v1/dynsec/import-password-file` ya deja dos rastros auditables: el del passwd como capability propia y el del documento DynSec proyectado desde ese import.
 - `services/broker_runtime.py` y `services/broker_reconciler.py` ya definen una costura explícita broker-facing para seguir separando `bhm-api` del reconciliador futuro sin cambiar todavía de proceso.
+- `services/broker_reconcile_runner.py` ya permite ejecutar reconciliaciones broker-facing por scope fuera del proceso HTTP, preparando la futura separación a un servicio/worker dedicado.
+- `docker-compose.dev.yml` ya incluye `bhm-reconciler` como servicio transicional dedicado para esa costura broker-facing, ejecutando `services.broker_reconcile_daemon` fuera del proceso web.
+- `bunkerm-platform` ya corre en `BROKER_RECONCILE_MODE=daemon` para los slices de `mosquitto.conf`, TLS, documento DynSec completo y `mosquitto_passwd`, esperando settlement reconciliado en lugar de aplicar esos cambios inline desde HTTP.
+- `docker-compose.dev.yml` ya monta `mosquitto-data`, `mosquitto-conf` y `mosquitto-log` en solo lectura dentro de `bunkerm-platform`; la señal manual de reload también quedó movida al control-plane broker-facing.
+- `docker-compose.dev.yml` ya incluye `bhm-broker-observability` como servicio interno broker-owned para servir `mosquitto.log` y `broker-resource-stats.json` por HTTP interno, evitando que `config` y `monitor` sigan leyendo esos ficheros directamente desde `bunkerm-platform`.
+- La superficie activa de `config` y `monitor` ya quedó desacoplada del filesystem observacional del broker; la deuda residual sobre `mosquitto-log` queda limitada a `clientlogs` y pasa a la futura Fase 5 de observabilidad/reporting.
+- El placeholder `broker.bridge_bundle` ya existe como scope transicional diferido para bridges futuros, de modo que cualquier reintroducción funcional deberá alinearse al control-plane y no a writers directos o volúmenes compartidos.
+- `POST /api/v1/dynsec/clients` ya puede operar también en modo daemon sin persistir passwords en SQLite: el web stagea un secreto efímero cifrado en `/nextjs/data/reconcile-secrets` y `bhm-reconciler` lo consume por `scope + version` al crear el cliente real.
+- Las rutas principales de `routers/dynsec.py` para `defaultACLAccess`, enable/disable/delete de cliente, roles, grupos y memberships ya usan también espera por settlement daemon en lugar de reconciliación inline cuando el runtime está en modo daemon.
+- `POST /api/v1/config/restart-mosquitto` y `POST /api/v1/dynsec/restart-mosquitto` ya delegan la recarga manual del broker al nuevo scope `broker.reload_signal`, en vez de escribir `.reload` desde la capa HTTP.
 - El build local del runtime `bunkerm-platform` ya volvió a ser reproducible en Windows + Podman tras excluir `frontend/node_modules` del contexto de imagen.
 - La integración real de cliente DynSec ya valida tanto el `status` auditable del control-plane como el `dynamic-security.json` efectivo del broker sobre el stack activo.
 - Las rutas DynSec de `roles` y `groups` ya no ejecutan comandos broker-facing directamente desde el router; delegan al reconciliador explícito y elevan error HTTP si la reconciliación falla.
 - Existe una prueba de integración ligera en `tests/test_broker_reconciler_integration.py` para validar la costura broker-facing con filesystem temporal y comandos DynSec simulados.
 - Existe también una prueba de integración real en `tests/test_broker_reconciler_real_integration.py` para validar create/disable/delete de cliente contra el stack Podman activo y el broker real.
 - El flujo de importación/sync de `mosquitto_passwd` ya no escribe `dynamic-security.json` directamente; ahora genera desired state del documento DynSec completo y lo delega al reconciliador explícito.
-- La integración real sobre el stack Podman activo ya cubre también import/reset del documento DynSec y el sync desde `mosquitto_passwd`, no solo el lifecycle principal de clientes.
+- La integración real sobre el stack Podman activo ya cubre también import/reset del documento DynSec, `import-password-file` y el sync desde `mosquitto_passwd`, no solo el lifecycle principal de clientes.
+- El baseline local ya fue revalidado en runtime real tras ese recorte: `podman compose ... up -d mosquitto bunkerm bhm-reconciler` recreó el stack y `deploy.ps1 -Action smoke` cerró en `5/5 OK`.
 
 ### Coordinación
 
@@ -430,6 +443,17 @@ Usar esta sección como tablero rápido de coordinación.
 - A ya dejó validadas tanto una integración ligera como una integración real sobre esa costura broker-facing, y además recuperó la reconstrucción reproducible del runtime local sobre Podman para seguir iterando Fase 3 sin depender de un stack viejo.
 - A ya movió también import/reset del documento DynSec y el sync desde `mosquitto_passwd` al mismo patrón transicional, cerrando la escritura directa activa de `dynamic-security.json` desde la superficie HTTP del producto.
 - A ya dejó validadas esas rutas también sobre el runtime real reconstruido, con restauración automática del documento DynSec y del `mosquitto_passwd` para no contaminar el stack activo.
+- A ya movió además el propio `mosquitto_passwd` al control-plane transicional, con rollback básico y estado auditable separado del documento DynSec.
+- A ya dejó una costura ejecutable por CLI para reconciliar scopes broker-facing sin depender del router HTTP como punto de aplicación efectiva.
+- A ya materializó esa costura en Compose como `bhm-reconciler`, todavía transicional pero ya separado del proceso web como loop broker-facing dedicado.
+- A ya amplió la integración real para cubrir también el import publicado de `mosquitto_passwd` contra el stack Podman activo.
+- A ya hizo el primer recorte de ownership real sobre el filesystem del broker: `bunkerm-platform` quedó sin permisos de escritura sobre `/etc/mosquitto` y `/var/log/mosquitto` para los slices ya daemonizados.
+- A ya eliminó también el bloqueo principal de `create_client` para modo daemon mediante un handoff efímero cifrado fuera de la base transicional y fuera del filesystem del broker.
+- A ya cerró además el siguiente slice activo sobre `mosquitto-data`: el runtime HTTP dejó de escribir `.reload` y `bunkerm-platform` quedó completamente en solo lectura sobre los mounts broker-facing del baseline.
+- A ya retiró también las superficies legacy ejecutables de `aws_bridge.py`, `azure_bridge.py`, `app/aws-bridge/main.py`, `app/azure-bridge/main.py` y `app/dynsec/main.py`; ya no quedan writers broker-facing alternativos en esos caminos históricos.
+- A ya auditó también el mount `mosquitto-log`: sigue siendo necesario por `clientlogs`, por `GET /api/v1/config/broker` y por `broker-resource-stats.json`, así que el siguiente recorte no era quitar el volumen sino volver esa dependencia explícita y degradable.
+- A ya hizo ese corte preparatorio en `clientlogs`: el tail del log puede deshabilitarse, la ausencia del fichero ya no se trata como supuesto implícito de arranque y existe un endpoint de estado de fuentes para debugging operativo.
+- B ya no debe considerar AWS/Azure Bridge ni el runtime standalone de DynSec como puntos reutilizables de implementación; cualquier trabajo futuro sobre esas capacidades deberá arrancar directamente desde el control-plane y no desde esos archivos legacy.
 - B debe seguir considerando estos contratos como transicionales, pero ya puede apoyarse en endpoints de estado para UI técnica o debugging si los necesita.
 
 ---

@@ -6,6 +6,7 @@ Los servicios externos (mosquitto_ctrl, dynamic-security.json) se mockean
 para que los tests no dependan del broker en ejecucion.
 """
 import json
+from types import SimpleNamespace
 
 import pytest
 import services.dynsec_service as dynsec_svc
@@ -158,6 +159,45 @@ async def test_set_default_acl_uses_desired_state_and_returns_control_plane_meta
     assert status_body["driftDetected"] is False
 
 
+async def test_set_default_acl_in_daemon_mode_waits_for_reconcile_settlement(client, monkeypatch):
+    """En modo daemon, el PUT debe resolver por espera de settlement y no por aplicación inline."""
+    wait_calls: list[tuple[tuple, dict]] = []
+
+    async def fake_set_default_acl_desired(session, updates):
+        return SimpleNamespace(
+            scope=desired_state_svc.DEFAULT_ACL_SCOPE,
+            version=4,
+            reconcile_status="pending",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    async def fake_reconcile_or_wait(state, reconcile_action, session, *args, **kwargs):
+        wait_calls.append((args, kwargs))
+        return SimpleNamespace(
+            scope=state.scope,
+            version=state.version,
+            reconcile_status="applied",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    monkeypatch.setattr(desired_state_svc, "set_default_acl_desired", fake_set_default_acl_desired)
+    monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+
+    payload = {
+        "publishClientSend": False,
+        "publishClientReceive": True,
+        "subscribe": False,
+        "unsubscribe": True,
+    }
+    resp = await client.put("/api/v1/dynsec/default-acl", json=payload)
+
+    assert resp.status_code == 200
+    assert wait_calls == [((), {})]
+    assert resp.json()["controlPlane"]["status"] == "applied"
+
+
 def test_merge_dynsec_configs_preserves_imported_default_acl(monkeypatch):
     """La importación debe conservar defaultACLAccess del JSON subido."""
     imported = {
@@ -263,6 +303,50 @@ async def test_create_client_success(client, monkeypatch):
     assert status_body["observed"]["username"] == "nuevo-sensor"
 
 
+async def test_create_client_in_daemon_mode_stages_ephemeral_secret_and_waits(client, monkeypatch):
+    """En modo daemon, create client debe stagear el secreto efímero fuera de la base."""
+    staged: list[tuple[str, int, str]] = []
+    wait_calls: list[tuple[tuple, dict]] = []
+
+    async def fake_set_client_desired(session, payload):
+        return SimpleNamespace(
+            scope=f"{desired_state_svc.CLIENT_SCOPE_PREFIX}{payload['username']}",
+            version=7,
+            reconcile_status="pending",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    async def fake_reconcile_or_wait(state, reconcile_action, session, *args, **kwargs):
+        wait_calls.append((args, kwargs))
+        return SimpleNamespace(
+            scope=state.scope,
+            version=state.version,
+            reconcile_status="applied",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    monkeypatch.setattr(desired_state_svc, "is_daemon_reconcile_mode", lambda: True)
+    monkeypatch.setattr(desired_state_svc, "set_client_desired", fake_set_client_desired)
+    monkeypatch.setattr(
+        desired_state_svc,
+        "stage_client_creation_secret",
+        lambda username, version, password: staged.append((username, version, password)),
+    )
+    monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+
+    resp = await client.post(
+        "/api/v1/dynsec/clients",
+        json={"username": "daemon-sensor", "password": "SecurePass123"},
+    )
+
+    assert resp.status_code == 201
+    assert staged == [("daemon-sensor", 7, "SecurePass123")]
+    assert wait_calls == [(("daemon-sensor",), {})]
+    assert resp.json()["controlPlane"]["status"] == "applied"
+
+
 async def test_disable_client_updates_desired_state_and_status(client, monkeypatch):
     """Disable debe persistir desired state del cliente y reconciliar el JSON."""
     dynsec_doc = {
@@ -337,7 +421,10 @@ async def test_sync_passwd_to_dynsec_uses_control_plane_and_updates_dynsec_json(
 
     monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
     monkeypatch.setattr(dynsec_svc.settings, "mosquitto_passwd_path", str(passwd_path))
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
+    monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
     monkeypatch.setattr(broker_reconciler, "_signal_dynsec_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
 
     resp = await client.post("/api/v1/dynsec/sync-passwd-to-dynsec")
     assert resp.status_code == 200
@@ -346,9 +433,85 @@ async def test_sync_passwd_to_dynsec_uses_control_plane_and_updates_dynsec_json(
     assert body["count"] == 1
     assert body["controlPlane"]["scope"] == desired_state_svc.DYNSEC_CONFIG_SCOPE
     assert body["controlPlane"]["status"] == "applied"
+    assert body["passwdControlPlane"]["scope"] == desired_state_svc.MOSQUITTO_PASSWD_SCOPE
+    assert body["passwdControlPlane"]["status"] == "applied"
 
     stored = json.loads(dynsec_path.read_text(encoding="utf-8"))
     assert any(client_entry["username"] == "sensor-99" for client_entry in stored["clients"])
+
+
+async def test_import_password_file_uses_passwd_control_plane_and_exposes_status(client, monkeypatch, tmp_path):
+    """La importación del passwd debe reconciliar el archivo y exponer estado auditable propio."""
+    dynsec_path = tmp_path / "dynamic-security.json"
+    passwd_path = tmp_path / "mosquitto_passwd"
+    dynsec_path.write_text(json.dumps(SAMPLE_DYNSEC), encoding="utf-8")
+
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+    monkeypatch.setattr(dynsec_svc.settings, "mosquitto_passwd_path", str(passwd_path))
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
+    monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
+    monkeypatch.setattr(broker_reconciler, "_signal_dynsec_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+
+    resp = await client.post(
+        "/api/v1/dynsec/import-password-file",
+        files={
+            "file": (
+                "mosquitto_passwd",
+                b"sensor-01:$7$existing\nsensor-77:$7$newhash\n",
+                "text/plain",
+            )
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["controlPlane"]["scope"] == desired_state_svc.MOSQUITTO_PASSWD_SCOPE
+    assert body["controlPlane"]["status"] == "applied"
+    assert body["dynsecControlPlane"]["scope"] == desired_state_svc.DYNSEC_CONFIG_SCOPE
+    assert passwd_path.read_text(encoding="utf-8") == "sensor-01:$7$existing\nsensor-77:$7$newhash\n"
+
+    status_resp = await client.get("/api/v1/dynsec/password-file-status")
+    assert status_resp.status_code == 200
+    status_body = status_resp.json()
+    assert status_body["exists"] is True
+    assert status_body["status"] == "applied"
+    assert status_body["scope"] == desired_state_svc.MOSQUITTO_PASSWD_SCOPE
+    assert status_body["user_count"] == 2
+
+
+async def test_password_import_restart_mosquitto_uses_control_plane_signal(client, monkeypatch):
+    """El restart publicado bajo dynsec debe delegar la señal al reconciliador broker-facing."""
+    calls: list[tuple[tuple, dict]] = []
+
+    async def fake_set_reload_desired(session, payload=None):
+        return SimpleNamespace(
+            scope=desired_state_svc.BROKER_RELOAD_SCOPE,
+            version=9,
+            reconcile_status="pending",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    async def fake_reconcile_or_wait(state, reconcile_action, session, *args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(
+            scope=state.scope,
+            version=state.version,
+            reconcile_status="applied",
+            drift_detected=False,
+            last_error=None,
+        )
+
+    monkeypatch.setattr(desired_state_svc, "set_broker_reload_desired", fake_set_reload_desired)
+    monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+
+    resp = await client.post("/api/v1/dynsec/restart-mosquitto")
+
+    assert resp.status_code == 200
+    assert resp.json()["controlPlane"]["scope"] == desired_state_svc.BROKER_RELOAD_SCOPE
+    assert resp.json()["controlPlane"]["status"] == "applied"
+    assert calls == [((), {})]
 
 
 async def test_delete_client_marks_desired_state_as_deleted(client, monkeypatch):

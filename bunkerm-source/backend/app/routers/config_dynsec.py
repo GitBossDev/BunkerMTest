@@ -160,7 +160,11 @@ async def import_dynsec_json(
         merged_config = merge_dynsec_configs(imported_data)
 
         state = await desired_state_svc.set_dynsec_config_desired(db, merged_config)
-        state = await desired_state_svc.reconcile_dynsec_config(db)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_dynsec_config,
+            db,
+        )
         _ensure_reconcile_success(state, "DynSec import reconciliation failed")
 
         user_count = len(merged_config["clients"]) - 1
@@ -219,7 +223,11 @@ async def import_acl(
         merged_config = merge_dynsec_configs(imported_data)
 
         state = await desired_state_svc.set_dynsec_config_desired(db, merged_config)
-        state = await desired_state_svc.reconcile_dynsec_config(db)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_dynsec_config,
+            db,
+        )
         _ensure_reconcile_success(state, "DynSec ACL import reconciliation failed")
 
         user_count = len(merged_config["clients"]) - 1
@@ -259,7 +267,11 @@ async def reset_dynsec_json(
     try:
         backup_path = create_backup()
         state = await desired_state_svc.set_dynsec_config_desired(db, DEFAULT_CONFIG)
-        state = await desired_state_svc.reconcile_dynsec_config(db)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_dynsec_config,
+            db,
+        )
         _ensure_reconcile_success(state, "DynSec reset reconciliation failed")
         return {
             "success": True,

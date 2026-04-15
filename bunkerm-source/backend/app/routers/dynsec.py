@@ -262,11 +262,22 @@ async def create_client(
                 "disabled": False,
             },
         )
-        state = await desired_state_svc.reconcile_client(
-            db,
-            client.username,
-            creation_password=client.password,
-        )
+        if desired_state_svc.is_daemon_reconcile_mode():
+            desired_state_svc.stage_client_creation_secret(client.username, state.version, client.password)
+            state = await desired_state_svc.reconcile_or_wait(
+                state,
+                desired_state_svc.reconcile_client,
+                db,
+                client.username,
+            )
+        else:
+            state = await desired_state_svc.reconcile_or_wait(
+                state,
+                desired_state_svc.reconcile_client,
+                db,
+                client.username,
+                creation_password=client.password,
+            )
         _ensure_reconcile_success(state, "Client reconciliation failed")
     except HTTPException:
         raise
@@ -307,7 +318,12 @@ async def enable_client(
         }
         payload["disabled"] = False
         state = await desired_state_svc.set_client_desired(db, payload)
-        state = await desired_state_svc.reconcile_client(db, username)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
         _ensure_reconcile_success(state, "Client enable reconciliation failed")
     except HTTPException:
         raise
@@ -348,7 +364,12 @@ async def disable_client(
         }
         payload["disabled"] = True
         state = await desired_state_svc.set_client_desired(db, payload)
-        state = await desired_state_svc.reconcile_client(db, username)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
         _ensure_reconcile_success(state, "Client disable reconciliation failed")
     except HTTPException:
         raise
@@ -389,7 +410,12 @@ async def delete_client(
         }
         payload["deleted"] = True
         state = await desired_state_svc.set_client_desired(db, payload)
-        state = await desired_state_svc.reconcile_client(db, username)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
         _ensure_reconcile_success(state, "Client delete reconciliation failed")
     except HTTPException:
         raise
@@ -430,7 +456,12 @@ async def add_client_role(username: str, role: RoleAssignment,
         if not any(r.get("rolename") == role.role_name for r in roles):
             roles.append({"rolename": role.role_name, "priority": role.priority or 1})
         state = await desired_state_svc.set_client_desired(db, payload)
-        state = await desired_state_svc.reconcile_client(db, username)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
         _ensure_reconcile_success(state, "Client role reconciliation failed")
     except HTTPException:
         raise
@@ -471,7 +502,12 @@ async def remove_client_role(username: str, role_name: str,
             if role.get("rolename") != role_name
         ]
         state = await desired_state_svc.set_client_desired(db, payload)
-        state = await desired_state_svc.reconcile_client(db, username)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
         _ensure_reconcile_success(state, "Client role reconciliation failed")
     except HTTPException:
         raise
@@ -561,7 +597,12 @@ async def create_role(
             db,
             {"rolename": role.name, "acls": [], "deleted": False},
         )
-        state = await desired_state_svc.reconcile_role(db, role.name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role.name,
+        )
         _ensure_reconcile_success(state, "Role reconciliation failed")
     except HTTPException:
         raise
@@ -595,7 +636,12 @@ async def delete_role(
         payload = observed or {"rolename": role_name, "acls": []}
         payload["deleted"] = True
         state = await desired_state_svc.set_role_desired(db, payload)
-        state = await desired_state_svc.reconcile_role(db, role_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
         _ensure_reconcile_success(state, "Role deletion reconciliation failed")
     except HTTPException:
         raise
@@ -642,7 +688,12 @@ async def add_role_acl(role_name: str, acl: ACLRequest,
                 }
             )
         state = await desired_state_svc.set_role_desired(db, payload)
-        state = await desired_state_svc.reconcile_role(db, role_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
         _ensure_reconcile_success(state, "Role ACL reconciliation failed")
     except HTTPException:
         raise
@@ -677,7 +728,12 @@ async def remove_role_acl(role_name: str, acl_type: ACLType, topic: str,
             if not (entry.get("acltype") == acl_type.value and entry.get("topic") == topic)
         ]
         state = await desired_state_svc.set_role_desired(db, payload)
-        state = await desired_state_svc.reconcile_role(db, role_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
         _ensure_reconcile_success(state, "Role ACL removal reconciliation failed")
     except HTTPException:
         raise
@@ -766,7 +822,12 @@ async def create_group(
             db,
             {"groupname": group.name, "roles": [], "clients": [], "deleted": False},
         )
-        state = await desired_state_svc.reconcile_group(db, group.name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group.name,
+        )
         _ensure_reconcile_success(state, "Group reconciliation failed")
     except HTTPException:
         raise
@@ -800,7 +861,12 @@ async def delete_group(
         payload = observed or {"groupname": group_name, "roles": [], "clients": []}
         payload["deleted"] = True
         state = await desired_state_svc.set_group_desired(db, payload)
-        state = await desired_state_svc.reconcile_group(db, group_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
         _ensure_reconcile_success(state, "Group deletion reconciliation failed")
     except HTTPException:
         raise
@@ -834,7 +900,12 @@ async def add_group_role(group_name: str, role: RoleAssignment,
         if not any(entry.get("rolename") == role.role_name for entry in roles):
             roles.append({"rolename": role.role_name, "priority": role.priority or 1})
         state = await desired_state_svc.set_group_desired(db, payload)
-        state = await desired_state_svc.reconcile_group(db, group_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
         _ensure_reconcile_success(state, "Group role reconciliation failed")
     except HTTPException:
         raise
@@ -869,7 +940,12 @@ async def remove_group_role(group_name: str, role_name: str,
             if entry.get("rolename") != role_name
         ]
         state = await desired_state_svc.set_group_desired(db, payload)
-        state = await desired_state_svc.reconcile_group(db, group_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
         _ensure_reconcile_success(state, "Group role removal reconciliation failed")
     except HTTPException:
         raise
@@ -911,7 +987,12 @@ async def add_client_to_group(group_name: str, body: dict,
                 client_entry["priority"] = int(priority)
             clients.append(client_entry)
         state = await desired_state_svc.set_group_desired(db, payload)
-        state = await desired_state_svc.reconcile_group(db, group_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
         _ensure_reconcile_success(state, "Group membership reconciliation failed")
     except HTTPException:
         raise
@@ -946,7 +1027,12 @@ async def remove_client_from_group(group_name: str, username: str,
             if entry.get("username") != username
         ]
         state = await desired_state_svc.set_group_desired(db, payload)
-        state = await desired_state_svc.reconcile_group(db, group_name)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
         _ensure_reconcile_success(state, "Group membership reconciliation failed")
     except HTTPException:
         raise
@@ -1015,7 +1101,11 @@ async def set_default_acl(acl_config: DefaultACLConfig,
     }
     try:
         state = await desired_state_svc.set_default_acl_desired(db, updates)
-        state = await desired_state_svc.reconcile_default_acl(db)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_default_acl,
+            db,
+        )
     except HTTPException:
         raise
     except ValueError as exc:
@@ -1026,11 +1116,7 @@ async def set_default_acl(acl_config: DefaultACLConfig,
             detail=f"Failed to reconcile default ACL access: {exc}",
         )
 
-    if state.reconcile_status == "error":
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=state.last_error or "Failed to reconcile default ACL access",
-        )
+    _ensure_reconcile_success(state, "Default ACL reconciliation failed")
 
     return {
         "message": "Default ACL access updated successfully",

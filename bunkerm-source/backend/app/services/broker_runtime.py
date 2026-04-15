@@ -20,6 +20,7 @@ def _signal_dynsec_reload() -> None:
 class BrokerRuntimePort(Protocol):
     mosquitto_conf_path: str
     mosquitto_conf_backup_dir: str
+    mosquitto_passwd_path: str
     mosquitto_certs_dir: str
 
     @contextmanager
@@ -48,6 +49,7 @@ class LocalBrokerRuntime:
 
     mosquitto_conf_path: str = settings.mosquitto_conf_path
     mosquitto_conf_backup_dir: str = settings.mosquitto_conf_backup_dir
+    mosquitto_passwd_path: str = settings.mosquitto_passwd_path
     mosquitto_certs_dir: str = settings.mosquitto_certs_dir
 
     @contextmanager

@@ -49,3 +49,13 @@ async def test_connected_clients_requires_auth(raw_client):
     """Sin autenticacion retorna 401 o 403."""
     resp = await raw_client.get("/api/v1/clientlogs/connected-clients")
     assert resp.status_code in (401, 403)
+
+
+async def test_source_status_returns_200_with_sources_map(client):
+    """El endpoint /source-status expone el estado de las fuentes de ClientLogs."""
+    resp = await client.get("/api/v1/clientlogs/source-status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "sources" in body
+    assert "logTail" in body["sources"]
+    assert "mqttPublish" in body["sources"]

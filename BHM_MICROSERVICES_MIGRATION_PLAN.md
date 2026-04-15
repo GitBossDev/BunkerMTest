@@ -2,7 +2,7 @@
 
 > **Proyecto**: BHM (Broker Health Manager)
 > **Objetivo**: Migrar la solución actual a una arquitectura de microservicios, operativa primero sobre Docker/Podman Compose y preparada para una evolución posterior a Kubernetes.
-> **Última actualización**: 2026-04-14
+> **Última actualización**: 2026-04-15
 
 ---
 
@@ -249,6 +249,41 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Replantear la gestión de bridges y certificados dentro del mismo modelo de reconciliación, excluyendo AWS/Azure del alcance funcional activo del producto.
 - [ ] Definir rollback para cambios fallidos al broker.
 
+### Estado de avance reportable de Fase 3
+
+- [x] Cortes implementados hasta ahora: 25 slices incrementales cerrados y validados localmente.
+- [x] Modelo de estado deseado para configuración del broker: cubierto para `mosquitto.conf`, TLS, documento DynSec completo, `mosquitto_passwd`, `broker.reload_signal` y placeholder transicional `broker.bridge_bundle` para bridges futuros fuera de la superficie activa.
+- [~] Modelo de estado deseado para clientes, roles, grupos y ACLs: avanzado. Las entidades DynSec principales ya operan por desired state + reconciliación; queda pendiente consolidar el reporting final del modelo frente a la futura persistencia PostgreSQL.
+- [x] Separación entre configuración deseada, generada, aplicada y observada: reportable. `desired`, `applied` y `observed` ya existen para las capabilities broker-facing; la dimensión `generated` queda explicitada como artefacto derivado o payload servido por el componente broker-owned cuando aplica.
+- [x] Detección de drift: reportable para las capabilities del control-plane. La cobertura residual fuera de drift estricto queda acotada a observabilidad histórica (`clientlogs`) y no al núcleo de aplicación broker-facing.
+- [x] Endpoints de gestión que solicitan cambios en vez de escribir al broker: cubierto para la superficie activa. `config` y `monitor` ya no leen directamente `mosquitto.log` ni `broker-resource-stats.json` desde el proceso web principal.
+- [x] Estrategia Compose-first de aplicación de cambios: avanzada y evidenciada. `bhm-reconciler` ejecuta el loop broker-facing fuera del proceso web y `bhm-broker-observability` aísla la lectura observacional broker-owned para las dos fuentes transicionales que seguían acopladas.
+- [~] Equivalencia conceptual para Kubernetes: en curso. El mapeo principal ya está documentado para config, passwd, TLS y DynSec; faltan lineamientos finales para observabilidad y posibles bridges futuros.
+- [x] Bridges y certificados en el modelo de reconciliación: reportable. TLS ya quedó absorbido por el control-plane y los bridges futuros tienen ahora placeholder explícito `broker.bridge_bundle` sin reactivar AWS/Azure Bridge.
+- [x] Rollback por capability: reportable. Existe rollback o degradación controlada para las capabilities broker-facing activas y queda explícita la excepción de observabilidad histórica, que se mueve a Fase 5.
+
+### Cortes restantes propuestos para cerrar Fase 3
+
+- [x] Corte 21 implementado: `GET /api/v1/config/broker` quedó desacoplado del acceso directo a `mosquitto.log` en `bunkerm-platform` y ahora consume un servicio interno broker-owned de observabilidad.
+- [x] Corte 22 implementado: `GET /api/v1/monitor/stats/resources` y su source-status ya consumen `broker-resource-stats.json` vía el mismo servicio interno broker-owned, sin lectura directa desde el proceso web principal.
+- [x] Corte 23 implementado: se añadió el scope transicional `broker.bridge_bundle` para modelar bridges futuros como desired state diferido, sin reactivar AWS/Azure Bridge.
+- [x] Corte 24 implementado: se documentó una matriz explícita de `desired/generated/applied/observed`, drift y rollback por capability para el baseline activo de Fase 3.
+- [x] Corte 25 implementado: se cerró la validación reportable del criterio de salida de Fase 3, dejando evidencia de qué mounts broker-facing ya no son dependencia del backend principal y cuál deuda residual pasa a Fase 5.
+
+### Matriz reportable de capacidades Fase 3
+
+| Capability | Desired | Generated | Applied | Observed | Drift | Rollback/Degradación | Estado |
+|------------|---------|-----------|---------|----------|-------|----------------------|--------|
+| `broker.mosquitto_config` | `broker_desired_state` | contenido `mosquitto.conf` derivado | reconciliador broker-facing | parseo del fichero efectivo | Sí | backup + restore + reload | Activo |
+| `broker.tls_certs` | `broker_desired_state` | archivos del cert store | reconciliador broker-facing | hash/metadata de ficheros | Sí | snapshot en memoria + restore | Activo |
+| `broker.dynsec_config` | `broker_desired_state` | documento DynSec proyectado | reconciliador broker-facing | lectura normalizada del JSON efectivo | Sí | rollback broker-facing / error auditable | Activo |
+| `broker.mosquitto_passwd` | `broker_desired_state` | fichero passwd derivado | reconciliador broker-facing | lectura del fichero efectivo | Sí | backup lateral + restore + reload | Activo |
+| `broker.reload_signal` | `broker_desired_state` | payload de señal | reconciliador broker-facing | confirmación observada de señal | No estricto | reintento manual | Activo |
+| `dynsec.client.*`, `dynsec.role.*`, `dynsec.group.*`, `dynsec.default_acl` | `broker_desired_state` | payload normalizado por entidad | reconciliador broker-facing | snapshot DynSec observado | Sí | rollback parcial / error auditable | Activo |
+| `broker.bridge_bundle` | `broker_desired_state` | payload diferido documentado | no aplica aún | no aplica aún | No | no aplica | Diferido |
+| `config/broker` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | `503` explícito | Transicional |
+| `monitor/stats/resources` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | fallback-process / unavailable | Transicional |
+
 ### Primer corte implementado
 
 - [x] Se introdujo la tabla transicional `broker_desired_state` para persistir estado deseado/aplicado/observado del control-plane antes de la migración a PostgreSQL.
@@ -329,17 +364,124 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] La integración real contra el stack Podman activo ya valida `POST /api/v1/dynsec/sync-passwd-to-dynsec`, preparando un `mosquitto_passwd` temporal en el runtime y comprobando que el documento DynSec observado y el broker real incorporan el usuario sincronizado.
 - [x] Las pruebas reales restauran después el documento DynSec y el fichero `mosquitto_passwd`, de modo que el stack activo queda limpio tras cada validación.
 
+### Undécimo corte implementado
+
+- [x] `mosquitto_passwd` ya forma parte del control-plane transicional como scope explícito `broker.mosquitto_passwd`, con `desired`, `applied`, `observed`, `status`, `version`, detección de drift y `lastError`.
+- [x] `POST /api/v1/dynsec/import-password-file` ya no copia el archivo directamente como paso principal del router; ahora registra desired state del passwd, reconcilia su aplicación efectiva con rollback básico y luego proyecta los usuarios faltantes sobre el documento DynSec completo.
+- [x] `POST /api/v1/dynsec/sync-passwd-to-dynsec` ahora deja auditado también el estado aplicado/observado del propio passwd antes de reconciliar DynSec.
+- [x] `GET /api/v1/dynsec/password-file-status` ya expone metadatos legacy (`exists`, `size_bytes`, `user_count`) junto con el estado auditable del nuevo scope `broker.mosquitto_passwd`.
+- [x] La costura broker-facing añade ahora aplicación efectiva de `mosquitto_passwd` con backup lateral, `chmod 0644`, señal de recarga y rollback básico si la escritura o la recarga fallan.
+
+### Duodécimo corte implementado
+
+- [x] Se añadió `services/broker_reconcile_runner.py` como runner CLI mínimo para reconciliar scopes broker-facing fuera del proceso HTTP (`python -m services.broker_reconcile_runner --scope ...`).
+- [x] La estrategia Compose-first queda más explícita: la aplicación efectiva del broker ya no depende conceptualmente del router HTTP, sino de una costura invocable por scope que puede moverse después a un contenedor `bhm-reconciler` sin cambiar el contrato interno del control-plane.
+- [x] Queda documentada la semántica transicional de rollback por capability: `mosquitto.conf` y `mosquitto_passwd` restauran contenido previo y relanzan recarga; TLS restaura snapshots de archivos; DynSec por entidad o documento completo se apoya en rollback broker-facing y/o detección de drift/estado de error si la reversión no es completa.
+- [x] Queda también más clara la traducción conceptual a Kubernetes: `mosquitto.conf` se alinea con configuración tipo ConfigMap, `mosquitto_passwd` y TLS con material tipo Secret y `dynamic-security.json` con un artefacto privado reconciliado por el componente broker-facing, no por la capa HTTP.
+
+### Decimotercer corte implementado
+
+- [x] `docker-compose.dev.yml` ya incluye `bhm-reconciler` como servicio transicional dedicado para el loop broker-facing, reutilizando la imagen actual pero sin puertos web y con `command` específico hacia `services.broker_reconcile_daemon`.
+- [x] Se añadió `services/broker_reconcile_daemon.py` para consumir de forma periódica el estado deseado pendiente/drift/error fuera del proceso HTTP.
+- [x] `services/broker_reconcile_runner.py` ya resuelve también scopes dinámicos (`dynsec.default_acl`, `dynsec.client.*`, `dynsec.role.*`, `dynsec.group.*`) a partir de `broker_desired_state`, de modo que el servicio dedicado puede reconciliar trabajo real y no solo scopes fijos.
+- [x] `deploy.ps1` ya reconoce también `bunkerm-reconciler` en el flujo de hot-patch backend y reinicia ese contenedor para no dejar el daemon con código desfasado durante desarrollo local.
+
+### Decimocuarto corte implementado
+
+- [x] La integración real contra el stack Podman activo ahora cubre también `POST /api/v1/dynsec/import-password-file`, no solo el sync desde `mosquitto_passwd`.
+- [x] La validación real de ese flujo comprueba el rastro auditable del scope `broker.mosquitto_passwd`, el documento DynSec observado y el artefacto efectivo del broker tras el import.
+- [x] La restauración del stack tras la prueba vuelve a dejar limpios tanto `dynamic-security.json` como `mosquitto_passwd`, manteniendo la misma disciplina de no contaminar el baseline activo.
+
+### Decimoquinto corte implementado
+
+- [x] Las rutas de `mosquitto.conf`, cert store TLS, import/reset del documento DynSec y `mosquitto_passwd` ya pueden operar en modo daemon broker-facing: registran el desired state y esperan el settlement reconciliado en vez de aplicar el cambio inline desde el proceso web cuando `BROKER_RECONCILE_MODE=daemon`.
+- [x] `services/broker_desired_state_service.py` ahora centraliza ese patrón con espera auditable por scope/version, de modo que el router HTTP puede seguir respondiendo con estado consistente sin retomar ownership directo del filesystem del broker.
+- [x] `docker-compose.dev.yml` ya arranca `bunkerm-platform` con `BROKER_RECONCILE_MODE=daemon`, `BROKER_RECONCILE_WAIT_TIMEOUT_SECONDS=12` y mounts `mosquitto-conf` y `mosquitto-log` en solo lectura.
+- [x] El stack local quedó validado con runtime real: `podman compose ... up -d mosquitto bunkerm bhm-reconciler` recreó `bunkerm-platform` y `bunkerm-reconciler`, y `deploy.ps1 -Action smoke` terminó en `5/5 OK`.
+- [x] El mount `mosquitto-data` sigue transicionalmente writable en `bunkerm-platform` porque el slice de `create_client` todavía depende de un password efímero no persistido en desired state y aún no puede migrarse completo al daemon sin rediseño adicional.
+
+### Decimosexto corte implementado
+
+- [x] Las rutas principales de entidades DynSec en `routers/dynsec.py` ya usan también el patrón daemon-aware `set desired state + wait for settlement` para `defaultACLAccess`, enable/disable/delete de cliente, roles de cliente, roles, ACLs, grupos y memberships, evitando seguir aplicando esos cambios inline desde el proceso web cuando `BROKER_RECONCILE_MODE=daemon`.
+- [x] `POST /api/v1/dynsec/clients` ya resuelve el caso sensible de `create_client` sin persistir el password en `broker_desired_state`: el proceso web cifra un secreto efímero y lo stagea en `/nextjs/data/reconcile-secrets`, y el reconciliador dedicado lo consume por `scope + version` en el momento de aplicar la creación real.
+- [x] El handoff efímero queda fuera del filesystem del broker y fuera de la base transicional: el password ya no necesita viajar ni en `desired`, ni en `applied`, ni en `observed`, y el artefacto staged se elimina tras una reconciliación exitosa.
+- [x] Con este corte desaparece el bloqueo funcional que impedía daemonizar `create_client`; el motivo para mantener `mosquitto-data` writable en `bunkerm-platform` pasa a ser la existencia de superficies broker-facing legacy aún no recortadas por completo, no la creación principal de clientes DynSec.
+
+### Decimoséptimo corte implementado
+
+- [x] La auditoría de superficies activas confirmó que las escrituras directas restantes a `.reload` dentro de `routers/` ya no pertenecían a DynSec ni al config activo, sino a dos endpoints de recarga manual; las únicas escrituras directas restantes en routers quedaron acotadas a `aws_bridge.py` y `azure_bridge.py`, que no forman parte del runtime HTTP montado por `main.py`.
+- [x] Se añadió el scope transicional `broker.reload_signal` al control-plane para modelar la señal manual de recarga de Mosquitto como capability broker-facing propia, aplicada por `bhm-reconciler` en vez de escribirse desde `bunkerm-platform` sobre `/var/lib/mosquitto/.reload`.
+- [x] `POST /api/v1/config/restart-mosquitto` y `POST /api/v1/dynsec/restart-mosquitto` ya no escriben el marker `.reload` desde el proceso web; ahora registran desired state y esperan settlement reconciliado igual que el resto de capabilities ya daemonizadas.
+- [x] `docker-compose.dev.yml` ya monta también `mosquitto-data` en solo lectura dentro de `bunkerm-platform`, de modo que el web container queda sin permisos de escritura sobre los tres mounts broker-facing del baseline (`mosquitto-data`, `mosquitto-conf`, `mosquitto-log`).
+
+### Decimoctavo corte implementado
+
+- [x] Las superficies legacy `routers/aws_bridge.py` y `routers/azure_bridge.py` ya no conservan lógica ejecutable de escritura directa sobre `conf.d`, certificados ni señales de recarga; quedaron convertidas en compatibilidad segura con respuesta `410 Gone` y mensaje explícito de reactivación futura solo vía control-plane.
+- [x] Los microservicios standalone históricos `app/aws-bridge/main.py` y `app/azure-bridge/main.py` ya no pueden actuar como writers alternativos del broker si alguien los ejecuta por error; ambos quedaron reducidos a stubs `410 Gone` alineados con la retirada funcional de AWS/Azure Bridge.
+- [x] `app/dynsec/main.py` dejó de contener un runtime legacy ejecutable con dual-write a `dynamic-security.json` y comandos directos `mosquitto_ctrl`; ahora es un stub de compatibilidad que redirige a la superficie unificada `/api/v1/dynsec`.
+- [x] Se añadieron guardrails y tests específicos para evitar que estas superficies legacy vuelvan a introducir mutaciones broker-facing fuera del control-plane transicional.
+
+### Decimonoveno corte implementado
+
+- [x] La auditoría del mount `mosquitto-log` confirmó que sigue teniendo tres consumidores activos dentro del runtime unificado: `services/clientlogs_service.py` por `tail -f` y replay inicial, `routers/config_mosquitto.py` para `GET /api/v1/config/broker` y `services/monitor_service.py` para `broker-resource-stats.json`; por tanto, retirar hoy ese volumen del web container no sería todavía un corte limpio de Fase 3.
+- [x] `services/clientlogs_service.py` ya no trata el log del broker como requisito implícito de arranque: el tail puede deshabilitarse por configuración, detecta ausencia del fichero sin quedarse en un loop ciego y publica estado operativo auditable de sus dos fuentes (`logTail`, `mqttPublish`).
+- [x] `GET /api/v1/clientlogs/source-status` expone ahora el estado de esas fuentes para distinguir cuándo ClientLogs está alimentándose por tail de logs, cuándo solo por observación MQTT y cuándo el acoplamiento al mount falta o está degradado.
+- [x] Este corte no elimina todavía `mosquitto-log` del baseline Compose-first porque el endpoint activo de lectura de logs y las métricas auxiliares del monitor siguen dependiendo de ese volumen; deja, eso sí, auditado y acotado el trabajo restante para la futura fase de observabilidad desacoplada.
+
+### Vigésimo corte implementado
+
+- [x] `GET /api/v1/config/broker` ya expone metadatos de fuente para la lectura de `mosquitto.log`, y `GET /api/v1/config/broker/source-status` deja auditado si esa dependencia compartida está disponible, deshabilitada o degradada.
+- [x] `services/monitor_service.py` ya publica estado operativo de la fuente `broker-resource-stats.json`, y `GET /api/v1/monitor/stats/resources` junto con `GET /api/v1/monitor/stats/resources/source-status` distinguen entre lectura por fichero compartido, fallback local o indisponibilidad.
+- [x] El cálculo de actividad derivada en `monitor/stats` ya degrada correctamente cuando el estado observado de DynSec no está disponible, evitando que la ausencia del artefacto broker-facing rompa endpoints de reporting operativo.
+- [x] Este corte no elimina todavía `mosquitto-log` del baseline, pero cierra la auditoría de sus consumidores activos con contrato HTTP explícito y deja listo el siguiente recorte sobre las dos dependencias observacionales restantes.
+
+### Vigésimo primer corte implementado
+
+- [x] Se añadió `bhm-broker-observability` como servicio interno Compose-first, broker-owned y sin puertos públicos, para servir por HTTP interno las lecturas transicionales de `mosquitto.log`.
+- [x] `GET /api/v1/config/broker` y `GET /api/v1/config/broker/source-status` ya no leen `mosquitto.log` directamente desde `bunkerm-platform`; ahora consumen `services/broker_observability_api.py` vía `broker_observability_client`.
+- [x] Los guardrails de arquitectura ya protegen que este desacoplamiento no retroceda a lectura directa del fichero compartido desde el router de configuración.
+
+### Vigésimo segundo corte implementado
+
+- [x] `GET /api/v1/monitor/stats/resources` y `GET /api/v1/monitor/stats/resources/source-status` ya no leen `broker-resource-stats.json` directamente desde `bunkerm-platform`; ahora consumen la misma API interna broker-owned.
+- [x] Cuando el servicio interno no está disponible, el monitor sigue degradando a `fallback-process` o `unavailable` con `lastError` explícito, en vez de asumir el mount como prerequisito silencioso.
+- [x] Este corte deja a `config` y `monitor` fuera del ownership directo del filesystem observacional del broker, manteniendo la compatibilidad transicional del baseline Compose-first.
+
+### Vigésimo tercer corte implementado
+
+- [x] Se añadió el scope `broker.bridge_bundle` como placeholder de desired state para futuros bridges, con estado `deferred`, payload normalizado y status auditable.
+- [x] El modelo deja explícito que la superficie AWS/Azure Bridge sigue retirada del producto activo, pero evita perder trazabilidad arquitectónica para una reintroducción posterior alineada al control-plane.
+
+### Vigésimo cuarto corte implementado
+
+- [x] La hoja de ruta de Fase 3 ya distingue de forma reportable qué capabilities tienen `desired`, `generated`, `applied` y `observed`, y cuáles son puramente observacionales o diferidas.
+- [x] La cobertura de drift y rollback quedó consolidada en una matriz única para que el avance pueda reportarse sin depender de revisar slice por slice.
+
+### Vigésimo quinto corte implementado
+
+- [x] La validación final de Fase 3 deja explícito que `bunkerm-platform` ya no necesita leer directamente `mosquitto.log` ni `broker-resource-stats.json`; esas lecturas viven ahora detrás de `bhm-broker-observability`.
+- [x] Los mounts broker-facing que siguen presentes en `bunkerm-platform` quedan acotados a compatibilidad transicional: `mosquitto-data` y `mosquitto-conf` en solo lectura para observación/control-plane ya recortado, y `mosquitto-log` pendiente solo por la funcionalidad histórica de `clientlogs`, que pasa a Fase 5 de observabilidad y reporting técnico.
+- [x] Con esto, la deuda residual deja de ser un problema del núcleo de gestión broker-facing y queda explicitada como trabajo posterior de observabilidad desacoplada.
+
 ### Consideraciones Docker/Podman ahora
 
 - [x] El primer reconciliador de `defaultACLAccess` es compatible con el runtime Compose-first actual.
 - [x] El contexto de build de `bunkerm-platform` ya excluye explícitamente `frontend/node_modules` y artefactos locales de Next.js para evitar fallos de tar en Windows + Podman durante la reconstrucción del runtime.
+- [x] Mientras siga existiendo volumen compartido en Compose, la aplicación efectiva del broker debe ejecutarse desde una costura invocable y testeable separada del router HTTP; el runner CLI actual cubre ese papel transicional.
+- [x] El baseline Compose-first ya materializa esa costura en un servicio dedicado `bhm-reconciler`, aunque `bunkerm-platform` mantenga todavía mounts broker-facing por compatibilidad transicional.
+- [x] `bunkerm-platform` ya no necesita escritura sobre `/etc/mosquitto` ni sobre los logs del broker para los slices de configuración de archivo, TLS, documento DynSec completo y `mosquitto_passwd`; esos mounts quedaron en solo lectura dentro del runtime local.
+- [x] El handoff efímero de `create_client` ya usa un spool cifrado en `/nextjs/data/reconcile-secrets`, compartido entre `bunkerm-platform` y `bhm-reconciler`, en lugar de reutilizar el filesystem del broker o persistir el password en SQLite.
+- [x] `bunkerm-platform` ya no necesita tampoco escritura sobre `/var/lib/mosquitto` para el runtime HTTP activo: la señal manual de recarga quedó encapsulada como capability broker-facing y las escrituras router-directas que siguen existiendo allí pertenecen solo a superficies legacy no montadas en `main.py`.
+- [x] Las superficies legacy históricas de AWS/Azure Bridge y el runtime standalone de DynSec ya no son ejecutables como writers alternativos del broker; quedaron explicitadas como compatibilidad retirada con respuesta `410 Gone` hasta que exista una migración real al control-plane.
+- [x] El mount `mosquitto-log` ya no es un prerequisito silencioso para que `clientlogs` arranque: el servicio puede degradarse de forma explícita y auditable cuando falta el fichero o cuando el tail se deshabilita por configuración.
+- [x] Los consumidores restantes de `mosquitto-log` y de `broker-resource-stats.json` ya exponen contrato HTTP y estado de fuente explícito, de modo que el acoplamiento observacional residual queda medible y reportable mientras se prepara su sustitución.
 - [ ] La solución no debe depender de que el backend principal comparta ownership del filesystem del broker.
 - [ ] Si existe un volumen persistente del broker, su manipulación efectiva debe quedar encapsulada en el componente que aplica cambios.
 - [x] Las capacidades AWS/Azure Bridge quedaron fuera de la superficie activa del producto y no deben considerarse parte del baseline funcional de Fase 3.
 
 ### Consideraciones Kubernetes después
 
-- [ ] El modelo de estado deseado debe poder mapearse a ConfigMaps, Secrets, CRDs o un operador más adelante.
+- [x] El modelo de estado deseado ya tiene una traducción conceptual inicial a objetos de plataforma: `mosquitto.conf` como configuración, `mosquitto_passwd` y TLS como secretos/material sensible y `dynamic-security.json` como artefacto privado reconciliado.
 - [ ] La semántica de reconciliación no debe depender de comandos ad hoc imposibles de portar a Kubernetes.
 - [ ] La aplicación de certificados y bridges debe poder evolucionar a secretos gestionados por la plataforma.
 - [x] Se documentó que un clúster local de Kubernetes puede usarse más adelante como carril opcional de validación, pero no como baseline obligatorio de Fase 3.
@@ -361,6 +503,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] El documento DynSec completo ya puede importarse, resetearse y sincronizarse desde `mosquitto_passwd` sin escritura directa desde la capa HTTP.
 - [x] El estado aplicado y observado del documento DynSec completo ya puede auditarse mediante `GET /api/v1/config/dynsec-json/status`.
 - [x] El slice real de documento DynSec completo y el sync desde `mosquitto_passwd` ya quedaron validados también contra el stack Podman activo, no solo por suite local.
+- [x] El archivo `mosquitto_passwd` ya puede solicitarse y auditarse como capability propia del control-plane mediante `POST /api/v1/dynsec/import-password-file` y `GET /api/v1/dynsec/password-file-status`.
+- [x] El baseline Compose-first ya puede ejecutar reconciliación broker-facing fuera del proceso web mediante el servicio `bhm-reconciler`.
 - [x] Las entidades de roles y grupos DynSec ya pueden solicitar cambios sin mutación directa del JSON desde la capa HTTP.
 - [x] El estado aplicado y observado de roles y grupos DynSec ya puede auditarse mediante endpoints de estado por entidad.
 - [x] Las memberships `group-client` DynSec ya pasan también por la costura explícita broker-facing y no por ejecución directa desde el router.
@@ -371,13 +515,30 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Los certificados TLS locales del broker ya pueden solicitar cambios sin escritura directa desde la capa HTTP.
 - [x] El estado aplicado y observado del cert store TLS ya puede auditarse mediante `GET /api/v1/config/tls-certs/status`.
 - [x] Existe rollback básico al menos para la reconciliación transicional de `mosquitto.conf`.
+- [x] El baseline Compose-first ya ejecuta en runtime real los slices anteriores con `bunkerm-platform` en modo daemon y con `/etc/mosquitto` y `/var/log/mosquitto` montados en solo lectura.
+- [x] El lifecycle principal de clientes DynSec ya puede solicitarse también en modo daemon sin persistir su password de creación en el control-plane durable.
+- [x] El baseline Compose-first ya puede ejecutar también la recarga manual de Mosquitto sin escritura directa desde la capa HTTP sobre `/var/lib/mosquitto/.reload`.
+- [x] No quedan superficies legacy ejecutables en el repositorio que sigan publicando rutas activas con lógica broker-facing directa para AWS/Azure Bridge o para el antiguo runtime standalone de DynSec.
+- [x] El acoplamiento activo restante a `mosquitto-log` ya está auditado por consumidor y `clientlogs` expone telemetría suficiente para seguir avanzando hacia una fase de observabilidad desacoplada sin perder trazabilidad del estado actual.
+- [x] El acoplamiento observacional restante a `mosquitto-log` y `broker-resource-stats.json` ya tiene reporting HTTP explícito por fuente, lo que permite medir el avance de Fase 3 sin depender solo del histórico narrativo de cortes.
 
 ### Tests
 
 - [x] Test unitario del modelo de estado deseado para `defaultACLAccess`.
 - [x] Test unitario del reconciliador de `defaultACLAccess`.
+- [x] `pytest tests/test_config.py tests/test_dynsec.py tests/test_architecture.py` pasó con `49 passed` tras introducir el modo daemon broker-facing para rutas elegibles.
+- [x] `deploy.ps1 -Action smoke` pasó con `5/5 OK` sobre el stack recompuesto con `bunkerm-platform` y `bhm-reconciler` activos.
+- [x] `pytest tests/test_dynsec.py tests/test_broker_reconcile_runner.py tests/test_architecture.py` pasó con `39 passed` tras daemonizar también las rutas principales de `routers/dynsec.py` y añadir el handoff efímero cifrado de `create_client`.
+- [x] `pytest tests/test_config.py tests/test_dynsec.py tests/test_broker_reconcile_runner.py tests/test_architecture.py` pasó con `58 passed` tras mover también la señal manual de reload al control-plane y endurecer `mosquitto-data` a solo lectura en el web container.
+- [x] `pytest tests/test_bridges.py tests/test_legacy_surfaces.py tests/test_architecture.py -q` pasó con `15 passed` y protege la retirada segura de superficies legacy broker-facing para que no vuelvan a introducir escrituras directas fuera del control-plane.
+- [x] `pytest tests/test_clientlogs.py tests/test_architecture.py -q` pasó con `13 passed` tras hacer auditable y opcional la dependencia de `clientlogs` respecto a `mosquitto-log`.
+- [x] `pytest tests/test_config.py tests/test_monitor.py tests/test_clientlogs.py tests/test_architecture.py -q` pasó con `44 passed` tras volver explícitos y auditables los consumidores restantes de `mosquitto-log` y `broker-resource-stats.json`.
 - [x] Test unitario del modelo de estado deseado para clientes DynSec y asignación de roles.
 - [x] Test unitario del reconciliador de clientes DynSec para create/enable-disable/roles.
+- [x] Tests de regresión para import/sync/status de `mosquitto_passwd` como scope propio del control-plane.
+- [x] Test de integración ligera del reconciliador broker-facing para la aplicación efectiva de `mosquitto_passwd`.
+- [x] Test unitario del runner CLI de reconciliación por scope.
+- [x] Test de guardrail arquitectónico para asegurar que `docker-compose.dev.yml` mantiene el servicio `bhm-reconciler` en el baseline Compose-first.
 - [x] Test unitario del modelo de estado deseado para roles, ACLs, grupos y memberships.
 - [x] Test unitario del reconciliador de roles, ACLs y grupos DynSec.
 - [x] Test unitario del modelo de estado deseado para `mosquitto.conf`.
@@ -392,6 +553,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Test de drift detection y estado observado para roles y grupos DynSec.
 - [x] Test de drift detection y estado observado para `mosquitto.conf`.
 - [x] Test de drift detection y estado observado para certificados TLS del broker.
+- [ ] La integración real `tests/test_broker_reconciler_real_integration.py` quedó preparada para este corte, pero en esta ejecución local terminó en `skipped` por precondiciones del entorno activo y no aportó una validación adicional del nuevo handoff efímero.
+- [x] `deploy.ps1 -Action smoke` volvió a cerrar en `5/5 OK` tras recrear `bunkerm-platform` con `mosquitto-data`, `mosquitto-conf` y `mosquitto-log` en solo lectura.
 
 ### Evidencia reciente
 
@@ -413,6 +576,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Se añadió `services/broker_runtime.py` como adapter local explícito para desacoplar la lógica del reconciliador de los detalles in-process del runtime broker-facing.
 - [x] Se amplió además la reconciliación broker-facing de grupos para cubrir memberships `group-client` y su prioridad desde el mismo seam explícito.
 - [x] Se amplió la costura broker-facing para cubrir también el documento DynSec completo y encapsular la señal `.dynsec-reload` detrás del runtime local.
+- [x] Se añadió `services/broker_reconcile_daemon.py` y el servicio Compose `bhm-reconciler` para empezar a ejecutar el control-loop broker-facing fuera del proceso web.
 - [x] Se añadió `tests/test_broker_reconciler_integration.py` para validar la costura broker-facing con filesystem temporal y comandos DynSec simulados.
 - [x] Se ajustó `.dockerignore` del runtime `bunkerm-platform` para excluir `frontend/node_modules` y permitir `podman compose build bunkerm` en Windows sin errores por modos de archivo en `.bin`.
 - [x] La suite enfocada `pytest tests/test_broker_reconciler_integration.py tests/test_architecture.py tests/test_bridges.py tests/test_config.py tests/test_dynsec.py -q` terminó en `49 passed`.
@@ -421,6 +585,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] La prueba real `pytest tests/test_broker_reconciler_real_integration.py -q` terminó en `1 passed` contra el stack Podman activo, verificando create/disable/delete de cliente tanto en `status` como en el broker real.
 - [x] La suite backend ampliada `pytest tests/test_dynsec.py tests/test_config.py tests/test_broker_reconciler_integration.py tests/test_architecture.py tests/test_bridges.py -q` terminó en `54 passed` tras migrar import/reset de DynSec y el sync desde `mosquitto_passwd` al control-plane.
 - [x] Tras reconstruir y refrescar de nuevo `bunkerm-platform`, la prueba real `pytest tests/test_broker_reconciler_real_integration.py -q` terminó en `3 passed`, validando lifecycle de cliente, import/reset de DynSec y sync desde `mosquitto_passwd` contra el stack Podman activo.
+- [x] `podman compose --env-file .env.dev -f docker-compose.dev.yml config` resuelve correctamente el nuevo servicio `bhm-reconciler` en el baseline Compose-first.
+- [x] La validación local `pytest tests/test_dynsec.py tests/test_broker_reconciler_integration.py tests/test_broker_reconcile_runner.py tests/test_architecture.py` terminó en `40 passed` tras introducir el daemon y el servicio Compose dedicado.
 
 ### Criterio de salida
 

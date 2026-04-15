@@ -14,6 +14,7 @@ from services.broker_runtime import BrokerRuntimePort, _signal_dynsec_reload, ge
 
 _MOSQUITTO_CONF_PATH: str = settings.mosquitto_conf_path
 _BACKUP_DIR: str = settings.mosquitto_conf_backup_dir
+_MOSQUITTO_PASSWD_PATH: str = settings.mosquitto_passwd_path
 _CERTS_DIR: str = settings.mosquitto_certs_dir
 _ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
 
@@ -28,6 +29,10 @@ class _ModuleConfiguredBrokerRuntime:
     @property
     def mosquitto_conf_backup_dir(self) -> str:
         return _BACKUP_DIR
+
+    @property
+    def mosquitto_passwd_path(self) -> str:
+        return _MOSQUITTO_PASSWD_PATH
 
     @property
     def mosquitto_certs_dir(self) -> str:
@@ -112,6 +117,13 @@ class BrokerReconciler:
                 self.runtime.write_dynsec(data)
 
         return errors
+
+    def signal_mosquitto_reload(self) -> List[str]:
+        try:
+            self.runtime.signal_mosquitto_reload()
+            return []
+        except Exception as exc:
+            return [f"signalMosquittoReload: {exc}"]
 
     def apply_client_projection(
         self,
@@ -421,6 +433,45 @@ class BrokerReconciler:
             "rollbackNote": rollback_note,
         }
 
+    def apply_mosquitto_passwd(self, rendered_content: str) -> Dict[str, Any]:
+        parent_dir = os.path.dirname(self.runtime.mosquitto_passwd_path)
+        if parent_dir:
+            os.makedirs(parent_dir, exist_ok=True)
+
+        previous_exists = os.path.exists(self.runtime.mosquitto_passwd_path)
+        previous_content = self.read_mosquitto_passwd_content()
+        rollback_note: str | None = None
+        errors: List[str] = []
+
+        try:
+            if previous_exists:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                backup_path = f"{self.runtime.mosquitto_passwd_path}.bak.{timestamp}"
+                shutil.copy2(self.runtime.mosquitto_passwd_path, backup_path)
+
+            with open(self.runtime.mosquitto_passwd_path, "w", encoding="utf-8") as handle:
+                handle.write(rendered_content)
+            os.chmod(self.runtime.mosquitto_passwd_path, 0o644)
+            self.runtime.signal_mosquitto_reload()
+        except Exception as exc:
+            errors.append(str(exc))
+            try:
+                if previous_exists:
+                    with open(self.runtime.mosquitto_passwd_path, "w", encoding="utf-8") as handle:
+                        handle.write(previous_content)
+                    os.chmod(self.runtime.mosquitto_passwd_path, 0o644)
+                elif os.path.exists(self.runtime.mosquitto_passwd_path):
+                    os.remove(self.runtime.mosquitto_passwd_path)
+                self.runtime.signal_mosquitto_reload()
+                rollback_note = "rollback applied"
+            except Exception as rollback_exc:
+                rollback_note = f"rollback failed: {rollback_exc}"
+
+        return {
+            "errors": errors,
+            "rollbackNote": rollback_note,
+        }
+
     def apply_tls_cert_store(self, desired_entries: List[Dict[str, Any]]) -> List[str]:
         os.makedirs(self.runtime.mosquitto_certs_dir, exist_ok=True)
         rollback_snapshots: Dict[str, bytes | None] = {}
@@ -504,6 +555,12 @@ class BrokerReconciler:
         if not os.path.exists(self.runtime.mosquitto_conf_path):
             return ""
         with open(self.runtime.mosquitto_conf_path, "r", encoding="utf-8") as handle:
+            return handle.read()
+
+    def read_mosquitto_passwd_content(self) -> str:
+        if not os.path.exists(self.runtime.mosquitto_passwd_path):
+            return ""
+        with open(self.runtime.mosquitto_passwd_path, "r", encoding="utf-8") as handle:
             return handle.read()
 
     def get_observed_default_acl(self) -> Dict[str, bool]:

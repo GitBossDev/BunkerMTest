@@ -370,8 +370,74 @@ def test_real_stack_syncs_passwd_users_to_dynsec():
         assert sync_response.status_code == 200, sync_response.text
         sync_body = sync_response.json()
         assert sync_body["controlPlane"]["scope"] == "broker.dynsec_config"
+        assert sync_body["passwdControlPlane"]["scope"] == "broker.mosquitto_passwd"
         assert sync_body["count"] >= 1
         _wait_until(assert_sync_applied, timeout_seconds=20.0)
+    finally:
+        if original_passwd is None:
+            _remove_platform_file(passwd_path)
+        else:
+            _copy_content_to_platform_file(passwd_path, original_passwd)
+        _restore_dynsec_document(session, base_url, original_doc)
+
+
+@pytest.mark.integration
+def test_real_stack_imports_password_file_and_updates_broker_artifacts():
+    _require_real_broker_tests_enabled()
+
+    platform_container = _container_name(PLATFORM_CONTAINER_ENV, "bunkerm-platform")
+    broker_container = _container_name(BROKER_CONTAINER_ENV, "bunkerm-mosquitto")
+    _require_container_running(platform_container)
+    _require_container_running(broker_container)
+
+    base_url = os.getenv(BASE_URL_ENV, "http://localhost:2000")
+    session = _login_session(base_url)
+    original_doc = _broker_dynsec_document()
+    passwd_path = _platform_env_var("MOSQUITTO_PASSWD_PATH", "/etc/mosquitto/mosquitto_passwd")
+    original_passwd = _platform_file_content(passwd_path, allow_missing=True)
+    username = f"phase3-import-passwd-{uuid.uuid4().hex[:8]}"
+
+    passwd_lines = [f"{username}:$7$phase3importhash1"]
+    desired_passwd = "\n".join(passwd_lines) + "\n"
+
+    def assert_import_applied() -> None:
+        passwd_status = session.get(
+            _proxy_url(base_url, "dynsec/password-file-status"),
+            timeout=10,
+        )
+        assert passwd_status.status_code == 200
+        passwd_body = passwd_status.json()
+        assert passwd_body["status"] in {"applied", "drift"}
+        assert passwd_body["scope"] == "broker.mosquitto_passwd"
+        assert passwd_body["user_count"] >= 1
+        assert username in passwd_body["observed"]["users"]
+
+        dynsec_status = session.get(
+            _proxy_url(base_url, "config/dynsec-json/status"),
+            timeout=10,
+        )
+        assert dynsec_status.status_code == 200
+        dynsec_body = dynsec_status.json()
+        assert dynsec_body["status"] in {"applied", "drift"}
+        assert any(entry.get("username") == username for entry in dynsec_body["observed"]["clients"])
+
+        platform_passwd = _platform_file_content(passwd_path)
+        assert platform_passwd == desired_passwd
+
+        dynsec_doc = _broker_dynsec_document()
+        assert any(entry.get("username") == username for entry in dynsec_doc.get("clients", []))
+
+    try:
+        import_response = session.post(
+            _proxy_url(base_url, "dynsec/import-password-file"),
+            files={"file": ("phase3-passwd", desired_passwd, "text/plain")},
+            timeout=15,
+        )
+        assert import_response.status_code == 200, import_response.text
+        import_body = import_response.json()
+        assert import_body["controlPlane"]["scope"] == "broker.mosquitto_passwd"
+        assert import_body["dynsecControlPlane"]["scope"] == "broker.dynsec_config"
+        _wait_until(assert_import_applied, timeout_seconds=20.0)
     finally:
         if original_passwd is None:
             _remove_platform_file(passwd_path)

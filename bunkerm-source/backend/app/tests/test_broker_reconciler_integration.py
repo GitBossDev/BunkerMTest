@@ -35,6 +35,31 @@ def test_broker_reconciler_applies_mosquitto_config_and_creates_backup(tmp_path,
     assert len(list(backup_dir.iterdir())) == 1
 
 
+def test_broker_reconciler_applies_mosquitto_passwd_and_creates_backup(tmp_path, monkeypatch):
+    """La aplicación efectiva de mosquitto_passwd debe escribir el archivo y dejar backup."""
+    passwd_path = tmp_path / "mosquitto_passwd"
+    passwd_path.write_text("sensor-01:$7$oldhash\n", encoding="utf-8")
+
+    reload_calls: list[str] = []
+
+    runtime = LocalBrokerRuntime(
+        mosquitto_conf_path=str(tmp_path / "mosquitto.conf"),
+        mosquitto_conf_backup_dir=str(tmp_path / "backups"),
+        mosquitto_passwd_path=str(passwd_path),
+        mosquitto_certs_dir=str(tmp_path / "certs"),
+    )
+    monkeypatch.setattr(runtime, "signal_mosquitto_reload", lambda: reload_calls.append("reload"))
+
+    reconciler = broker_reconciler.BrokerReconciler(runtime=runtime)
+    result = reconciler.apply_mosquitto_passwd("sensor-01:$7$newhash\nsensor-02:$7$otherhash\n")
+
+    assert result["errors"] == []
+    assert result["rollbackNote"] is None
+    assert passwd_path.read_text(encoding="utf-8") == "sensor-01:$7$newhash\nsensor-02:$7$otherhash\n"
+    assert reload_calls == ["reload"]
+    assert len(list(tmp_path.glob("mosquitto_passwd.bak.*"))) == 1
+
+
 def test_broker_reconciler_applies_default_acl_to_dynsec_and_calls_broker(tmp_path, monkeypatch):
     """El reconciliador debe proyectar ACL por defecto al JSON y emitir comandos broker-facing."""
     dynsec_path = tmp_path / "dynamic-security.json"

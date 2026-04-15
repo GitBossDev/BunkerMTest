@@ -84,7 +84,6 @@ async def test_save_mosquitto_config_uses_desired_state_and_returns_control_plan
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(config_router, "_signal_mosquitto_reload", lambda: None)
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
     monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
 
@@ -137,7 +136,6 @@ async def test_remove_listener_updates_control_plane_state(client, monkeypatch, 
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(config_router, "_signal_mosquitto_reload", lambda: None)
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
 
     resp = await client.post("/api/v1/config/remove-mosquitto-listener", json={"port": 9001})
@@ -148,6 +146,39 @@ async def test_remove_listener_updates_control_plane_state(client, monkeypatch, 
     written = conf_path.read_text(encoding="utf-8")
     assert "listener 9001" not in written
     assert "listener 1900" in written
+
+
+async def test_restart_mosquitto_uses_control_plane_signal(client, monkeypatch):
+    """El restart publicado debe delegar la señal al reconciliador broker-facing."""
+    calls: list[tuple[tuple, dict]] = []
+
+    async def fake_set_reload_desired(session, payload=None):
+        return type(
+            "State",
+            (),
+            {
+                "scope": desired_state_svc.BROKER_RELOAD_SCOPE,
+                "version": 3,
+                "reconcile_status": "pending",
+                "drift_detected": False,
+                "last_error": None,
+            },
+        )()
+
+    async def fake_reconcile_or_wait(state, reconcile_action, session, *args, **kwargs):
+        calls.append((args, kwargs))
+        state.reconcile_status = "applied"
+        return state
+
+    monkeypatch.setattr(desired_state_svc, "set_broker_reload_desired", fake_set_reload_desired)
+    monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+
+    resp = await client.post("/api/v1/config/restart-mosquitto")
+
+    assert resp.status_code == 200
+    assert resp.json()["controlPlane"]["scope"] == desired_state_svc.BROKER_RELOAD_SCOPE
+    assert resp.json()["controlPlane"]["status"] == "applied"
+    assert calls == [((), {})]
 
 
 async def test_mosquitto_config_status_detects_drift_after_external_change(client, monkeypatch, tmp_path):
@@ -162,7 +193,6 @@ async def test_mosquitto_config_status_detects_drift_after_external_change(clien
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(config_router, "_signal_mosquitto_reload", lambda: None)
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
     monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
 
@@ -210,7 +240,6 @@ async def test_save_mosquitto_config_returns_500_and_rolls_back_when_reload_fail
         if signal_calls["count"] == 1:
             raise RuntimeError("reload failed")
 
-    monkeypatch.setattr(config_router, "_signal_mosquitto_reload", fail_then_succeed)
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", fail_then_succeed)
 
     payload = {
@@ -340,6 +369,61 @@ async def test_upload_tls_cert_returns_500_and_rolls_back_when_reconcile_fails(c
     status_resp = await client.get("/api/v1/config/tls-certs/status")
     assert status_resp.status_code == 200
     assert status_resp.json()["status"] == "error"
+
+
+async def test_broker_logs_returns_source_metadata_when_file_missing(client, monkeypatch, tmp_path):
+    """El endpoint delega al servicio interno y conserva metadatos de source."""
+
+    async def fake_fetch_broker_logs(limit=1000):
+        assert limit == 1000
+        return {
+            "logs": [],
+            "path": str(tmp_path / "missing.log"),
+            "error": "Log file not found",
+            "source": {
+                "path": str(tmp_path / "missing.log"),
+                "available": False,
+                "mode": "shared-log-file",
+            },
+        }
+
+    monkeypatch.setattr(config_router.broker_observability_client, "fetch_broker_logs", fake_fetch_broker_logs)
+
+    resp = await client.get("/api/v1/config/broker")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["logs"] == []
+    assert body["source"]["path"] == str(tmp_path / "missing.log")
+    assert body["source"]["available"] is False
+    assert body["source"]["mode"] == "shared-log-file"
+
+
+async def test_broker_log_source_status_returns_200(client, monkeypatch):
+    """El endpoint de estado de fuente para logs del broker debe responder siempre."""
+
+    async def fake_fetch_source_status():
+        return {"source": {"path": "/var/log/mosquitto/mosquitto.log", "available": True}}
+
+    monkeypatch.setattr(config_router.broker_observability_client, "fetch_broker_log_source_status", fake_fetch_source_status)
+
+    resp = await client.get("/api/v1/config/broker/source-status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "source" in body
+    assert "path" in body["source"]
+
+
+async def test_broker_logs_returns_503_when_observability_service_is_unavailable(client, monkeypatch):
+    """Si el servicio interno no responde, config/broker debe exponer 503."""
+
+    async def failing_fetch_broker_logs(limit=1000):
+        raise config_router.broker_observability_client.BrokerObservabilityUnavailable("dial tcp timeout")
+
+    monkeypatch.setattr(config_router.broker_observability_client, "fetch_broker_logs", failing_fetch_broker_logs)
+
+    resp = await client.get("/api/v1/config/broker")
+    assert resp.status_code == 503
+    assert "Broker observability service unavailable" in resp.json()["detail"]
 
 
 async def test_dynsec_json_status_returns_unmanaged_without_desired_state(client, monkeypatch, tmp_path):
