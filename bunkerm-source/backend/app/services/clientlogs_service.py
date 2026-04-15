@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import time
 import uuid
 import threading
@@ -20,6 +19,7 @@ from pydantic import BaseModel
 from clientlogs.sqlite_activity_storage import client_activity_storage
 from core.config import settings
 from monitor.topic_sqlite_storage import topic_history_storage
+from services import broker_observability_client
 
 # ---------------------------------------------------------------------------
 # Constantes y patrones regex
@@ -426,13 +426,49 @@ def get_clientlogs_source_status() -> Dict[str, Dict[str, object]]:
         }
 
 
+def _remember_recent_log_signature(
+    signature: str,
+    recent_signatures: deque[str],
+    recent_signature_set: set[str],
+) -> None:
+    if signature in recent_signature_set:
+        return
+    if len(recent_signatures) == recent_signatures.maxlen:
+        evicted = recent_signatures.popleft()
+        recent_signature_set.discard(evicted)
+    recent_signatures.append(signature)
+    recent_signature_set.add(signature)
+
+
+def _process_log_snapshot(
+    lines: List[str],
+    *,
+    replay: bool,
+    recent_signatures: deque[str],
+    recent_signature_set: set[str],
+) -> int:
+    processed = 0
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line in recent_signature_set:
+            continue
+        mqtt_monitor.process_line(line, replay=replay)
+        _remember_recent_log_signature(line, recent_signatures, recent_signature_set)
+        processed += 1
+    return processed
+
+
 # ---------------------------------------------------------------------------
 # Funciones de fondo (se ejecutan como hilos daemon en el lifespan)
 # ---------------------------------------------------------------------------
 
 def monitor_mosquitto_logs() -> None:
-    """Lee el log de Mosquitto en tiempo real y alimenta el MQTTMonitor."""
+    """Consume snapshots de logs vía observabilidad broker-owned y alimenta el MQTTMonitor."""
     log_file = os.getenv("BROKER_LOG_PATH", settings.broker_log_path)
+    recent_signatures: deque[str] = deque(maxlen=10000)
+    recent_signature_set: set[str] = set()
+    poll_interval = max(settings.broker_observability_log_poll_interval_seconds, 0.5)
+    snapshot_limit = max(100, min(settings.broker_observability_log_snapshot_lines, 5000))
     _update_source_status(
         "logTail",
         enabled=settings.broker_log_tail_enabled,
@@ -441,6 +477,8 @@ def monitor_mosquitto_logs() -> None:
         available=False,
         replayCompleted=False,
         lastError=None,
+        mode="broker-observability-service",
+        endpoint=settings.broker_observability_url,
     )
 
     if not settings.broker_log_tail_enabled:
@@ -448,119 +486,57 @@ def monitor_mosquitto_logs() -> None:
         _update_source_status("logTail", lastError="disabled_by_config")
         return
 
-    if not os.path.isfile(log_file):
-        print(f"Monitoreo de logs no iniciado: archivo no encontrado en {log_file}")
-        _update_source_status("logTail", lastError="log_file_not_found")
-        return
-
-    print("Iniciando monitoreo de logs de Mosquitto...")
-    _update_source_status("logTail", available=True)
-
-    # Replay de arranque: reconstruye el estado de conexiones y suscripciones
-    try:
-        result = subprocess.run(
-            [
-                "grep", "-E",
-                "New client connected from|Client .+ disconnected|Client .+ closed its connection",
-                log_file,
-            ],
-            capture_output=True,
-            text=True,
-        )
-        for replay_line in result.stdout.splitlines():
-            line = replay_line.strip()
-            if line:
-                mqtt_monitor.process_line(line, replay=True)
-        print(
-            f"Replay de arranque: {len(mqtt_monitor.connected_clients)} conectados, "
-            f"{len(mqtt_monitor._client_usernames)} usernames conocidos."
-        )
-    except Exception as exc:
-        print(f"Replay de arranque falló: {exc}")
-        _update_source_status("logTail", lastError=f"startup_replay_failed: {exc}")
-
-    try:
-        result_sub = subprocess.run(
-            ["grep", "-E", r": [^ ]+ [012] [^ ]+$", log_file],
-            capture_output=True,
-            text=True,
-        )
-        for replay_line in result_sub.stdout.splitlines():
-            line = replay_line.strip()
-            if line:
-                mqtt_monitor.process_line(line, replay=True)
-        print(f"Replay de suscripciones: {len(mqtt_monitor._subscription_counts)} tópicos distintos.")
-    except Exception as exc:
-        print(f"Replay de suscripciones falló: {exc}")
-        _update_source_status("logTail", lastError=f"subscription_replay_failed: {exc}")
-
-    # Detección de reinicio de Mosquitto: si el broker terminó después de la última conexión,
-    # los clientes "conectados" son fantasmas — los limpiamos
-    try:
-        term_grep = subprocess.run(
-            ["grep", "mosquitto version .* terminating", log_file],
-            capture_output=True,
-            text=True,
-        )
-        if term_grep.returncode == 0:
-            term_lines = [l.strip() for l in term_grep.stdout.splitlines() if l.strip()]
-            if term_lines and mqtt_monitor.connected_clients:
-                last_term_raw = term_lines[-1].split(": ")[0]
-                if last_term_raw.isdigit():
-                    last_term_dt = datetime.fromtimestamp(int(last_term_raw), tz=timezone.utc)
-                else:
-                    last_term_dt = datetime.fromisoformat(last_term_raw).replace(tzinfo=timezone.utc)
-                last_conn_dt = max(
-                    (datetime.fromisoformat(ev.timestamp) for ev in mqtt_monitor.connected_clients.values()),
-                    default=datetime.min.replace(tzinfo=timezone.utc),
-                )
-                if last_term_dt > last_conn_dt:
-                    stale = len(mqtt_monitor.connected_clients)
-                    mqtt_monitor.connected_clients.clear()
-                    mqtt_monitor._last_seen.clear()
-                    print(f"Arranque: reinicio detectado — eliminados {stale} clientes obsoletos.")
-    except Exception as exc:
-        print(f"Arranque: detección de reinicio falló: {exc}")
-        _update_source_status("logTail", lastError=f"restart_detection_failed: {exc}")
-
-    _update_source_status("logTail", replayCompleted=True)
-
-    # Lectura continua con tail -f
-    try:
-        process = subprocess.Popen(
-            ["tail", "-f", log_file],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-    except Exception as exc:
-        _update_source_status("logTail", lastError=f"tail_start_failed: {exc}")
-        print(f"Monitoreo continuo de logs no pudo iniciarse: {exc}")
-        return
-
-    print("Monitoreo continuo de logs iniciado.")
-    _update_source_status("logTail", running=True, lastError=None)
+    print("Iniciando monitoreo de logs vía broker observability...")
+    replay_completed = False
     while True:
-        line = process.stdout.readline()
-        if line:
-            mqtt_monitor.process_line(line.strip())
+        try:
+            payload = broker_observability_client.fetch_broker_logs_sync(limit=snapshot_limit)
+            source = payload.get("source") or {}
             _update_source_status(
                 "logTail",
-                lastEventAt=datetime.now(tz=timezone.utc).isoformat(),
+                running=True,
+                available=bool(source.get("available", False)),
+                path=source.get("path", log_file),
+                lastError=payload.get("error") or source.get("lastError"),
             )
-            continue
 
-        if process.poll() is not None:
-            stderr_output = ""
-            if process.stderr is not None:
-                stderr_output = process.stderr.read().strip()
+            lines = payload.get("logs") or []
+            if not replay_completed:
+                processed = _process_log_snapshot(
+                    lines,
+                    replay=True,
+                    recent_signatures=recent_signatures,
+                    recent_signature_set=recent_signature_set,
+                )
+                replay_completed = True
+                _update_source_status("logTail", replayCompleted=True, lastError=None)
+                print(
+                    "Replay de arranque vía broker observability: "
+                    f"{processed} líneas, {len(mqtt_monitor.connected_clients)} conectados, "
+                    f"{len(mqtt_monitor._subscription_counts)} tópicos con suscripciones."
+                )
+            else:
+                processed = _process_log_snapshot(
+                    lines,
+                    replay=False,
+                    recent_signatures=recent_signatures,
+                    recent_signature_set=recent_signature_set,
+                )
+                if processed > 0:
+                    _update_source_status(
+                        "logTail",
+                        lastEventAt=datetime.now(tz=timezone.utc).isoformat(),
+                        lastError=None,
+                    )
+        except broker_observability_client.BrokerObservabilityUnavailable as exc:
             _update_source_status(
                 "logTail",
                 running=False,
-                lastError=stderr_output or f"tail_exited:{process.returncode}",
+                available=False,
+                lastError=str(exc),
             )
-            print(f"Monitoreo continuo de logs finalizó: {stderr_output or process.returncode}")
-            return
+            print(f"Monitoreo de logs vía broker observability no disponible: {exc}")
+        time.sleep(poll_interval)
 
 
 def monitor_mqtt_publishes() -> None:

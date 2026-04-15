@@ -104,12 +104,7 @@ services:
   # En esta fase representa temporalmente bhm-web + bhm-api.
   # ==========================================
   bunkerm:
-    build:
-      context: ./bunkerm-source
-      dockerfile: Dockerfile.next
-      args:
-        # API key para Next.js en tiempo de build
-        - NEXT_PUBLIC_API_KEY=${API_KEY:-default_api_key_replace_in_production}
+    image: bunkermtest-bunkerm:latest
     container_name: bunkerm-platform
     restart: unless-stopped
     depends_on:
@@ -177,7 +172,6 @@ services:
       # Se mantienen por compatibilidad transicional y no deben ampliarse.
       - mosquitto-data:/var/lib/mosquitto:ro   # DynSec JSON y marcadores broker-facing: solo lectura desde web
       - mosquitto-conf:/etc/mosquitto:ro    # mosquitto.conf/certs/passwd: lectura desde web; escritura solo via bhm-reconciler
-      - mosquitto-log:/var/log/mosquitto:ro # logs del broker (clientlogs los parsea)
     networks:
       bunkerm-network:
         aliases:
@@ -197,11 +191,7 @@ services:
   # misma imagen y volúmenes compartidos del baseline Compose-first.
   # ==========================================
   bhm-reconciler:
-    build:
-      context: ./bunkerm-source
-      dockerfile: Dockerfile.next
-      args:
-        - NEXT_PUBLIC_API_KEY=${API_KEY:-default_api_key_replace_in_production}
+    image: bunkermtest-bunkerm:latest
     container_name: bunkerm-reconciler
     restart: unless-stopped
     depends_on:
@@ -250,11 +240,7 @@ services:
   # Broker observability interno - read-only sobre artefactos del broker
   # ==========================================
   bhm-broker-observability:
-    build:
-      context: ./bunkerm-source
-      dockerfile: Dockerfile.next
-      args:
-        - NEXT_PUBLIC_API_KEY=${API_KEY:-default_api_key_replace_in_production}
+    image: bunkermtest-bunkerm:latest
     container_name: bunkerm-broker-observability
     restart: unless-stopped
     depends_on:

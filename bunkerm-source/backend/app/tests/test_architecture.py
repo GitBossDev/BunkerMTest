@@ -15,6 +15,24 @@ import sys
 import pathlib
 
 
+def _compose_service_block(compose_text: str, service_name: str) -> str:
+    lines = compose_text.splitlines()
+    block: list[str] = []
+    capturing = False
+    service_header = f"  {service_name}:"
+
+    for line in lines:
+        if line.startswith(service_header):
+            capturing = True
+        elif capturing and line.startswith("  ") and not line.startswith("    "):
+            break
+
+        if capturing:
+            block.append(line)
+
+    return "\n".join(block)
+
+
 # ---------------------------------------------------------------------------
 # D1.1 — Puerto unificado
 # ---------------------------------------------------------------------------
@@ -195,23 +213,25 @@ def test_compose_web_service_uses_daemon_mode_and_read_only_broker_mounts():
     """Protege el siguiente recorte: el web container no debe escribir mounts broker-facing."""
     compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
+    bunkerm_block = _compose_service_block(compose_text, "bunkerm")
 
     assert "BROKER_RECONCILE_MODE=daemon" in compose_text
     assert "BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102" in compose_text
-    assert "mosquitto-data:/var/lib/mosquitto:ro" in compose_text
-    assert "mosquitto-conf:/etc/mosquitto:ro" in compose_text
-    assert "mosquitto-log:/var/log/mosquitto:ro" in compose_text
+    assert "mosquitto-data:/var/lib/mosquitto:ro" in bunkerm_block
+    assert "mosquitto-conf:/etc/mosquitto:ro" in bunkerm_block
+    assert "mosquitto-log:/var/log/mosquitto:ro" not in bunkerm_block
 
 
 def test_compose_baseline_includes_broker_observability_service():
     """Protege el recorte donde config/monitor consumen observabilidad broker-owned por HTTP interno."""
     compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
     compose_text = compose_path.read_text(encoding="utf-8")
+    observability_block = _compose_service_block(compose_text, "bhm-broker-observability")
 
     assert "bhm-broker-observability:" in compose_text
     assert "container_name: bunkerm-broker-observability" in compose_text
     assert "services.broker_observability_api:app" in compose_text
-    assert "mosquitto-log:/var/log/mosquitto:ro" in compose_text
+    assert "mosquitto-log:/var/log/mosquitto:ro" in observability_block
 
 
 def test_config_and_monitor_routers_no_longer_read_shared_broker_files_directly():

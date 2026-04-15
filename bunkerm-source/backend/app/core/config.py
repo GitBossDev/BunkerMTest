@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     broker_observability_enabled: bool = True
     broker_observability_url: str = "http://bhm-broker-observability:9102"
     broker_observability_timeout_seconds: float = 2.0
+    broker_observability_log_poll_interval_seconds: float = 2.0
+    broker_observability_log_snapshot_lines: int = 5000
     api_log_file: str = "/nextjs/data/api.log"
     broker_reconcile_mode: str = "inline"
     broker_reconcile_wait_timeout_seconds: float = 10.0

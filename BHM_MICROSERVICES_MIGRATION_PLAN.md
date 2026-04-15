@@ -191,7 +191,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `docker compose` o `podman compose` levantan todos los servicios requeridos.
 - [x] Cada contenedor expone solo los puertos realmente necesarios.
 - [x] El frontend funciona consumiendo exclusivamente la API.
-- [ ] El backend de gestión no depende de escribir directamente en archivos del broker para arrancar.
+- [x] El backend de gestión no depende de escribir directamente en archivos del broker para arrancar.
 
 ### Tests
 
@@ -211,6 +211,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `deploy.ps1 -Action stop` y `deploy.ps1 -Action start` completaron correctamente y dejaron el stack operativo otra vez.
 - [x] `deploy.ps1 -Action restart` reconstruyó el runtime y dejó `bunkerm-mosquitto` y `bunkerm-platform` en estado `healthy`.
 - [x] `deploy.ps1 -Action build` construyó correctamente `bunkermtest-mosquitto:latest` y `bunkermtest-bunkerm:latest`.
+- [x] `deploy.ps1 -Action start` reconstruyó el stack Compose-first usando la imagen reutilizable `bunkermtest-bunkerm:latest` para `bunkerm-platform`, `bhm-reconciler` y `bhm-broker-observability`, y el smoke automático volvió a cerrar en `5/5 OK`.
 - [x] `deploy.ps1 -Action smoke` terminó en `5/5 OK` después de endurecer el check autenticado de DynSec frente a timing de arranque.
 - [x] `GET /login` respondió `200 OK` y devolvió la pantalla de autenticación de Next.js.
 - [x] `POST /api/auth/login` con las credenciales iniciales dejó una cookie de sesión reutilizable en `http://localhost:2000` tras ajustar la política `Secure` al esquema real de `FRONTEND_URL`.
@@ -218,16 +219,18 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] El runtime activo expone `2000/tcp` para la plataforma y `1900/tcp`, `9001/tcp` para el broker.
 - [x] Dos reinicios controlados mantuvieron estable el hash de `dynamic-security.json`, confirmando que el entrypoint del broker dejó de reescribir el archivo cuando no hay cambios efectivos de credenciales.
 - [x] El broker registró `Credentials already synchronized for admin`, confirmando sincronización idempotente en arranque.
+- [x] La inspección runtime confirmó que `bunkerm-platform` ya no monta `/var/log/mosquitto`, mientras que `bunkerm-broker-observability` sí mantiene ese mount en solo lectura como consumidor broker-owned.
+- [x] Desde `bunkerm-platform` se validó por HTTP interno que `bhm-broker-observability` expone `source-status` disponible para `mosquitto.log` y `broker-resource-stats.json`, confirmando el nuevo camino runtime de observabilidad desacoplada del proceso web.
 
 ### Hallazgos abiertos
 
-- [ ] El backend actual sigue acoplado a `dynamic-security.json`, `mosquitto.conf` y logs compartidos; la verificación de arranque sin escritura/lectura directa del filesystem del broker sigue pendiente y se resolverá en Fase 3.
+- [x] La deuda original sobre arranque del backend quedó cerrada en Fase 3: el proceso web ya no necesita escribir directamente en archivos del broker para arrancar y la lectura observacional de logs/resource stats quedó desplazada a `bhm-broker-observability`; permanecen solo mounts de compatibilidad transicional en solo lectura para artefactos broker-facing aún gobernados por el control-plane.
 - [x] El smoke test de `deploy.ps1` fue endurecido con reintentos en la llamada autenticada a DynSec porque el hot-patch posterior al arranque puede introducir una ventana corta de falso negativo.
 - [x] La cookie de autenticación del frontend ya no fuerza `Secure` en el baseline HTTP local; se usa cookie segura automáticamente cuando `FRONTEND_URL` es `https`.
 
 ### Criterio de salida
 
-- [ ] BHM funciona correctamente como stack Compose-first y deja de depender de supuestos de despliegue monolítico.
+- [x] BHM funciona correctamente como stack Compose-first y deja de depender de supuestos de despliegue monolítico.
 
 ---
 
@@ -237,30 +240,31 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Actividades
 
-- [ ] Diseñar el modelo de estado deseado para configuración del broker.
-- [ ] Diseñar el modelo de estado deseado para clientes, roles, grupos y ACLs.
+- [x] Diseñar el modelo de estado deseado para configuración del broker.
+- [x] Diseñar el modelo de estado deseado para clientes, roles, grupos y ACLs.
 - [x] Definir el servicio reconciliador responsable de aplicar cambios al broker dentro del proceso actual, dejando una costura explícita para su futura separación.
-- [ ] Separar configuración deseada, configuración generada, estado aplicado y estado observado.
-- [ ] Diseñar detección de drift entre el estado deseado y el estado real del broker.
-- [ ] Rediseñar los endpoints de gestión para que soliciten cambios en lugar de escribir archivos directamente.
-- [ ] Definir estrategia de aplicación de cambios en Docker/Podman Compose.
-- [ ] Definir equivalencia conceptual para Kubernetes, aunque la implementación llegue más adelante.
+- [x] Separar configuración deseada, configuración generada, estado aplicado y estado observado.
+- [x] Diseñar detección de drift entre el estado deseado y el estado real del broker.
+- [x] Rediseñar los endpoints de gestión para que soliciten cambios en lugar de escribir archivos directamente.
+- [x] Definir estrategia de aplicación de cambios en Docker/Podman Compose.
+- [x] Definir equivalencia conceptual para Kubernetes, aunque la implementación llegue más adelante.
 - [x] Evaluar si un laboratorio local de Kubernetes agrega valor en Fase 3 o si debe mantenerse fuera del camino crítico.
-- [ ] Replantear la gestión de bridges y certificados dentro del mismo modelo de reconciliación, excluyendo AWS/Azure del alcance funcional activo del producto.
-- [ ] Definir rollback para cambios fallidos al broker.
+- [x] Replantear la gestión de bridges y certificados dentro del mismo modelo de reconciliación, excluyendo AWS/Azure del alcance funcional activo del producto.
+- [x] Definir rollback para cambios fallidos al broker.
 
 ### Estado de avance reportable de Fase 3
 
-- [x] Cortes implementados hasta ahora: 25 slices incrementales cerrados y validados localmente.
+- [x] Cortes implementados hasta ahora: 26 slices incrementales cerrados y validados localmente.
 - [x] Modelo de estado deseado para configuración del broker: cubierto para `mosquitto.conf`, TLS, documento DynSec completo, `mosquitto_passwd`, `broker.reload_signal` y placeholder transicional `broker.bridge_bundle` para bridges futuros fuera de la superficie activa.
-- [~] Modelo de estado deseado para clientes, roles, grupos y ACLs: avanzado. Las entidades DynSec principales ya operan por desired state + reconciliación; queda pendiente consolidar el reporting final del modelo frente a la futura persistencia PostgreSQL.
+- [x] Modelo de estado deseado para clientes, roles, grupos y ACLs: cubierto en el baseline activo. Las entidades DynSec principales ya operan por desired state + reconciliación con estado auditable por entidad o capability.
 - [x] Separación entre configuración deseada, generada, aplicada y observada: reportable. `desired`, `applied` y `observed` ya existen para las capabilities broker-facing; la dimensión `generated` queda explicitada como artefacto derivado o payload servido por el componente broker-owned cuando aplica.
 - [x] Detección de drift: reportable para las capabilities del control-plane. La cobertura residual fuera de drift estricto queda acotada a observabilidad histórica (`clientlogs`) y no al núcleo de aplicación broker-facing.
-- [x] Endpoints de gestión que solicitan cambios en vez de escribir al broker: cubierto para la superficie activa. `config` y `monitor` ya no leen directamente `mosquitto.log` ni `broker-resource-stats.json` desde el proceso web principal.
-- [x] Estrategia Compose-first de aplicación de cambios: avanzada y evidenciada. `bhm-reconciler` ejecuta el loop broker-facing fuera del proceso web y `bhm-broker-observability` aísla la lectura observacional broker-owned para las dos fuentes transicionales que seguían acopladas.
-- [~] Equivalencia conceptual para Kubernetes: en curso. El mapeo principal ya está documentado para config, passwd, TLS y DynSec; faltan lineamientos finales para observabilidad y posibles bridges futuros.
+- [x] Endpoints de gestión que solicitan cambios en vez de escribir al broker: cubierto para la superficie activa. `config`, `monitor` y `clientlogs` ya no dependen de lectura directa de `mosquitto.log` ni `broker-resource-stats.json` desde el proceso web principal.
+- [x] Estrategia Compose-first de aplicación de cambios: avanzada y evidenciada. `bhm-reconciler` ejecuta el loop broker-facing fuera del proceso web y `bhm-broker-observability` centraliza la lectura observacional broker-owned para logs y resource stats.
+- [x] Equivalencia conceptual para Kubernetes: cerrada a nivel conceptual para la salida de Fase 3. El baseline actual ya mapea config/secretos/estado deseado/observabilidad broker-owned a componentes portables y deja `bridge_bundle` como capability diferida sin bloquear la traducción posterior a Jobs, sidecars o controladores en Kubernetes.
 - [x] Bridges y certificados en el modelo de reconciliación: reportable. TLS ya quedó absorbido por el control-plane y los bridges futuros tienen ahora placeholder explícito `broker.bridge_bundle` sin reactivar AWS/Azure Bridge.
 - [x] Rollback por capability: reportable. Existe rollback o degradación controlada para las capabilities broker-facing activas y queda explícita la excepción de observabilidad histórica, que se mueve a Fase 5.
+- [x] Deuda residual de Fase 3: cerrada para el criterio de salida actual. El núcleo broker-facing del proceso web ya no mantiene escritura cruzada ni lectura directa de logs/stats del broker; el trabajo restante queda ya reubicado como evolución posterior de Fase 5/Fase 8 y no como bloqueo del baseline Compose-first.
 
 ### Cortes restantes propuestos para cerrar Fase 3
 
@@ -283,6 +287,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 | `broker.bridge_bundle` | `broker_desired_state` | payload diferido documentado | no aplica aún | no aplica aún | No | no aplica | Diferido |
 | `config/broker` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | `503` explícito | Transicional |
 | `monitor/stats/resources` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | fallback-process / unavailable | Transicional |
+| `clientlogs/logTail` observabilidad | no aplica | snapshot de logs servido por `bhm-broker-observability` | polling interno broker-owned | source-status HTTP | No | degradación explícita + reintento | Transicional |
 
 ### Primer corte implementado
 
@@ -463,6 +468,14 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Los mounts broker-facing que siguen presentes en `bunkerm-platform` quedan acotados a compatibilidad transicional: `mosquitto-data` y `mosquitto-conf` en solo lectura para observación/control-plane ya recortado, y `mosquitto-log` pendiente solo por la funcionalidad histórica de `clientlogs`, que pasa a Fase 5 de observabilidad y reporting técnico.
 - [x] Con esto, la deuda residual deja de ser un problema del núcleo de gestión broker-facing y queda explicitada como trabajo posterior de observabilidad desacoplada.
 
+### Vigésimo sexto corte implementado
+
+- [x] `services/clientlogs_service.py` ya no usa `tail -f` ni `grep` locales sobre `mosquitto.log`; ahora consume snapshots vía `broker_observability_client.fetch_broker_logs_sync()` y mantiene `source-status` auditable con degradación explícita y reintentos.
+- [x] `services/monitor_service.py` dejó también de leer `broker-resource-stats.json` por filesystem local para los snapshots históricos persistidos; ese path ya consume el servicio interno `bhm-broker-observability` tanto en la capa HTTP como en la capa de storage histórico.
+- [x] `docker-compose.dev.yml` ya no monta `mosquitto-log` dentro de `bunkerm-platform`; ese volumen queda acotado al broker y al servicio interno broker-owned de observabilidad.
+- [x] Con este corte, el proceso web principal ya no mantiene accesos directos activos ni a `mosquitto.log` ni a `broker-resource-stats.json`, cerrando la deuda ejecutable detectada en la revisión general de los cortes de Fase 3.
+- [x] La validación runtime ampliada sobre el stack activo confirmó además que `bunkerm-platform` consume `source-status` de logs y resource stats por HTTP interno contra `bhm-broker-observability`, y que el mount `/var/log/mosquitto` ya no existe en el contenedor web.
+
 ### Consideraciones Docker/Podman ahora
 
 - [x] El primer reconciliador de `defaultACLAccess` es compatible con el runtime Compose-first actual.
@@ -473,17 +486,17 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] El handoff efímero de `create_client` ya usa un spool cifrado en `/nextjs/data/reconcile-secrets`, compartido entre `bunkerm-platform` y `bhm-reconciler`, en lugar de reutilizar el filesystem del broker o persistir el password en SQLite.
 - [x] `bunkerm-platform` ya no necesita tampoco escritura sobre `/var/lib/mosquitto` para el runtime HTTP activo: la señal manual de recarga quedó encapsulada como capability broker-facing y las escrituras router-directas que siguen existiendo allí pertenecen solo a superficies legacy no montadas en `main.py`.
 - [x] Las superficies legacy históricas de AWS/Azure Bridge y el runtime standalone de DynSec ya no son ejecutables como writers alternativos del broker; quedaron explicitadas como compatibilidad retirada con respuesta `410 Gone` hasta que exista una migración real al control-plane.
-- [x] El mount `mosquitto-log` ya no es un prerequisito silencioso para que `clientlogs` arranque: el servicio puede degradarse de forma explícita y auditable cuando falta el fichero o cuando el tail se deshabilita por configuración.
-- [x] Los consumidores restantes de `mosquitto-log` y de `broker-resource-stats.json` ya exponen contrato HTTP y estado de fuente explícito, de modo que el acoplamiento observacional residual queda medible y reportable mientras se prepara su sustitución.
-- [ ] La solución no debe depender de que el backend principal comparta ownership del filesystem del broker.
-- [ ] Si existe un volumen persistente del broker, su manipulación efectiva debe quedar encapsulada en el componente que aplica cambios.
+- [x] `bunkerm-platform` ya no monta `mosquitto-log`; la observabilidad de logs y resource stats del broker quedó trasladada a `bhm-broker-observability`, que es ahora el único consumidor broker-owned de ese volumen compartido.
+- [x] `clientlogs`, `config` y `monitor` ya consumen observabilidad broker-owned por HTTP interno y exponen estado de fuente explícito, de modo que el acoplamiento observacional residual dejó de vivir dentro del proceso web principal.
+- [x] La solución ya no depende de que el backend principal comparta ownership del filesystem del broker; el web mantiene solo mounts transicionales en solo lectura y las escrituras broker-facing viven fuera del proceso HTTP.
+- [x] Si existe un volumen persistente del broker, su manipulación efectiva queda encapsulada en los componentes broker-owned que aplican cambios u observan artefactos (`bhm-reconciler` y `bhm-broker-observability`).
 - [x] Las capacidades AWS/Azure Bridge quedaron fuera de la superficie activa del producto y no deben considerarse parte del baseline funcional de Fase 3.
 
 ### Consideraciones Kubernetes después
 
 - [x] El modelo de estado deseado ya tiene una traducción conceptual inicial a objetos de plataforma: `mosquitto.conf` como configuración, `mosquitto_passwd` y TLS como secretos/material sensible y `dynamic-security.json` como artefacto privado reconciliado.
-- [ ] La semántica de reconciliación no debe depender de comandos ad hoc imposibles de portar a Kubernetes.
-- [ ] La aplicación de certificados y bridges debe poder evolucionar a secretos gestionados por la plataforma.
+- [x] La semántica de reconciliación ya no depende de comandos ad hoc como contrato de arquitectura: los detalles de ejecución quedan encapsulados detrás de capabilities de desired state y de componentes broker-owned, lo que permite traducirlos después a Jobs, sidecars o controladores en Kubernetes.
+- [x] La aplicación de certificados y bridges ya puede evolucionar a secretos gestionados por la plataforma: TLS quedó modelado como capability reconciliada y los bridges futuros se representan mediante `broker.bridge_bundle`, listo para proyectarse luego sobre Secrets/ConfigMaps o recursos equivalentes.
 - [x] Se documentó que un clúster local de Kubernetes puede usarse más adelante como carril opcional de validación, pero no como baseline obligatorio de Fase 3.
 
 ### Decisión aplicada en esta fase
@@ -519,8 +532,10 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] El lifecycle principal de clientes DynSec ya puede solicitarse también en modo daemon sin persistir su password de creación en el control-plane durable.
 - [x] El baseline Compose-first ya puede ejecutar también la recarga manual de Mosquitto sin escritura directa desde la capa HTTP sobre `/var/lib/mosquitto/.reload`.
 - [x] No quedan superficies legacy ejecutables en el repositorio que sigan publicando rutas activas con lógica broker-facing directa para AWS/Azure Bridge o para el antiguo runtime standalone de DynSec.
-- [x] El acoplamiento activo restante a `mosquitto-log` ya está auditado por consumidor y `clientlogs` expone telemetría suficiente para seguir avanzando hacia una fase de observabilidad desacoplada sin perder trazabilidad del estado actual.
-- [x] El acoplamiento observacional restante a `mosquitto-log` y `broker-resource-stats.json` ya tiene reporting HTTP explícito por fuente, lo que permite medir el avance de Fase 3 sin depender solo del histórico narrativo de cortes.
+- [x] El proceso web principal ya no mantiene lectura directa activa de `mosquitto.log` ni de `broker-resource-stats.json`; esos artefactos quedaron encapsulados detrás de `bhm-broker-observability`.
+- [x] `clientlogs` conserva trazabilidad operativa mediante polling HTTP interno y `source-status`, sin requerir el mount de logs en `bunkerm-platform`.
+- [x] El stack runtime validado con `deploy.ps1 -Action start` ya incluye `bunkerm-mosquitto`, `bunkerm-reconciler`, `bunkerm-broker-observability` y `bunkerm-platform` operativos en la misma red Compose-first, con smoke `5/5 OK` posterior al arranque.
+- [x] La validación interna desde `bunkerm-platform` confirmó `source-status.available=true` para logs y resource stats en `bhm-broker-observability`, reforzando que la observabilidad broker-owned ya no depende del filesystem local del proceso web.
 
 ### Tests
 
@@ -533,6 +548,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `pytest tests/test_bridges.py tests/test_legacy_surfaces.py tests/test_architecture.py -q` pasó con `15 passed` y protege la retirada segura de superficies legacy broker-facing para que no vuelvan a introducir escrituras directas fuera del control-plane.
 - [x] `pytest tests/test_clientlogs.py tests/test_architecture.py -q` pasó con `13 passed` tras hacer auditable y opcional la dependencia de `clientlogs` respecto a `mosquitto-log`.
 - [x] `pytest tests/test_config.py tests/test_monitor.py tests/test_clientlogs.py tests/test_architecture.py -q` pasó con `44 passed` tras volver explícitos y auditables los consumidores restantes de `mosquitto-log` y `broker-resource-stats.json`.
+- [x] `pytest tests/test_clientlogs.py tests/test_clientlogs_service.py tests/test_monitor.py tests/test_architecture.py tests/test_config.py -q` pasó con `49 passed` tras mover `clientlogs` y los snapshots históricos del monitor a `bhm-broker-observability` y retirar `mosquitto-log` de `bunkerm-platform`.
 - [x] Test unitario del modelo de estado deseado para clientes DynSec y asignación de roles.
 - [x] Test unitario del reconciliador de clientes DynSec para create/enable-disable/roles.
 - [x] Tests de regresión para import/sync/status de `mosquitto_passwd` como scope propio del control-plane.
@@ -577,6 +593,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Se amplió además la reconciliación broker-facing de grupos para cubrir memberships `group-client` y su prioridad desde el mismo seam explícito.
 - [x] Se amplió la costura broker-facing para cubrir también el documento DynSec completo y encapsular la señal `.dynsec-reload` detrás del runtime local.
 - [x] Se añadió `services/broker_reconcile_daemon.py` y el servicio Compose `bhm-reconciler` para empezar a ejecutar el control-loop broker-facing fuera del proceso web.
+- [x] Se añadió el polling HTTP interno broker-owned para `clientlogs` y para los snapshots históricos de resource stats del monitor, permitiendo retirar `mosquitto-log` del contenedor web principal.
 - [x] Se añadió `tests/test_broker_reconciler_integration.py` para validar la costura broker-facing con filesystem temporal y comandos DynSec simulados.
 - [x] Se ajustó `.dockerignore` del runtime `bunkerm-platform` para excluir `frontend/node_modules` y permitir `podman compose build bunkerm` en Windows sin errores por modos de archivo en `.bin`.
 - [x] La suite enfocada `pytest tests/test_broker_reconciler_integration.py tests/test_architecture.py tests/test_bridges.py tests/test_config.py tests/test_dynsec.py -q` terminó en `49 passed`.

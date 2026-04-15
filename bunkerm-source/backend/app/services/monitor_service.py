@@ -25,6 +25,7 @@ from monitor.sqlite_storage import BrokerTickSnapshot, SQLiteMonitorHistoryStora
 from monitor.topic_sqlite_storage import topic_history_storage
 
 from core.config import settings
+from services import broker_observability_client
 
 logger = logging.getLogger(__name__)
 
@@ -668,50 +669,25 @@ def get_broker_resource_source_status() -> Dict[str, object]:
 
 
 def read_broker_resource_stats() -> Dict[str, Any]:
-    """Lee métricas del contenedor Mosquitto desde un archivo compartido."""
-    stats_path = settings.broker_resource_stats_path
-    _update_resource_source_status(
-        enabled=settings.broker_resource_stats_file_enabled,
-        path=stats_path,
-    )
-
-    if not settings.broker_resource_stats_file_enabled:
-        _update_resource_source_status(
-            available=False,
-            mode="disabled",
-            lastError="disabled_by_config",
-        )
-        return {}
-
-    if not os.path.isfile(stats_path):
-        _update_resource_source_status(
-            available=False,
-            mode="shared-file",
-            lastError="stats_file_not_found",
-        )
-        return {}
-
+    """Lee métricas del broker vía servicio interno de observabilidad broker-owned."""
     try:
-        with open(stats_path, "r") as fh:
-            data = json.load(fh)
-        if isinstance(data, dict):
-            _update_resource_source_status(
-                available=True,
-                mode="shared-file",
-                lastError=None,
-                lastReadAt=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            )
-            return data
+        payload = broker_observability_client.fetch_broker_resource_stats_sync()
+        source = payload.get("source") or {}
         _update_resource_source_status(
-            available=True,
-            mode="shared-file",
-            lastError="invalid_stats_payload",
+            enabled=bool(source.get("enabled", True)),
+            path=str(source.get("path") or settings.broker_resource_stats_path),
+            available=bool(source.get("available", False)),
+            mode=str(source.get("mode") or "broker-observability-service"),
+            lastError=source.get("lastError"),
+            lastReadAt=source.get("lastReadAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         )
-        return {}
-    except Exception as exc:
+        stats = payload.get("stats")
+        return stats if isinstance(stats, dict) else {}
+    except broker_observability_client.BrokerObservabilityUnavailable as exc:
         _update_resource_source_status(
+            enabled=True,
             available=False,
-            mode="shared-file",
+            mode="broker-observability-service",
             lastError=str(exc),
         )
         return {}
