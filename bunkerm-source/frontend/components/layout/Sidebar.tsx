@@ -19,7 +19,7 @@ import {
   Radio,
   KeyRound,
   UserCog,
-  BarChart3,
+  Cross,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
@@ -65,7 +65,6 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     title: 'Monitoring',
     items: [
       { label: 'Alerts', href: '/ai/monitoring', icon: Activity },
-      { label: 'Reports', href: '/reports', icon: BarChart3 },
     ],
   },
   {
@@ -119,10 +118,10 @@ export function Sidebar({ className, onNavClick }: SidebarProps) {
       >
         {/* Logo */}
         <div className="flex items-center gap-2 px-4 h-14 border-b border-sidebar-border">
-          <div className="flex items-center justify-center w-8 h-8 bg-sidebar-primary rounded-lg">
-            <Lock className="w-4 h-4 text-white" />
+          <div className="flex items-center justify-center w-8 h-8 bg-primary-gradient rounded-lg shadow-sm">
+            <Cross className="w-4 h-4 text-white" />
           </div>
-          <span className="font-bold text-lg">BunkerM</span>
+          <span className="font-bold text-lg">BHM</span>
         </div>
 
         {/* Navigation */}
@@ -144,7 +143,7 @@ export function Sidebar({ className, onNavClick }: SidebarProps) {
                         className={cn(
                           'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
                           isActive
-                            ? 'bg-sidebar-primary text-sidebar-primary-foreground'
+                            ? 'bg-primary-gradient text-primary-foreground shadow-sm hover:brightness-105'
                             : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
                         )}
                       >
@@ -163,7 +162,7 @@ export function Sidebar({ className, onNavClick }: SidebarProps) {
         {/* Footer */}
         <div className="p-4 border-t border-sidebar-border">
           <p className="text-xs text-sidebar-foreground/40 text-center">
-            BunkerM Community {process.env.NEXT_PUBLIC_CURRENT_VERSION || 'v2.0.0'}
+            Broker Health Management {process.env.NEXT_PUBLIC_CURRENT_VERSION || 'v1.0.0'}
           </p>
         </div>
       </aside>
