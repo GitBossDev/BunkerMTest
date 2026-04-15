@@ -306,7 +306,7 @@ function Invoke-Setup {
     Write-Success "Setup completado correctamente!"
     Write-Host ""
     Write-Info "Proximos pasos:"
-    Write-Host "  1. Revisa .env.dev y actualiza configuracion SMTP/Twilio si es necesario"
+    Write-Host "  1. Revisa .env.dev y actualiza configuracion SMTP si es necesario"
     Write-Host "  2. Ejecuta: .\deploy.ps1 -Action build"
     Write-Host "  3. Ejecuta: .\deploy.ps1 -Action start"
     Write-Host ""
