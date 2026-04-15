@@ -15,9 +15,13 @@
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 6%;
 
-    /* Primary = modern green */
-    --primary: 142 72% 38%;
+    /* Primary = Color de IDboxRT: #F46B77 o 0%,45%,100%*/
+    --primary: 355 86% 69%;
     --primary-foreground: 0 0% 100%;
+    
+    --primary-gradient-start: 355 86% 69%;
+    --primary-gradient-mid: 342 82% 64%;
+    --primary-gradient-end: 328 76% 59%;
 
     --secondary: 0 0% 96%;
     --secondary-foreground: 0 0% 9%;
@@ -34,19 +38,22 @@
     /* Thin dark line — creates the separator in light mode */
     --border: 0 0% 85%;
     --input: 0 0% 85%;
-    --ring: 142 72% 38%;
+    --ring: 355 86% 69%;
 
     --radius: 0.5rem;
 
     /* Sidebar: white in light mode, separated by thin dark border */
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 0 0% 9%;
-    --sidebar-primary: 142 72% 38%;
+    --sidebar-primary: 355 86% 69%;
     --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-gradient-start: 355 86% 69%;
+    --sidebar-gradient-mid: 342 82% 64%;
+    --sidebar-gradient-end: 328 76% 59%;
     --sidebar-accent: 0 0% 95%;
     --sidebar-accent-foreground: 0 0% 9%;
     --sidebar-border: 0 0% 82%;
-    --sidebar-ring: 142 72% 38%;
+    --sidebar-ring: 355 86% 69%;
   }
 
   /* ── Dark mode ──────────────────────────────────────────────────────────── */
@@ -62,8 +69,11 @@
     --popover-foreground: 0 0% 95%;
 
     /* Primary = modern green (brighter for dark backgrounds) */
-    --primary: 142 72% 45%;
+    --primary: 355 86% 76%;
     --primary-foreground: 0 0% 100%;
+    --primary-gradient-start: 355 86% 76%;
+    --primary-gradient-mid: 342 82% 71%;
+    --primary-gradient-end: 328 76% 66%;
 
     --secondary: 0 0% 13%;
     --secondary-foreground: 0 0% 95%;
@@ -80,17 +90,17 @@
     /* Thin lighter line — creates the white separator in dark mode */
     --border: 0 0% 18%;
     --input: 0 0% 18%;
-    --ring: 142 72% 45%;
+    --ring: 355 86% 76%;
 
     /* Sidebar: pure black — creates contrast with the dark-gray main area */
     --sidebar-background: 0 0% 3%;
     --sidebar-foreground: 0 0% 95%;
-    --sidebar-primary: 142 72% 45%;
+    --sidebar-primary: 355 86% 76%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 10%;
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 0 0% 20%;
-    --sidebar-ring: 142 72% 45%;
+    --sidebar-ring: 355 86% 76%;
   }
 }
 
@@ -100,6 +110,17 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .bg-primary-gradient {
+    background-image: linear-gradient(
+      90deg,
+      hsl(var(--primary-gradient-start)) 0%,
+      hsl(var(--primary-gradient-mid)) 55%,
+      hsl(var(--primary-gradient-end)) 100%
+    );
   }
 }
 

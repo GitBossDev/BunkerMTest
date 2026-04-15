@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { Loader2, Lock, Mail } from 'lucide-react'
+import { Loader2, Cross, Mail, Lock} from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,9 +51,9 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-12 h-12 bg-primary rounded-xl mb-4">
-            <Lock className="w-6 h-6 text-primary-foreground" />
+            <Cross className="w-6 h-6 text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-bold">BunkerM</h1>
+          <h1 className="text-2xl font-bold">Broker Health Management</h1>
           <p className="text-muted-foreground text-sm mt-1">MQTT Broker Manager</p>
         </div>
 
