@@ -637,11 +637,21 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 - [x] Se separaron las URLs de persistencia por dominio en configuración (`control_plane_database_url`, `history_database_url`, `reporting_database_url`) manteniendo fallback controlado al `database_url` actual durante la transición.
 - [x] El motor async principal del backend ya consume `resolved_control_plane_database_url`, dejando preparado el primer corte operativo del control-plane durable sobre PostgreSQL.
-- [x] Se añadió una utilidad específica `scripts/migrate-control-plane-state.py` para migrar `broker_desired_state` desde SQLite al datastore configurado del control-plane, endurecida con timeouts y modo `--dry-run` para evitar bloqueos del entorno durante esta fase.
+- [x] La normalización de URLs async/sync ya convierte automáticamente `postgresql://...` en `postgresql+asyncpg://...` para el motor async principal y en `postgresql+psycopg://...` para los seams sync, evitando acoplar la operación a un dialecto explícito en Compose.
+- [x] `docker-compose.dev.yml` ya inyecta de forma explícita `CONTROL_PLANE_DATABASE_URL`, `HISTORY_DATABASE_URL` y `REPORTING_DATABASE_URL` en `bunkerm-platform` y `bhm-reconciler`, manteniendo fallback Compose-first sobre SQLite cuando esas variables no se activen.
+- [x] Se añadió una utilidad específica `scripts/migrate-control-plane-state.py` para migrar `broker_desired_state` desde SQLite al datastore configurado del control-plane, endurecida con timeouts, selección explícita de `--source-url` SQLite y modo `--dry-run` para evitar bloqueos o confusión con `.env.dev` cuando `DATABASE_URL` ya apunte a PostgreSQL.
 - [x] El control-plane ya deja rastro durable append-only de cambios solicitados mediante la nueva tabla `broker_desired_state_audit`, versionada junto a `broker_desired_state` para cubrir la parte auditable del corte 1.
+- [x] El migrador del control-plane ya contempla también `broker_desired_state_audit`, de modo que el corte 1 puede moverse con estado deseado y rastro append-only consistentes.
+- [x] El backend principal ya incorpora Alembic propio para el bounded context del control-plane (`backend/app/alembic`), con una revisión inicial enfocada en `broker_desired_state` y `broker_desired_state_audit` y soporte seguro para adoptar esquemas PostgreSQL ya bootstrappeados sin `alembic_version`.
+- [x] Se añadió `scripts/upgrade-control-plane-schema.py` como utilidad operativa para ejecutar `upgrade/stamp` del esquema del control-plane sin depender de rutas manuales dentro del backend.
+- [x] `core.database.init_db()` y el daemon `bhm-reconciler` ya usan Alembic automáticamente cuando el control-plane apunta a un backend no SQLite; `create_all` queda restringido al baseline SQLite transicional.
 - [x] Históricos y reporting ya no solo pasan por seams: las factorías de dominio seleccionan ahora backends SQLAlchemy reales para `client activity`, `broker history`, `topic history` y `reporting` cuando el dominio apunte a PostgreSQL.
 - [x] Se añadieron implementaciones SQLAlchemy reutilizando los modelos ORM existentes del backend unificado, de modo que el cambio de backend no exige reescribir routers ni servicios en los cortes 2 y 3.
 - [x] La validación enfocada del estado actual de Fase 4 quedó ejecutada con `36 passed, 1 warning` sobre utilidades de URL, factorías, auditoría del control-plane, storages SQLAlchemy nuevos y regresiones existentes de config, monitor, clientlogs y reporting.
+- [x] La activación enfocada del corte 1 ya quedó validada también sobre PostgreSQL real en Compose (`1 passed`) y el `dry-run` del migrador quedó verificado con selección segura de fuente SQLite (`0` filas cuando no hay estado legacy presente).
+- [x] La activación enfocada del corte 2 ya quedó validada también sobre PostgreSQL real en Compose (`1 passed`) para `broker history`, `topic history` y `client activity`, verificando persistencia real de los storages SQLAlchemy contra el contenedor PostgreSQL.
+- [x] Se añadió `scripts/migrate-history-reporting-state.py` para migrar desde SQLite los datos operativos de `broker history`, `topic history`, `client activity` y las tablas que consume `reporting`, con `--dry-run`, detección segura de targets ya poblados y normalización automática del host PostgreSQL cuando se ejecuta desde el host Windows.
+- [x] La activación enfocada del corte 3 ya quedó validada también sobre PostgreSQL real en Compose (`1 passed`) para reporting diario/semanal, timeline, incidentes y purge de retención usando `SQLAlchemyReportingStorage`.
 
 ### Actividades
 
@@ -649,12 +659,12 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Mantener la base de datos separada del producto externo de reporting/transformación, sin compartir tablas ni ownership de dominio.
 - [ ] Introducir una capa de persistencia o repositorios de transición que permitan mover cada dominio sin seguir acoplando el código al backend SQLite actual.
 - [ ] Ejecutar una migración incremental por capability o agregado, no por big bang, y evitar una doble escritura generalizada; la compatibilidad temporal debe ser acotada por dominio, con un único writer y lecturas/imports transicionales cuando hagan falta.
-- [ ] Migrar primero el estado durable del control-plane: `broker_desired_state`, auditoría de cambios solicitados, estado aplicado/observado y metadatos necesarios para `bhm-reconciler` y `bhm-api`.
+- [~] Migrar primero el estado durable del control-plane: `broker_desired_state`, auditoría de cambios solicitados, estado aplicado/observado y metadatos necesarios para `bhm-reconciler` y `bhm-api`. El wiring Compose-first, la validación real contra PostgreSQL, el `dry-run` seguro y el rollout runtime sobre la imagen reconstruida ya quedaron cubiertos; resta migrar el baseline SQLite legacy con la utilidad segura.
 - [ ] Migrar después los históricos ya existentes en SQLite que más condicionan a producto: broker history, topic history, client activity y reporting técnico asociado.
 - [ ] Migrar por último los read models o tablas auxiliares que sigan quedando en SQLite y que no bloqueen el primer corte operativo sobre PostgreSQL.
-- [ ] Añadir migraciones de esquema y versionado de base de datos con Alembic para PostgreSQL.
-- [ ] Hacer explícita la dependencia funcional de `bhm-api` y `bhm-reconciler` respecto a PostgreSQL en Compose cuando el primer corte operativo esté listo.
-- [ ] Ajustar configuración de entorno, backup, restore y utilidades de migración para PostgreSQL.
+- [~] Añadir migraciones de esquema y versionado de base de datos con Alembic para PostgreSQL. El control-plane ya tiene revisión inicial y utilidad operativa de upgrade; falta extender el versionado formal al resto de dominios que todavía se auto-bootstrappean por seam.
+- [x] Hacer explícita la dependencia funcional de `bhm-api` y `bhm-reconciler` respecto a PostgreSQL en Compose cuando el primer corte operativo esté listo. `deploy.ps1` ya detecta URLs PostgreSQL activas, arranca `postgres` sin arrastrar `pgadmin` opcional, y el smoke validado sobre Podman/Compose cerró en `7/7 OK` con conectividad real desde ambos contenedores.
+- [~] Ajustar configuración de entorno, backup, restore y utilidades de migración para PostgreSQL. Ya existen utilidades operativas para upgrade Alembic del control-plane y migración/dry-run de históricos+reporting; falta cerrar backup/restore formal y el flujo dedicado cuando reporting deje de compartir datastore con history.
 
 ### Orden recomendado de Fase 4
 
@@ -664,9 +674,9 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Estado actual de los cortes
 
-- [~] Corte 1 en progreso: el control-plane ya puede correr sobre la URL dedicada y ahora persiste auditoría append-only (`broker_desired_state_audit`); falta ejecutar el corte operativo completo sobre PostgreSQL y migrar el baseline SQLite con la utilidad segura.
-- [~] Corte 2 en progreso: monitor, topic history y client activity ya tienen factorías y backends SQLAlchemy listos para PostgreSQL; falta completar la migración de datos y validar runtime real de esos dominios contra el contenedor PostgreSQL.
-- [~] Corte 3 en progreso: reporting ya tiene backend SQLAlchemy propio y mantiene retención/purgas sobre el seam de dominio; falta cerrar el read model operativo definitivo cuando `reporting_database_url` deje de compartir fallback con history.
+- [~] Corte 1 en progreso: el control-plane ya puede correr sobre la URL dedicada, persiste auditoría append-only (`broker_desired_state_audit`), tiene Alembic propio con adopción segura del esquema bootstrappeado y ya quedó validado en runtime Compose-first sobre PostgreSQL (`7/7 OK`); falta migrar el baseline SQLite con la utilidad segura.
+- [~] Corte 2 en progreso: monitor, topic history y client activity ya tienen factorías y backends SQLAlchemy listos para PostgreSQL y quedaron validados también contra PostgreSQL real; falta completar la migración de datos legacy y cerrar la activación runtime completa de esos dominios.
+- [~] Corte 3 en progreso: reporting ya tiene backend SQLAlchemy propio, migrador operativo desde SQLite y validación real contra PostgreSQL; la brecha restante es independizar completamente el read model cuando `reporting_database_url` deje de compartir fallback/datastore con history.
 
 ### Riesgos a controlar
 
@@ -677,16 +687,16 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Verificaciones
 
-- [ ] `bhm-api` y `bhm-reconciler` pueden operar con PostgreSQL como datastore principal en los dominios ya migrados.
+- [x] `bhm-api` y `bhm-reconciler` pueden operar con PostgreSQL como datastore principal en los dominios ya migrados. El arranque ya aplica Alembic del control-plane sobre PostgreSQL, `deploy.ps1` levanta automáticamente `postgres` cuando la configuración activa lo requiere y la corrida runtime completa del stack quedó validada en Podman/Compose con smoke `7/7 OK`.
 - [ ] No existen accesos directos de dominio al SQLite antiguo en los flujos ya migrados; cualquier acceso residual queda acotado a importación, fallback transicional o dominios pendientes de corte.
 - [ ] Los datos históricos y operativos esenciales se conservan y siguen siendo auditables tras cada corte.
 - [ ] Los contratos HTTP consumidos por frontend y reporting técnico mantienen compatibilidad razonable durante la transición o documentan claramente su cambio.
 
 ### Tests
 
-- [ ] Test unitario de repositorios, servicios de persistencia y adapters de transición SQLite/PostgreSQL.
-- [ ] Test de integración contra PostgreSQL real en contenedor para `bhm-api` y `bhm-reconciler`.
-- [ ] Test de migración de datos desde SQLite por dominio o capability, empezando por el control-plane y siguiendo por históricos.
+- [~] Test unitario de repositorios, servicios de persistencia y adapters de transición SQLite/PostgreSQL. Ya existe cobertura para utilidades de URL, migraciones Alembic del control-plane, arranque runtime con Alembic y storages SQLAlchemy de control-plane/history/topic/client activity/reporting.
+- [x] Test de integración contra PostgreSQL real en contenedor para `bhm-api` y `bhm-reconciler`. Ya existe validación real del control-plane y del segundo corte de storages contra PostgreSQL, y la validación runtime extremo a extremo del stack Compose-first quedó cerrada con smoke `7/7 OK` apuntando a PostgreSQL como datastore principal.
+- [~] Test de migración de datos desde SQLite por dominio o capability, empezando por el control-plane y siguiendo por históricos. El control-plane ya cubre `dry-run` seguro y migración de auditoría; falta validar migraciones legacy del segundo y tercer corte.
 - [ ] Test de compatibilidad de API en endpoints afectados por cada corte de persistencia.
 - [ ] Test de rollback o recuperación ante fallo de migración, incluyendo restauración de datos y vuelta controlada al datastore previo cuando aplique.
 

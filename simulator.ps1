@@ -3,7 +3,7 @@
     Script de gestión del simulador de planta de tratamiento.
 
 .DESCRIPTION
-    Controla el simulador de IoT industrial para BunkerM.
+    Controla el simulador de IoT industrial para Broker Health Manager.
     Permite iniciar, detener, reiniciar, y gestionar anomalías.
 
 .PARAMETER Action
@@ -144,7 +144,7 @@ function Invoke-Start {
     $platformRunning = & $script:CE ps --filter "name=bunkerm-platform" --filter "status=running" -q 2>$null
     $ErrorActionPreference = $savedPref
     if (-not $platformRunning) {
-        Write-ColorOutput "BunkerM (bunkerm-platform) no está corriendo. Inícialo primero:" -Type ERROR
+        Write-ColorOutput "Broker Health Manager (bunkerm-platform) no está corriendo. Inícialo primero:" -Type ERROR
         Write-Host "  .\deploy.ps1 -Action start" -ForegroundColor Yellow
         Write-Host ""
         exit 1
@@ -311,7 +311,7 @@ function Invoke-Clean {
 function Show-Banner {
     Write-Host ""
     Write-Host "===============================================" -ForegroundColor Cyan
-    Write-Host "  Water Plant Simulator - BunkerM Test" -ForegroundColor Cyan
+    Write-Host "  Water Plant Simulator - BHM Test" -ForegroundColor Cyan
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 }

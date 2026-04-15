@@ -193,5 +193,5 @@ docker-compose -f ../docker-compose.simulator.yml up -d
 
 ---
 
-**Parte del proyecto BunkerM Extended**  
+**Parte del proyecto Broker Health Manager**  
 Ver [../ROADMAP.md](../ROADMAP.md) para más información.

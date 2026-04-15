@@ -264,7 +264,7 @@ PGADMIN_DEFAULT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 - [x] Nginx proxy en puerto 2000
 - [x] Script deploy.ps1 con acciones: setup, build, start, stop, restart, status, logs, clean, patch-backend, patch-frontend
 - [x] Script generate-secrets.py genera .env.dev automáticamente
-- [x] Login con admin@brokerpanel.com / Usuario@1
+- [x] Login con admin@bhm.local / Usuario@1
 - [x] Logs de servicios sin errores críticos
 
 ---
@@ -515,7 +515,7 @@ Extensiones propias implementadas sobre la base de BunkerM:
 
 - [x] Sistema de usuarios del panel con roles `admin` y `user` (solo lectura)
 - [x] JWT con rol incluido en payload, cookies HTTP-only
-- [x] Nuevo default admin: `admin@brokerpanel.com` / `Usuario@1`
+- [x] Nuevo default admin: `admin@bhm.local` / `Usuario@1`
 - [x] Gestion de usuarios en **Settings > Panel Users** (solo admin)
 - [x] Registro publico deshabilitado
 - [x] Middleware Next.js bloquea mutaciones para rol `user`
@@ -552,7 +552,7 @@ Extensiones propias implementadas sobre la base de BunkerM:
 
 - [x] Codigo fuente unificado en repositorio propio (GitBossDev/BunkerMTest)
 - [x] bunkerm-source integrado como codigo propio (no submodulo)
-- [x] Metadatos UI: "BrokerPanel - Para CIC"
+- [x] Metadatos UI alineados con Broker Health Manager
 
 ---
 

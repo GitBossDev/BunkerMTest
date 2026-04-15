@@ -7,7 +7,7 @@
 #
 # app/main.py
 """
-Punto de entrada único del backend BunkerM.
+Punto de entrada único del backend Broker Health Manager.
 Consolida en un solo proceso uvicorn los servicios HTTP activos del producto:
   - dynsec-api       (puerto 1000)
   - monitor-api      (puerto 1001)
@@ -163,7 +163,7 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="BunkerM API",
+    title="Broker Health Manager API",
     version="1.0.0",
     docs_url="/api/v1/docs",
     openapi_url="/api/v1/openapi.json",

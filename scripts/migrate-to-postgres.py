@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Migration script from SQLite to PostgreSQL for BunkerM Extended
-This script migrates data from BunkerM's default SQLite database to PostgreSQL
+Migration script from SQLite to PostgreSQL for Broker Health Manager
+This script migrates data from Broker Health Manager's default SQLite database to PostgreSQL
 
 Usage: python scripts/migrate-to-postgres.py
 """
@@ -60,7 +60,7 @@ def get_postgres_connection():
         sys.exit(1)
 
 def create_postgres_tables(pg_conn):
-    """Create PostgreSQL tables for BunkerM Extended"""
+    """Create PostgreSQL tables for Broker Health Manager."""
     
     cursor = pg_conn.cursor()
     
@@ -216,7 +216,7 @@ def main():
     """Main migration function"""
     
     print("==========================================")
-    print("BunkerM Extended - SQLite to PostgreSQL Migration")
+    print("Broker Health Manager - SQLite to PostgreSQL Migration")
     print("==========================================")
     print()
     

@@ -217,9 +217,23 @@ def test_compose_web_service_uses_daemon_mode_and_read_only_broker_mounts():
 
     assert "BROKER_RECONCILE_MODE=daemon" in compose_text
     assert "BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102" in compose_text
+    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL:-}" in bunkerm_block
+    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL:-}" in bunkerm_block
+    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL:-}" in bunkerm_block
     assert "mosquitto-data:/var/lib/mosquitto:ro" not in bunkerm_block
     assert "mosquitto-conf:/etc/mosquitto:ro" not in bunkerm_block
     assert "mosquitto-log:/var/log/mosquitto:ro" not in bunkerm_block
+
+
+def test_compose_reconciler_receives_domain_database_urls_for_phase4():
+    """Protege que el control-plane broker-facing pueda apuntar a PostgreSQL por dominio en Compose."""
+    compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
+    compose_text = compose_path.read_text(encoding="utf-8")
+    reconciler_block = _compose_service_block(compose_text, "bhm-reconciler")
+
+    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL:-}" in reconciler_block
+    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL:-}" in reconciler_block
+    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL:-}" in reconciler_block
 
 
 def test_compose_baseline_includes_broker_observability_service():

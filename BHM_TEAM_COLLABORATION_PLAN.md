@@ -229,9 +229,9 @@ Regla:
 - [ ] Diseñar la estrategia de migración incremental de SQLite a PostgreSQL por capability o agregado.
 - [ ] Definir el esquema PostgreSQL inicial del bounded context de BHM, empezando por control-plane, auditoría y reconciliación.
 - [ ] Definir estrategia de compatibilidad temporal acotada para features ya persistidas en SQLite, evitando doble escritura estructural.
-- [~] Implementar la capa de persistencia portable o repositorios de transición. Ya existen factorías y backends SQLAlchemy reales para history/reporting, pero falta la activación operativa completa con PostgreSQL.
-- [~] Ejecutar el primer corte operativo: mover a PostgreSQL el estado durable del control-plane (`broker_desired_state` y auditoría asociada). La auditoría append-only ya quedó implementada en `broker_desired_state_audit`.
-- [~] Ejecutar el segundo corte operativo: mover broker history, topic history y client activity a PostgreSQL. Los storages SQLAlchemy ya quedaron implementados detrás de los seams existentes.
+- [~] Implementar la capa de persistencia portable o repositorios de transición. Ya existen factorías y backends SQLAlchemy reales para history/reporting, el motor async del control-plane ya normaliza URLs PostgreSQL async de forma automática, el control-plane ya tiene Alembic propio y el arranque runtime ya lo usa en PostgreSQL; falta la activación operativa completa del resto de dominios.
+- [~] Ejecutar el primer corte operativo: mover a PostgreSQL el estado durable del control-plane (`broker_desired_state` y auditoría asociada). La auditoría append-only ya quedó implementada en `broker_desired_state_audit`, Compose ya inyecta URLs por dominio, el control-plane ya tiene versión inicial Alembic y la integración real contra PostgreSQL ya pasó en el stack Compose.
+- [~] Ejecutar el segundo corte operativo: mover broker history, topic history y client activity a PostgreSQL. Los storages SQLAlchemy ya quedaron implementados detrás de los seams existentes, ya pasaron una validación real enfocada contra PostgreSQL y ahora cuentan también con un migrador específico desde SQLite.
 - [ ] Coordinar con B qué endpoints y payloads cambiarán por la migración y cuáles mantendrán compatibilidad temporal.
 
 ### APIs y contratos
@@ -278,9 +278,15 @@ Estado actual ya disponible para coordinación con B:
 - Fase 3 puede considerarse cerrada: el runtime HTTP ya no depende de mounts broker-facing para escrituras ni lecturas activas, y el siguiente carril estructural pasa a ser PostgreSQL.
 - Fase 4 ya quedó ordenada en tres cortes para coordinación: primero control-plane durable y auditoría, después broker history/topic history/client activity, y por último read models o tablas auxiliares que sigan en SQLite.
 - Mientras A no cierre un dominio en PostgreSQL, B debe evitar consolidar almacenamiento definitivo nuevo en SQLite para históricos o reporting técnico; puede seguir avanzando en UX, filtros, tablas, payloads esperados y contratos provisionales.
-- A ya implementó el tramo actual de Fase 4 en código: URLs de base por dominio, engine del control-plane separable, migrador seguro de `broker_desired_state`, auditoría append-only del control-plane y backends SQLAlchemy para históricos/reporting detrás de las factorías existentes.
+- A ya implementó el tramo actual de Fase 4 en código: URLs de base por dominio, engine del control-plane separable, normalización automática de dialectos async/sync para PostgreSQL, migrador seguro de `broker_desired_state` + `broker_desired_state_audit`, Alembic propio para el control-plane con adopción segura del esquema inicial y backends SQLAlchemy para históricos/reporting detrás de las factorías existentes.
 - La capa HTTP y los servicios de monitor, clientlogs y reporting ya dejaron de depender de imports SQLite concretos para esos dominios; esto reduce el riesgo de merge cuando llegue la activación operativa de PostgreSQL.
 - La validación enfocada del estado actual de Fase 4 ya pasó con `36 passed, 1 warning`, así que B puede seguir trabajando sobre contratos/UI de históricos y reporting sin tocar de nuevo la capa de persistencia ni asumir imports directos a SQLite.
+- La validación real sobre PostgreSQL ya cubre dos carriles separados de Fase 4: control-plane durable y storages del segundo corte (`broker history`, `topic history`, `client activity`), ambos sobre el stack Compose-first.
+- La validación real sobre PostgreSQL ya cubre también reporting técnico (`daily/weekly report`, `timeline`, `incidents`, `retention purge`) y existe ya un migrador operativo `scripts/migrate-history-reporting-state.py` para mover las tablas legacy de SQLite al datastore compartido de history/reporting.
+- Alembic no queda como artefacto temporal de transición: pasa a ser la vía formal de versionado del esquema PostgreSQL del control-plane. Lo que sigue transicional es SQLite como origen legacy y el hecho de que reporting todavía comparte datastore/fallback con history.
+- `deploy.ps1` ya detecta cuándo `.env.dev` activa PostgreSQL como datastore operativo, arranca `postgres` sin depender de `pgadmin`, usa `psycopg` como driver sync para seams/migraciones y extiende el smoke a comprobaciones de conectividad real desde `bunkerm-platform` y `bhm-reconciler`.
+- La corrida runtime Compose-first sobre PostgreSQL ya quedó validada de punta a punta en Podman/Compose tras reconstruir la imagen base y recrear el stack: smoke `7/7 OK` con `bhm-api` y `bhm-reconciler` conectando al control-plane PostgreSQL.
+- El baseline Compose-first sigue siendo la referencia de despliegue: la integración enfocada del control-plane con PostgreSQL se validó sobre Podman/Compose y no implica adelantar una migración a Kubernetes.
 
 ### Coordinación
 

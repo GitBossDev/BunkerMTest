@@ -49,7 +49,7 @@ def test_storage_factories_select_sqlalchemy_backends_for_postgres_urls(monkeypa
     topic_storage = create_topic_history_storage()
     reporting_storage = create_reporting_storage()
 
-    assert client_storage == ("client", "postgresql+psycopg2://bhm:secret@localhost:5432/bhm_history")
-    assert monitor_storage == ("monitor", "postgresql+psycopg2://bhm:secret@localhost:5432/bhm_history", None)
-    assert topic_storage == ("topic", "postgresql+psycopg2://bhm:secret@localhost:5432/bhm_history")
-    assert reporting_storage == ("reporting", "postgresql+psycopg2://bhm:secret@localhost:5432/bhm_reporting")
+    assert client_storage == ("client", "postgresql+psycopg://bhm:secret@localhost:5432/bhm_history")
+    assert monitor_storage == ("monitor", "postgresql+psycopg://bhm:secret@localhost:5432/bhm_history", None)
+    assert topic_storage == ("topic", "postgresql+psycopg://bhm:secret@localhost:5432/bhm_history")
+    assert reporting_storage == ("reporting", "postgresql+psycopg://bhm:secret@localhost:5432/bhm_reporting")

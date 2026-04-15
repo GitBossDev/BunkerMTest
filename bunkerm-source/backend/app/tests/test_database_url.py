@@ -1,6 +1,8 @@
 from core.config import Settings
 from core.database_url import (
+    get_async_database_url,
     ensure_sqlite_url,
+    get_host_accessible_database_url,
     get_async_engine_connect_args,
     get_sync_database_url,
     get_sync_engine_connect_args,
@@ -12,6 +14,7 @@ def test_sqlite_url_detection_and_connect_args():
     sqlite_url = "sqlite+aiosqlite:////tmp/bunkerm.db"
 
     assert is_sqlite_url(sqlite_url) is True
+    assert get_async_database_url("sqlite+pysqlite:////tmp/bunkerm.db") == sqlite_url
     assert get_async_engine_connect_args(sqlite_url) == {"check_same_thread": False}
     assert get_sync_database_url(sqlite_url) == "sqlite+pysqlite:////tmp/bunkerm.db"
     assert get_sync_engine_connect_args(sqlite_url) == {"check_same_thread": False}
@@ -21,9 +24,20 @@ def test_non_sqlite_url_skips_sqlite_connect_args():
     postgres_url = "postgresql+asyncpg://bhm:secret@localhost:5432/bhm"
 
     assert is_sqlite_url(postgres_url) is False
+    assert get_async_database_url("postgresql://bhm:secret@localhost:5432/bhm") == postgres_url
     assert get_async_engine_connect_args(postgres_url) == {"timeout": 5, "command_timeout": 30}
-    assert get_sync_database_url(postgres_url) == "postgresql+psycopg2://bhm:secret@localhost:5432/bhm"
+    assert get_sync_database_url(postgres_url) == "postgresql+psycopg://bhm:secret@localhost:5432/bhm"
+    assert get_sync_database_url("postgresql://bhm:secret@localhost:5432/bhm") == "postgresql+psycopg://bhm:secret@localhost:5432/bhm"
     assert get_sync_engine_connect_args(postgres_url) == {"connect_timeout": 5}
+
+
+def test_host_accessible_database_url_rewrites_unresolved_compose_postgres_host(monkeypatch):
+    monkeypatch.delenv("BHM_POSTGRES_HOST_OVERRIDE", raising=False)
+    monkeypatch.setattr("socket.getaddrinfo", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("unresolved")))
+
+    resolved = get_host_accessible_database_url("postgresql://bhm:secret@postgres:5432/bhm")
+
+    assert resolved == "postgresql://bhm:secret@localhost:5432/bhm"
 
 
 def test_settings_resolve_domain_database_urls():

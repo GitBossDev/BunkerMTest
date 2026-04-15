@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
     logger.info("Background tasks stopped")
 
 
-app = FastAPI(title="BunkerM AI Service", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Broker Health Manager AI Service", version="1.0.0", lifespan=lifespan)
 
 from app.ingestion.router import router as ingestion_router
 from app.metrics.router import router as metrics_router

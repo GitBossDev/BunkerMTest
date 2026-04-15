@@ -239,7 +239,7 @@ class WaterPlantSimulator:
 def main():
     """Función principal."""
     print("===========================================")
-    print("  Water Plant Simulator - BunkerM Extended")
+    print("  Water Plant Simulator - Broker Health Manager")
     print("===========================================")
     print()
     

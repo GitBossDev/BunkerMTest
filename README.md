@@ -9,6 +9,8 @@
 
 BHM (Broker Health Manager) es una plataforma web de gestión y monitoreo de brokers MQTT diseñada para equipos que trabajan con dispositivos IoT industriales. La plataforma mide el pulso de tu infraestructura de mensajería: conexiones activas, latencia, caudal de mensajes, fallos de autenticación y capacidad del broker, todo en tiempo real desde un único panel.
 
+> Nota de naming: el nombre activo del producto es BHM o Broker Health Manager. Identificadores técnicos heredados como `bunkerm-source`, `bunkerm-platform`, `bunkerm-mosquitto`, `bunkerm-*` volúmenes, imágenes y rutas históricas de SQLite se mantienen por compatibilidad operativa hasta ejecutar una fase dedicada de renombre técnico.
+
 El objetivo es proporcionar una herramienta de operaciones completa que cubra el ciclo entero: desde la configuración del broker y la gestión de credenciales MQTT hasta la detección de anomalías, pruebas de estrés con simuladores industriales y alertas tempranas ante comportamientos anómalos.
 
 ---
@@ -103,7 +105,7 @@ Acceder en **http://localhost:2000**
 
 | Tipo | Usuario | Contraseña |
 |------|---------|-----------|
-| Panel (admin) | `admin@brokerpanel.com` | `Usuario@1` |
+| Panel (admin) | `admin@bhm.local` | `Usuario@1` |
 | Broker MQTT | `admin` | *(generada en `setup`, ver `.env.dev`)* |
 
 > Las credenciales del broker se generan aleatoriamente en cada `setup` y se sincronizan automáticamente con el broker al iniciar el contenedor.

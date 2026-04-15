@@ -1,5 +1,5 @@
 # ==========================================
-# BunkerM Extended - Deployment Script for Windows
+# Broker Health Manager - Deployment Script for Windows
 # ==========================================
 # This script automates the deployment process on Windows
 
@@ -98,7 +98,7 @@ function Get-RuntimeEngines {
 function Show-Banner {
     Write-Host ""
     Write-Host "==========================================" -ForegroundColor Magenta
-    Write-Host "   BunkerM Extended - Deployment Tool    " -ForegroundColor Magenta
+    Write-Host " Broker Health Manager - Deployment Tool " -ForegroundColor Magenta
     Write-Host "==========================================" -ForegroundColor Magenta
     Write-Host ""
 }
@@ -118,6 +118,98 @@ function Test-Prerequisites {
     }
 
     Write-Host ""
+}
+
+function Get-EnvMap {
+    param(
+        [string]$Path = ".env.dev"
+    )
+
+    $values = @{}
+    if (-not (Test-Path $Path)) {
+        return $values
+    }
+
+    foreach ($rawLine in Get-Content $Path) {
+        $line = $rawLine.Trim()
+        if (-not $line -or $line.StartsWith('#')) {
+            continue
+        }
+
+        $parts = $line.Split('=', 2)
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $values[$parts[0].Trim()] = $parts[1]
+    }
+
+    return $values
+}
+
+function Test-PostgresUrl {
+    param(
+        [string]$Value
+    )
+
+    if (-not $Value) {
+        return $false
+    }
+
+    return $Value.Trim().ToLowerInvariant().StartsWith('postgresql')
+}
+
+function Test-PostgresRequired {
+    param(
+        [hashtable]$EnvMap
+    )
+
+    foreach ($name in @('CONTROL_PLANE_DATABASE_URL', 'HISTORY_DATABASE_URL', 'REPORTING_DATABASE_URL', 'DATABASE_URL')) {
+        if (Test-PostgresUrl -Value $EnvMap[$name]) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Wait-ContainerHealthy {
+    param(
+        [string]$ContainerName,
+        [int]$TimeoutSeconds = 90
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $status = & $script:CE inspect -f "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $ContainerName 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $normalizedStatus = ($status | Out-String).Trim().ToLowerInvariant()
+            if ($normalizedStatus -in @('healthy', 'running')) {
+                return $true
+            }
+            if ($normalizedStatus -in @('exited', 'dead')) {
+                return $false
+            }
+        }
+
+        Start-Sleep -Seconds 2
+    }
+
+    return $false
+}
+
+function Test-ContainerControlPlanePostgresConnectivity {
+    param(
+        [string]$ContainerName
+    )
+
+    $pythonSnippet = "import sys; sys.path.insert(0, '/app'); from sqlalchemy import create_engine, text; from core.config import Settings; from core.database_url import get_sync_database_url; settings = Settings(); resolved_url = settings.resolved_control_plane_database_url; assert resolved_url.lower().startswith('postgresql'), f'resolved_control_plane_database_url is not PostgreSQL: {resolved_url}'; engine = create_engine(get_sync_database_url(resolved_url), future=True); connection = engine.connect(); connection.execute(text('SELECT 1')); connection.close(); print('OK')"
+
+    $output = & $script:CE exec $ContainerName /opt/venv/bin/python -c $pythonSnippet 2>&1
+    return @{
+        Success = ($LASTEXITCODE -eq 0)
+        Output = (($output | Out-String).Trim())
+    }
 }
 
 function Invoke-Setup {
@@ -246,6 +338,13 @@ function Invoke-Start {
     Write-Success $validateOutput
     Write-Host ""
 
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
+    $pgAdminRequested = [bool]$WithTools
+    if ($postgresRequired -and -not $pgAdminRequested) {
+        Write-Warning "La configuracion activa PostgreSQL como datastore operativo; se iniciara postgres sin habilitar pgAdmin."
+    }
+
     # Si bunkerm-source existe pero no tiene .env, crear uno vacio para que compose no falle
     if (Test-Path "bunkerm-source") {
         if (-not (Test-Path "bunkerm-source\.env")) {
@@ -275,18 +374,38 @@ function Invoke-Start {
 
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
 
-    if ($WithTools) {
+    if ($pgAdminRequested) {
         Write-Info "Starting with tools profile (includes pgAdmin)..."
         $composeCmd += " --profile tools"
+    } elseif ($postgresRequired) {
+        Write-Info "Starting PostgreSQL runtime dependency without optional pgAdmin..."
+        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "No se pudo iniciar el servicio postgres requerido por la configuracion actual."
+            exit 1
+        }
     }
     
     $composeCmd += " up -d"
     
     Invoke-Expression $composeCmd
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Fallo el arranque del stack Compose-first. Revisa: .\deploy.ps1 -Action logs"
+        exit 1
+    }
     
     Write-Host ""
     Write-Success "[OK] Services started successfully!"
     Write-Host ""
+
+    if ($postgresRequired) {
+        Write-Info "Esperando a que PostgreSQL quede healthy para el runtime de Fase 4..."
+        if (-not (Wait-ContainerHealthy -ContainerName "bunkerm-postgres" -TimeoutSeconds 90)) {
+            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs -WithTools"
+            exit 1
+        }
+    }
+
     Write-Info "Waiting for services to be ready (30 seconds)..."
     Start-Sleep -Seconds 30
 
@@ -314,8 +433,10 @@ function Invoke-Start {
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
     
-    if ($WithTools) {
+    if ($pgAdminRequested) {
         Write-Host "  - pgAdmin:   http://localhost:5050" -ForegroundColor Cyan
+    }
+    if ($pgAdminRequested -or $postgresRequired) {
         Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
     }
     
@@ -327,10 +448,14 @@ function Invoke-Start {
 function Invoke-Stop {
     Write-Info "Stopping services..."
     Write-Host ""
+
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
+    $effectiveWithTools = [bool]$WithTools -or $postgresRequired
     
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
 
-    if ($WithTools) {
+    if ($effectiveWithTools) {
         $composeCmd += " --profile tools"
     }
 
@@ -370,7 +495,7 @@ function Invoke-Status {
     Write-Host "Health Checks:" -ForegroundColor Yellow
     Write-Host ""
 
-    # BunkerM broker MQTT standalone (puerto 1900)
+    # Broker Health Manager MQTT broker standalone (puerto 1900)
     Write-Host -NoNewline "  Mosquitto MQTT standalone (localhost:1900)... "
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     $tcpClient = New-Object System.Net.Sockets.TcpClient
@@ -384,8 +509,8 @@ function Invoke-Status {
         $ErrorActionPreference = $savedPref
     }
 
-    # Nginx / Web UI → BunkerM en puerto 2000 (redirige a /login, acepta 200 y 3xx)
-    Write-Host -NoNewline "  BunkerM Web UI (http://localhost:2000)... "
+    # Nginx / Web UI → BHM en puerto 2000 (redirige a /login, acepta 200 y 3xx)
+    Write-Host -NoNewline "  BHM Web UI (http://localhost:2000)... "
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
         Write-Success "[OK] HTTP $($resp.StatusCode)"
@@ -398,8 +523,8 @@ function Invoke-Status {
         }
     }
 
-    # BunkerM Auth API (confirma que el backend esta respondiendo)
-    Write-Host -NoNewline "  BunkerM API (/api/auth/me)... "
+    # Broker Health Manager Auth API (confirma que el backend esta respondiendo)
+    Write-Host -NoNewline "  BHM API (/api/auth/me)... "
     try {
         $resp = Invoke-WebRequest -Uri "http://localhost:2000/api/auth/me" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         Write-Success "[OK] HTTP $($resp.StatusCode)"
@@ -417,8 +542,15 @@ function Invoke-Status {
 function Invoke-Logs {
     Write-Info "Showing logs..."
     Write-Host ""
+
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
+    $effectiveWithTools = [bool]$WithTools -or $postgresRequired
     
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml logs"
+    if ($effectiveWithTools) {
+        $composeCmd += " --profile tools"
+    }
     
     if ($Follow) {
         $composeCmd += " -f"
@@ -468,7 +600,7 @@ function Invoke-Clean {
 }
 
 function Invoke-Build {
-    Write-Info "Construyendo imagen de BunkerM..."
+    Write-Info "Construyendo imagen de Broker Health Manager..."
     Write-Host ""
 
     if (-not (Test-Path "bunkerm-source")) {
@@ -477,7 +609,7 @@ function Invoke-Build {
         exit 1
     }
 
-    # Construir Mosquitto primero (más rápido; BunkerM depende de él en runtime)
+    # Construir Mosquitto primero (más rápido; Broker Health Manager depende de él en runtime)
     Invoke-BuildMosquitto
 
     # Convertir CRLF a LF en scripts .sh antes de construir
@@ -501,7 +633,7 @@ function Invoke-Build {
     $ErrorActionPreference = $savedPref
 
     if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen BunkerM construida correctamente: bunkermtest-bunkerm:latest"
+        Write-Success "[OK] Imagen de Broker Health Manager construida correctamente: bunkermtest-bunkerm:latest"
         Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
     } else {
         Write-Host "[ERROR] Fallo en el build. Revisa los logs de arriba." -ForegroundColor Red
@@ -562,13 +694,17 @@ function Invoke-Smoke {
         Write-Warning "  API_KEY no encontrada en .env.dev -- check autenticado sera omitido"
     }
 
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
+    $totalChecks = if ($postgresRequired) { 7 } else { 5 }
+
     $passed = 0
     $failed = 0
     $savedPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
 
     # ── 1. Puerto MQTT 1900 ──────────────────────────────────────────────────
-    Write-Host -NoNewline "  [1/5] MQTT puerto 1900 .......................... "
+    Write-Host -NoNewline "  [1/$totalChecks] MQTT puerto 1900 .......................... "
     $tcpClient = New-Object System.Net.Sockets.TcpClient
     try {
         $tcpClient.Connect('localhost', 1900)
@@ -581,7 +717,7 @@ function Invoke-Smoke {
     }
 
     # ── 2. Nginx / Web UI ────────────────────────────────────────────────────
-    Write-Host -NoNewline "  [2/5] Web UI http://localhost:2000 .............. "
+    Write-Host -NoNewline "  [2/$totalChecks] Web UI http://localhost:2000 .............. "
     try {
         $r = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
         Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
@@ -596,7 +732,7 @@ function Invoke-Smoke {
     }
 
     # ── 3. Next.js / Auth ────────────────────────────────────────────────────
-    Write-Host -NoNewline "  [3/5] Auth API /api/auth/me ..................... "
+    Write-Host -NoNewline "  [3/$totalChecks] Auth API /api/auth/me ..................... "
     try {
         $r = Invoke-WebRequest -Uri "http://localhost:2000/api/auth/me" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
         Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
@@ -611,7 +747,7 @@ function Invoke-Smoke {
     }
 
     # ── 4. Backend health: ruta publica legacy o ruta autenticada actual ─────
-    Write-Host -NoNewline "  [4/5] Backend monitor health ..................... "
+    Write-Host -NoNewline "  [4/$totalChecks] Backend monitor health ..................... "
     $healthOk = $false
     $healthNote = ""
     foreach ($attempt in 1..3) {
@@ -663,14 +799,14 @@ function Invoke-Smoke {
         $failed++
     }
 
-    # ── 5. Backend autenticado: /api/dynsec/clients ──────────────────────────
+    # ── 5. Backend autenticado: endpoint DynSec ligero ───────────────────────
     if ($apiKey) {
-        Write-Host -NoNewline "  [5/5] Backend /api/dynsec/clients (API key) ..... "
+        Write-Host -NoNewline "  [5/$totalChecks] Backend /api/dynsec/roles (API key) ....... "
         $dynsecOk = $false
         $dynsecError = ""
         foreach ($attempt in 1..5) {
             try {
-                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/clients?page=1&limit=1" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
+                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/roles" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
                 Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
                 $passed++
                 $dynsecOk = $true
@@ -696,7 +832,31 @@ function Invoke-Smoke {
             $failed++
         }
     } else {
-        Write-Host "  [5/5] Backend /api/dynsec/clients ................ OMITIDO (sin API key)" -ForegroundColor Yellow
+        Write-Host "  [5/$totalChecks] Backend /api/dynsec/roles .................. OMITIDO (sin API key)" -ForegroundColor Yellow
+    }
+
+    if ($postgresRequired) {
+        Write-Host -NoNewline "  [6/$totalChecks] bhm-api -> PostgreSQL control-plane ....... "
+        $platformPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName "bunkerm-platform"
+        if ($platformPgCheck.Success) {
+            Write-Host "OK" -ForegroundColor Green
+            $passed++
+        } else {
+            $platformError = if ($platformPgCheck.Output) { $platformPgCheck.Output } else { "error no especificado" }
+            Write-Host "FAIL $platformError" -ForegroundColor Red
+            $failed++
+        }
+
+        Write-Host -NoNewline "  [7/$totalChecks] bhm-reconciler -> PostgreSQL control-plane . "
+        $reconcilerPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName "bunkerm-reconciler"
+        if ($reconcilerPgCheck.Success) {
+            Write-Host "OK" -ForegroundColor Green
+            $passed++
+        } else {
+            $reconcilerError = if ($reconcilerPgCheck.Output) { $reconcilerPgCheck.Output } else { "error no especificado" }
+            Write-Host "FAIL $reconcilerError" -ForegroundColor Red
+            $failed++
+        }
     }
 
     $ErrorActionPreference = $savedPref
@@ -787,13 +947,16 @@ function Invoke-ReloadMosquitto {
 }
 
 function Invoke-StartBunkerM {
-    Write-Info "Starting BunkerM platform..."
+    Write-Info "Starting Broker Health Manager platform..."
     Write-Host ""
     
     if (-not (Test-Path ".env.dev")) {
         Write-Error ".env.dev not found. Run setup first: .\deploy.ps1 -Action setup"
         exit 1
     }
+
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
     
     # Verificar que la red exista
     Write-Info "Verificando red Docker..."
@@ -804,27 +967,48 @@ function Invoke-StartBunkerM {
         Write-Success "[OK] Red creada"
     }
 
-    # Iniciar mosquitto standalone primero (BunkerM depende de el)
+    # Iniciar mosquitto standalone primero (Broker Health Manager depende de el)
     Write-Info "Iniciando Mosquitto standalone..."
     Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d mosquitto"
     
     Write-Info "Esperando a que Mosquitto este listo (15 segundos)..."
     Start-Sleep -Seconds 15
 
-    # Iniciar solo el servicio bunkerm (BunkerM usa SQLite internamente, postgres no es necesario)
-    Write-Info "Iniciando BunkerM..."
+    if ($postgresRequired) {
+        Write-Info "La configuracion actual requiere PostgreSQL. Iniciando servicio postgres del perfil tools..."
+        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml --profile tools up -d postgres"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "No se pudo iniciar el servicio postgres requerido por la configuracion actual."
+            exit 1
+        }
+        if (-not (Wait-ContainerHealthy -ContainerName "bunkerm-postgres" -TimeoutSeconds 90)) {
+            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs -WithTools"
+            exit 1
+        }
+    }
+
+    # Iniciar solo el servicio bunkerm. Si la configuracion ya apunta a PostgreSQL,
+    # se levanta antes el servicio postgres para que el runtime no arranque degradado.
+    Write-Info "Iniciando Broker Health Manager..."
     Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d bunkerm"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Fallo el arranque del servicio bunkerm. Revisa: .\deploy.ps1 -Action logs"
+        exit 1
+    }
     
     Write-Host ""
-    Write-Success "[OK] BunkerM iniciado!"
+    Write-Success "[OK] Broker Health Manager iniciado!"
     Write-Host ""
-    Write-Info "Esperando a que BunkerM esté listo (60 segundos)..."
+    Write-Info "Esperando a que Broker Health Manager esté listo (60 segundos)..."
     Start-Sleep -Seconds 60
     
     Write-Host ""
     Write-Info "URLs de acceso:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
+    if ($postgresRequired) {
+        Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
+    }
     Write-Host ""
     Write-Info "Verificar estado: .\deploy.ps1 -Action status"
     Write-Info "Ver logs: $script:CE logs bunkerm-platform -f"
@@ -832,13 +1016,13 @@ function Invoke-StartBunkerM {
 }
 
 function Invoke-StopBunkerM {
-    Write-Info "Deteniendo BunkerM platform..."
+    Write-Info "Deteniendo Broker Health Manager platform..."
     Write-Host ""
     
     Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop bunkerm mosquitto"
 
     Write-Host ""
-    Write-Success "[OK] BunkerM y Mosquitto detenidos!"
+    Write-Success "[OK] Broker Health Manager y Mosquitto detenidos!"
     Write-Host ""
 }
 

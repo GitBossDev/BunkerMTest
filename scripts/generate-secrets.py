@@ -52,7 +52,7 @@ def generate_secrets():
     
     # Create .env.dev content
     env_content = f"""# ==========================================
-# BunkerM Extended - Development Environment
+# Broker Health Manager - Development Environment
 # ==========================================
 # Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 # NEVER commit this file to version control
@@ -66,7 +66,12 @@ POSTGRES_DB=bunkerm_db
 POSTGRES_PORT=5432
 
 # Database connection string
-DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+DATABASE_URL=sqlite+aiosqlite:////nextjs/data/bunkerm.db
+
+# Optional Phase 4 domain URLs (enable together with -WithTools when validating PostgreSQL)
+# CONTROL_PLANE_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+# HISTORY_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+# REPORTING_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
 
 # ------------------------------------------
 # MQTT Broker (Mosquitto) Configuration
@@ -82,7 +87,7 @@ BROKER_CPU_LIMIT_CORES=2
 BROKER_MEMORY_LIMIT=4g
 
 # ------------------------------------------
-# BunkerM Backend Services
+# Broker Health Manager Backend Services
 # ------------------------------------------
 # API Security
 API_KEY={api_key}
@@ -110,15 +115,15 @@ NGINX_PORT=2000
 # ------------------------------------------
 # Frontend / UI Admin Credentials
 # ------------------------------------------
-# Initial admin account for the BunkerM web UI.
+# Initial admin account for the Broker Health Manager web UI.
 # Change this password after first login.
-ADMIN_INITIAL_EMAIL=admin@brokerpanel.com
+ADMIN_INITIAL_EMAIL=admin@bhm.local
 ADMIN_INITIAL_PASSWORD={admin_ui_password}
 
 # ------------------------------------------
 # pgAdmin (Optional - for database management)
 # ------------------------------------------
-PGADMIN_DEFAULT_EMAIL=admin@bunkerm.local
+PGADMIN_DEFAULT_EMAIL=admin@bhm.local
 PGADMIN_DEFAULT_PASSWORD={pgadmin_password}
 PGADMIN_PORT=5050
 
@@ -135,7 +140,7 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USERNAME=your-email@gmail.com
 SMTP_PASSWORD=your-app-specific-password
-SMTP_FROM_EMAIL=noreply@bunkerm.local
+SMTP_FROM_EMAIL=noreply@bhm.local
 SMTP_USE_TLS=true
 
 # ------------------------------------------

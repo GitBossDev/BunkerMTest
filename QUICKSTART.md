@@ -33,12 +33,20 @@ Unblock-File deploy.ps1
 ### Paso 3: Iniciar servicios
 
 ```powershell
-# Iniciar plataforma BHM (sin PostgreSQL — no es necesario)
+# Iniciar plataforma BHM en baseline Compose-first
+# Sigue funcionando sobre Podman/Docker sin Kubernetes.
+# Si no activas URLs PostgreSQL en .env.dev, PostgreSQL no es obligatorio.
 .\deploy.ps1 -Action start
 
-# Opcional: iniciar con PostgreSQL + pgAdmin (Fase 3-4)
+# Opcional: forzar también pgAdmin además de PostgreSQL
 .\deploy.ps1 -Action start -WithTools
 ```
+
+Si `.env.dev` define `DATABASE_URL`, `CONTROL_PLANE_DATABASE_URL`, `HISTORY_DATABASE_URL` o
+`REPORTING_DATABASE_URL` con un esquema `postgresql://...`, `deploy.ps1 -Action start` activa
+automáticamente el perfil `tools` para levantar `postgres` antes del runtime. En ese modo, el
+smoke test también verifica conectividad real a PostgreSQL desde `bunkerm-platform` y
+`bhm-reconciler`.
 
 ### Paso 4: Verificar estado
 
@@ -50,7 +58,7 @@ Unblock-File deploy.ps1
 
 - **Web UI**: http://localhost:2000
 - **MQTT broker**: `localhost:1900`
-- **pgAdmin** (solo con -WithTools): http://localhost:5050
+- **pgAdmin** (cuando se active el perfil `tools`): http://localhost:5050
 
 #### Credenciales de la UI web
 

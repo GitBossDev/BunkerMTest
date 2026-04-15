@@ -47,6 +47,10 @@ def _parse_dt(raw: str | None) -> datetime | None:
 
 
 def _read_sqlite_rows(database_url: str) -> list[dict[str, object]]:
+    return _read_sqlite_table_rows(database_url, "broker_desired_state")
+
+
+def _read_sqlite_table_rows(database_url: str, table_name: str) -> list[dict[str, object]]:
     db_path = _resolve_sqlite_path(database_url)
     if not os.path.exists(db_path):
         return []
@@ -56,10 +60,28 @@ def _read_sqlite_rows(database_url: str) -> list[dict[str, object]]:
             row[0]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
-        if "broker_desired_state" not in tables:
+        if table_name not in tables:
             return []
-        rows = conn.execute("SELECT * FROM broker_desired_state").fetchall()
+        rows = conn.execute(f"SELECT * FROM {table_name}").fetchall()
     return [dict(row) for row in rows]
+
+
+def _default_legacy_control_plane_sqlite_url() -> str:
+    return "sqlite+aiosqlite:////nextjs/data/bunkerm.db"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--source-url",
+        help="SQLite source URL to migrate from. If omitted, uses CONTROL_PLANE_SOURCE_DATABASE_URL or the legacy bunkerm.db path.",
+    )
+    parser.add_argument(
+        "--target-url",
+        help="Override target control-plane URL. If omitted, uses resolved_control_plane_database_url from settings.",
+    )
+    return parser.parse_args()
 
 
 async def _migrate() -> int:
@@ -70,41 +92,55 @@ async def _migrate() -> int:
 
     Settings = importlib.import_module("core.config").Settings
     database_url_module = importlib.import_module("core.database_url")
+    get_async_database_url = database_url_module.get_async_database_url
+    get_host_accessible_database_url = database_url_module.get_host_accessible_database_url
     ensure_sqlite_url = database_url_module.ensure_sqlite_url
     get_async_engine_connect_args = database_url_module.get_async_engine_connect_args
-    BrokerDesiredState = importlib.import_module("models.orm").BrokerDesiredState
+    orm_module = importlib.import_module("models.orm")
+    BrokerDesiredState = orm_module.BrokerDesiredState
+    BrokerDesiredStateAudit = orm_module.BrokerDesiredStateAudit
+
+    args = _parse_args()
 
     settings = Settings()
-    source_url = settings.database_url
-    target_url = settings.resolved_control_plane_database_url
+    source_url = (
+        args.source_url
+        or os.getenv("CONTROL_PLANE_SOURCE_DATABASE_URL")
+        or _default_legacy_control_plane_sqlite_url()
+    )
+    target_url = get_host_accessible_database_url(args.target_url or settings.resolved_control_plane_database_url)
 
-    ensure_sqlite_url(source_url, "DATABASE_URL")
+    ensure_sqlite_url(source_url, "CONTROL_PLANE_SOURCE_DATABASE_URL")
     rows = _read_sqlite_rows(source_url)
-    if not rows:
-        print("No broker_desired_state rows found in the SQLite source database.")
+    audit_rows = _read_sqlite_table_rows(source_url, "broker_desired_state_audit")
+    if not rows and not audit_rows:
+        print("No control-plane rows found in the SQLite source database.")
         return 0
 
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("--dry-run", action="store_true")
-    args, _ = parser.parse_known_args()
-
     if args.dry_run:
-        print(f"Dry-run: {len(rows)} broker_desired_state rows ready to migrate.")
+        print(
+            "Dry-run: "
+            f"{len(rows)} broker_desired_state row(s) and "
+            f"{len(audit_rows)} broker_desired_state_audit row(s) ready to migrate."
+        )
         print(f"Source: {source_url}")
         print(f"Target: {target_url}")
-        return len(rows)
+        return len(rows) + len(audit_rows)
+
+    async_target_url = get_async_database_url(target_url)
 
     engine = create_async_engine(
-        target_url,
+        async_target_url,
         echo=False,
         pool_pre_ping=True,
-        connect_args=get_async_engine_connect_args(target_url),
+        connect_args=get_async_engine_connect_args(async_target_url),
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
         async with engine.begin() as conn:
             await conn.run_sync(BrokerDesiredState.__table__.create, checkfirst=True)
+            await conn.run_sync(BrokerDesiredStateAudit.__table__.create, checkfirst=True)
 
         async with session_factory() as session:
             for row in rows:
@@ -123,12 +159,32 @@ async def _migrate() -> int:
                         applied_at=_parse_dt(row.get("applied_at")),
                     )
                 )
+            for row in audit_rows:
+                await session.merge(
+                    BrokerDesiredStateAudit(
+                        id=row.get("id"),
+                        scope=row["scope"],
+                        version=row["version"],
+                        event_kind=row.get("event_kind") or "desired_change",
+                        desired_payload_json=row.get("desired_payload_json"),
+                        applied_payload_json=row.get("applied_payload_json"),
+                        observed_payload_json=row.get("observed_payload_json"),
+                        reconcile_status=row.get("reconcile_status") or "pending",
+                        drift_detected=bool(row.get("drift_detected", False)),
+                        error_message=row.get("error_message"),
+                        recorded_at=_parse_dt(row.get("recorded_at")) or datetime.utcnow(),
+                    )
+                )
             await session.commit()
     finally:
         await engine.dispose()
 
-    print(f"Migrated {len(rows)} broker_desired_state rows into the control-plane datastore.")
-    return len(rows)
+    print(
+        "Migrated "
+        f"{len(rows)} broker_desired_state row(s) and "
+        f"{len(audit_rows)} broker_desired_state_audit row(s) into the control-plane datastore."
+    )
+    return len(rows) + len(audit_rows)
 
 
 def main() -> None:
