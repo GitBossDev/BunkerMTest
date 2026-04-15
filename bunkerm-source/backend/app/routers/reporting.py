@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Security, status
 from fastapi.responses import Response
 
 from core.auth import get_api_key
-from reporting.sqlite_reporting import reporting_storage
+from reporting.storage import reporting_storage
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
 

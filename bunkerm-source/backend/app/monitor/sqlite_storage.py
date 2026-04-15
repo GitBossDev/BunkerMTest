@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+from core.database_url import ensure_sqlite_url
 from monitor.data_storage import PERIODS
 
 
@@ -26,6 +27,7 @@ def _parse_iso_utc(raw: str) -> datetime:
 
 
 def _resolve_sqlite_target(database_url: str) -> tuple[str, bool]:
+    ensure_sqlite_url(database_url, "HISTORY_DATABASE_URL")
     prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
     target = database_url
     for prefix in prefixes:

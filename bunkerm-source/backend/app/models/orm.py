@@ -234,6 +234,16 @@ class ClientDailySummary(Base):
     distinct_subscribe_topics: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class ClientDailyDistinctTopic(Base):
+    """Distinct topics seen per user/day and event type for reporting summaries."""
+    __tablename__ = "client_daily_distinct_topics"
+
+    username: Mapped[str] = mapped_column(String(128), primary_key=True)
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(32), primary_key=True)
+    topic: Mapped[str] = mapped_column(String(512), primary_key=True)
+
+
 class BrokerDesiredState(Base):
     """Estado deseado/aplicado/observado para cortes transicionales del control-plane."""
     __tablename__ = "broker_desired_state"
@@ -249,3 +259,20 @@ class BrokerDesiredState(Base):
     desired_updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     reconciled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class BrokerDesiredStateAudit(Base):
+    """Append-only audit trail for desired-state change requests in the control-plane."""
+    __tablename__ = "broker_desired_state_audit"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    event_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    desired_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    applied_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    observed_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reconcile_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    drift_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)

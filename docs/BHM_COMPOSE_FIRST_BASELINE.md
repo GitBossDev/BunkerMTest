@@ -116,6 +116,7 @@ Validaciones realizadas sobre el stack actual:
 - el alias `bhm-broker` resolvio correctamente desde `bunkerm-platform`
 - `deploy.ps1 -Action stop`, `start` y `restart` ejecutaron correctamente el ciclo operativo del stack
 - `deploy.ps1 -Action build` construyo correctamente las imagenes `bunkermtest-mosquitto:latest` y `bunkermtest-bunkerm:latest`
+- `deploy.ps1 -Action start` reconstruyo el stack Compose-first reutilizando `bunkermtest-bunkerm:latest` para `bunkerm-platform`, `bhm-reconciler` y `bhm-broker-observability`
 - `deploy.ps1 -Action smoke` termino en `5/5 OK` tras endurecer el check autenticado de DynSec
 - `GET /login` respondio `200 OK` y sirvio la pantalla de autenticacion
 - `POST /api/auth/login` dejo cookie de sesion reutilizable en el baseline local tras ajustar la politica `Secure` al esquema de `FRONTEND_URL`
@@ -123,16 +124,21 @@ Validaciones realizadas sobre el stack actual:
 - la exposicion de puertos observada en runtime quedo limitada a `2000/tcp` para plataforma y `1900/tcp`, `9001/tcp` para broker
 - dos reinicios controlados mantuvieron estable el hash de `dynamic-security.json`
 - el broker registro `Credentials already synchronized for admin`, confirmando sincronizacion idempotente del entrypoint
+- la inspeccion runtime confirmo que `bunkerm-platform` ya no monta `/var/log/mosquitto`, `/var/lib/mosquitto` ni `/etc/mosquitto`; solo conserva `/nextjs/data`, `/var/log/api` y `/var/log/nginx`
+- la inspeccion runtime confirmo que `bhm-broker-observability` concentra los mounts broker-owned en solo lectura sobre `/var/log/mosquitto`, `/var/lib/mosquitto` y `/etc/mosquitto`
+- desde `bunkerm-platform` se valido por HTTP interno que `bhm-broker-observability` expone `source-status` disponible para `mosquitto.log`, `broker-resource-stats.json`, `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y el directorio de certificados
 
 Conclusiones:
 
 - el baseline Compose-first queda validado a nivel runtime para la topologia actual
 - el ajuste de healthcheck corrige una incompatibilidad real entre backend, nginx y middleware frontend
-- la siguiente iteracion de Fase 2 debe centrarse en reducir dependencias de filesystem compartido y definir el primer recorte entre `bhm-api` y `bhm-reconciler`
+- el criterio operativo de salida de Fase 2 puede darse por cumplido: el stack arranca, se reconstruye y se valida de forma reproducible sobre Compose-first
+- la revision final del punto pendiente sobre mounts read-only quedo cerrada en Fase 3: el runtime HTTP activo ya no depende de `mosquitto-data` ni `mosquitto-conf` y consume esas lecturas broker-facing a traves de `bhm-broker-observability`
 
 Hallazgos pendientes antes de cerrar completamente la fase:
 
-- el backend principal sigue dependiendo de acceso directo a `dynamic-security.json`, `mosquitto.conf` y logs compartidos; eso queda como deuda estructural para Fase 3
+- no quedan hallazgos bloqueantes para Fase 2: la deuda de logs, data y config broker-facing fue absorbida por `bhm-broker-observability` durante el cierre de Fase 3
+- la indisponibilidad de `mosquitto_passwd` en el baseline actual se observa ya por `source-status` broker-owned sin requerir mounts directos en la plataforma; cualquier trabajo posterior sobre reporting o UX de esa ausencia pertenece a fases siguientes, no al cierre Compose-first
 
 ---
 
@@ -164,3 +170,5 @@ Con esta base de Fase 2 ya se puede:
 - diseñar la migración de persistencia a PostgreSQL con un baseline Compose coherente
 
 El siguiente paso lógico después de esta base es decidir el primer recorte técnico real del runtime actual.
+
+Con la validacion actual, Fase 2 queda cerrada a nivel operativo y ya no arrastra deuda broker-facing bloqueante dentro de `bunkerm-platform`. El siguiente paso puede pasar a Fase 4, apoyandose en un baseline Compose-first ya desacoplado del filesystem del broker para las lecturas activas del runtime HTTP.

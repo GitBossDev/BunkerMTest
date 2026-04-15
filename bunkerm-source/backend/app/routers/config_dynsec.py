@@ -21,13 +21,7 @@ from core.auth import get_api_key
 from core.database import get_db
 
 # Importar lógica de negocio del módulo original (se mantiene intacto)
-from config.dynsec_config import (
-    DEFAULT_CONFIG,
-    create_backup,
-    merge_dynsec_configs,
-    read_dynsec_json,
-    validate_dynsec_json,
-)
+from config.dynsec_config import DEFAULT_CONFIG, create_backup, merge_dynsec_configs, validate_dynsec_json
 from services import broker_desired_state_service as desired_state_svc
 
 logger = logging.getLogger(__name__)
@@ -66,7 +60,7 @@ async def get_dynsec_json_status(
 async def get_dynsec_json(api_key: str = Security(get_api_key)):
     """Devuelve la configuración DynSec completa en JSON."""
     try:
-        data = read_dynsec_json()
+        data = desired_state_svc.get_observed_dynsec_config()
         if not data:
             return {"success": False, "message": "Failed to read dynamic security JSON"}
         return {"success": True, "data": data}
@@ -87,7 +81,7 @@ async def export_dynsec_json(api_key: str = Security(get_api_key)):
     from datetime import datetime
 
     try:
-        data = read_dynsec_json()
+        data = desired_state_svc.get_observed_dynsec_config()
         if not data:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -10,11 +10,11 @@ from typing import Any, Dict, Iterable, Set
 
 from fastapi import APIRouter, Security, status
 
-from clientlogs.sqlite_activity_storage import client_activity_storage
+from clientlogs.activity_storage import client_activity_storage
 from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
-from monitor.topic_sqlite_storage import topic_history_storage
-from services import dynsec_service as dynsec_svc
+from monitor.topic_history_storage import topic_history_storage
+from services import broker_desired_state_service as desired_state_svc
 from services.clientlogs_service import mqtt_monitor, MQTTEvent, get_clientlogs_source_status
 
 router = APIRouter(prefix="/api/v1/clientlogs", tags=["clientlogs"])
@@ -97,7 +97,7 @@ def _entry_names(items: Iterable[Any], key: str) -> Set[str]:
 
 def _build_client_capability_map() -> Dict[str, Dict[str, bool]]:
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
     except Exception:
         return {}
     default_acl = data.get("defaultACLAccess", {})
@@ -224,7 +224,7 @@ async def get_client_activity(username: str, days: int = 30, limit: int = 200,
                               api_key: str = Security(get_api_key)):
     """Devuelve auditoría persistida reciente de un cliente MQTT."""
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
     except Exception:
         pass

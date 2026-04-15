@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from core.auth import get_api_key
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
-from monitor.topic_sqlite_storage import topic_history_storage
+from monitor.topic_history_storage import topic_history_storage
 from models.schemas import AlertConfigUpdate, PublishRequest
 from routers.clientlogs import build_activity_summary
 from services import broker_observability_client

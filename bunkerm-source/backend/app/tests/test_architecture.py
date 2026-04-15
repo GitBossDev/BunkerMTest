@@ -217,8 +217,8 @@ def test_compose_web_service_uses_daemon_mode_and_read_only_broker_mounts():
 
     assert "BROKER_RECONCILE_MODE=daemon" in compose_text
     assert "BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102" in compose_text
-    assert "mosquitto-data:/var/lib/mosquitto:ro" in bunkerm_block
-    assert "mosquitto-conf:/etc/mosquitto:ro" in bunkerm_block
+    assert "mosquitto-data:/var/lib/mosquitto:ro" not in bunkerm_block
+    assert "mosquitto-conf:/etc/mosquitto:ro" not in bunkerm_block
     assert "mosquitto-log:/var/log/mosquitto:ro" not in bunkerm_block
 
 
@@ -231,20 +231,26 @@ def test_compose_baseline_includes_broker_observability_service():
     assert "bhm-broker-observability:" in compose_text
     assert "container_name: bunkerm-broker-observability" in compose_text
     assert "services.broker_observability_api:app" in compose_text
+    assert "mosquitto-data:/var/lib/mosquitto:ro" in observability_block
+    assert "mosquitto-conf:/etc/mosquitto:ro" in observability_block
     assert "mosquitto-log:/var/log/mosquitto:ro" in observability_block
 
 
-def test_config_and_monitor_routers_no_longer_read_shared_broker_files_directly():
-    """Protege que config y monitor usen el cliente HTTP interno y no lean archivos broker-facing."""
+def test_web_surfaces_no_longer_read_shared_broker_files_directly():
+    """Protege que las lecturas broker-facing del web pasen por observabilidad o estado observado."""
     app_root = pathlib.Path(__file__).parents[1]
     config_text = (app_root / "routers" / "config_mosquitto.py").read_text(encoding="utf-8")
     monitor_text = (app_root / "routers" / "monitor.py").read_text(encoding="utf-8")
+    dynsec_text = (app_root / "routers" / "dynsec.py").read_text(encoding="utf-8")
+    clientlogs_text = (app_root / "routers" / "clientlogs.py").read_text(encoding="utf-8")
 
     assert "broker_observability_client" in config_text
     assert "broker_observability_client" in monitor_text
-    assert "settings.broker_log_path" not in config_text
-    assert "settings.broker_resource_stats_path" not in monitor_text
+    assert "get_observed_dynsec_config" in dynsec_text
+    assert "get_observed_dynsec_config" in clientlogs_text
+    assert "settings.mosquitto_conf_path" not in monitor_text
     assert 'open(log_path' not in config_text
+    assert "read_dynsec()" not in dynsec_text
 
 
 def test_legacy_bridge_and_dynsec_surfaces_no_longer_embed_broker_writes():
