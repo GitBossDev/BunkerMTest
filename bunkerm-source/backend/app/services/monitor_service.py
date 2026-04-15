@@ -26,6 +26,7 @@ from monitor.topic_sqlite_storage import topic_history_storage
 
 from core.config import settings
 from services import broker_observability_client
+from services.alert_notifications import notify_alert_raised
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +364,7 @@ class AlertEngine:
             }
             self._active[key] = entry
             self._alert_history.append({**entry})
+            notify_alert_raised(entry)
         else:
             self._active[key]["description"] = description
 

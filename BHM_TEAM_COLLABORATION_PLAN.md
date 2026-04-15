@@ -292,7 +292,7 @@ Estado actual ya disponible para coordinación con B:
 - [ ] Implementar alertas por redes o webhooks.
 - [ ] Refinar histórico de logs de broker.
 - [ ] Refinar histórico de logs de clientes.
-- [ ] Mejorar estilos y UI donde aplique.
+- [x] Mejorar estilos y UI donde aplique.
 
 ### Trabajo seguro sin bloquearse
 

@@ -24,6 +24,50 @@ There are two entry points:
 
 ---
 
+## External Notifications (Email)
+
+Besides dashboard notifications, BunkerM can now send external notifications when a new alert becomes active. This is useful when no operator is currently viewing the UI.
+
+- Trigger moment: only when an alert is first raised with status `active`.
+- Repeated polls do not resend the same alert while it stays active.
+- Delivery is asynchronous (non-blocking) and does not stop alert evaluation if a provider fails.
+
+### 1) Global switch
+
+```env
+ALERT_NOTIFY_ENABLED=true
+```
+
+### 2) Email via SMTP
+
+```env
+ALERT_NOTIFY_EMAIL_ENABLED=true
+ALERT_NOTIFY_EMAIL_TO=ops@example.com,oncall@example.com
+ALERT_NOTIFY_EMAIL_FROM=alerts@bunkerm.local
+ALERT_NOTIFY_SMTP_HOST=smtp.example.com
+ALERT_NOTIFY_SMTP_PORT=587
+ALERT_NOTIFY_SMTP_USERNAME=alerts-user
+ALERT_NOTIFY_SMTP_PASSWORD=replace_me
+ALERT_NOTIFY_SMTP_STARTTLS=true
+ALERT_NOTIFY_SMTP_SSL=false
+```
+
+After setting variables, redeploy BunkerM backend.
+
+### Testing Email Delivery
+
+To validate delivery safely before using production SMTP:
+
+1. Point SMTP to a sandbox server (for example MailHog/Mailpit/smtp4dev).
+2. Trigger one alert condition (for example set `ALERT_CLIENT_CAPACITY_PCT=1` temporarily so capacity alert fires quickly).
+3. Verify these backend logs appear:
+  - `Alert email sent to N recipient(s)`
+  - No `Failed to send alert email notification` errors
+4. Check the sandbox inbox and confirm subject format: `[BunkerM][SEVERITY] <title>`.
+5. Restore normal thresholds after the test.
+
+---
+
 ## Alert Types
 
 The monitor service evaluates alert conditions every ~30 seconds (each stats poll). All alerts are stored in memory — they are reset when the monitor service restarts.

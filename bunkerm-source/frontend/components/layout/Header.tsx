@@ -108,54 +108,12 @@ export function Header({ onMenuClick }: HeaderProps) {
             <DropdownMenuLabel>Support &amp; Resources</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <a href="https://bunkerai.dev/" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <Globe className="mr-2 h-4 w-4" />
-                BunkerM
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://bunkeriot.github.io/BunkerM/" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <BookOpen className="mr-2 h-4 w-4" />
-                Documentation
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://github.com/bunkeriot/BunkerM/discussions" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <MessageSquare className="mr-2 h-4 w-4" />
-                Discussions
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://github.com/bunkeriot/BunkerM/releases" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <Tag className="mr-2 h-4 w-4" />
-                Releases
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://github.com/bunkeriot/BunkerM" target="_blank" rel="noopener noreferrer" className="flex items-center">
+              <a href="https://github.com/GitBossDev/BunkerMTest" target="_blank" rel="noopener noreferrer" className="flex items-center">
                 <Github className="mr-2 h-4 w-4" />
                 GitHub
               </a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild>
-              <a href="https://www.reddit.com/r/BunkerM/" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <RedditIcon className="mr-2 h-4 w-4" />
-                Reddit
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://www.linkedin.com/in/mehdi-idrissi/" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <LinkedInIcon className="mr-2 h-4 w-4" />
-                LinkedIn
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <a href="https://x.com/BunkerIoT" target="_blank" rel="noopener noreferrer" className="flex items-center">
-                <XIcon className="mr-2 h-4 w-4" />
-                X (Twitter)
-              </a>
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
