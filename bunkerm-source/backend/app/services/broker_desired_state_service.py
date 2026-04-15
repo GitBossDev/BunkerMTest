@@ -24,7 +24,8 @@ from config.mosquitto_config import (
 from config.dynsec_config import DEFAULT_CONFIG as DEFAULT_DYNSEC_CONFIG, validate_dynsec_json
 from core.config import settings
 from core.database import AsyncSessionLocal
-from models.orm import BrokerDesiredState
+from models.orm import BrokerDesiredState, BrokerDesiredStateAudit
+from services import broker_observability_client
 from services import broker_reconciler as broker_reconciler_svc
 from services import dynsec_service
 
@@ -52,6 +53,7 @@ _BROKER_RECONCILE_SECRET_DIR: str = settings.broker_reconcile_secret_dir
 _ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
 _MOSQUITTO_PASSWD_LINE_PATTERN = re.compile(r"^[^:]+:\$\d+\$[^:]+$")
 _broker_reconciler = broker_reconciler_svc.BrokerReconciler()
+_DESIRED_AUDIT_EVENT_KIND = "desired_change"
 
 
 def _utcnow() -> datetime:
@@ -133,6 +135,29 @@ def normalize_bridge_bundle_payload(payload: Dict[str, Any] | None) -> Dict[str,
 
 def get_broker_reconciler() -> broker_reconciler_svc.BrokerReconciler:
     return _broker_reconciler
+
+
+async def _commit_desired_state_change(
+    session: AsyncSession,
+    state: BrokerDesiredState,
+) -> BrokerDesiredState:
+    session.add(
+        BrokerDesiredStateAudit(
+            scope=state.scope,
+            version=state.version,
+            event_kind=_DESIRED_AUDIT_EVENT_KIND,
+            desired_payload_json=state.desired_payload_json,
+            applied_payload_json=state.applied_payload_json,
+            observed_payload_json=state.observed_payload_json,
+            reconcile_status=state.reconcile_status,
+            drift_detected=state.drift_detected,
+            error_message=state.last_error,
+            recorded_at=_utcnow(),
+        )
+    )
+    await session.commit()
+    await session.refresh(state)
+    return state
 
 
 def is_daemon_reconcile_mode() -> bool:
@@ -448,9 +473,28 @@ def _normalize_mosquitto_observed_payload(parsed: Dict[str, Any], content: str) 
 
 
 def get_observed_mosquitto_config() -> Dict[str, Any]:
-    content = _read_mosquitto_content()
-    parsed = parse_mosquitto_conf() if content else {"config": {}, "listeners": []}
-    return _normalize_mosquitto_observed_payload(parsed, content)
+    if os.path.isfile(_MOSQUITTO_CONF_PATH):
+        content = _read_mosquitto_content()
+        parsed = parse_mosquitto_conf() if content else {"config": {}, "listeners": []}
+        return _normalize_mosquitto_observed_payload(parsed, content)
+
+    try:
+        parsed = parse_mosquitto_conf()
+        if parsed.get("config"):
+            return _normalize_mosquitto_observed_payload(parsed, _read_mosquitto_content())
+    except Exception:
+        pass
+
+    payload = broker_observability_client.fetch_broker_mosquitto_config_sync()
+    return normalize_mosquitto_config_payload(
+        {
+            "config": payload.get("config", {}),
+            "listeners": payload.get("listeners", []),
+            "max_inflight_messages": payload.get("max_inflight_messages"),
+            "max_queued_messages": payload.get("max_queued_messages"),
+            "tls": payload.get("tls"),
+        }
+    )
 
 
 async def get_mosquitto_config_state(session: AsyncSession) -> BrokerDesiredState | None:
@@ -491,9 +535,7 @@ async def set_broker_reload_desired(
         state.last_error = None
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def reconcile_broker_reload_signal(session: AsyncSession) -> BrokerDesiredState:
@@ -520,9 +562,7 @@ async def reconcile_broker_reload_signal(session: AsyncSession) -> BrokerDesired
         state.reconcile_status = "applied"
         state.last_error = None
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def get_broker_reload_status(session: AsyncSession) -> Dict[str, Any]:
@@ -590,9 +630,7 @@ async def set_bridge_bundle_desired(
         state.last_error = "bridge scope defined but not active in product surface"
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def get_bridge_bundle_status(session: AsyncSession) -> Dict[str, Any]:
@@ -660,9 +698,7 @@ async def _store_mosquitto_config_desired(
         state.last_error = None
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def set_mosquitto_config_desired(session: AsyncSession, payload: Dict[str, Any]) -> BrokerDesiredState:
@@ -715,9 +751,7 @@ async def reconcile_mosquitto_config(session: AsyncSession) -> BrokerDesiredStat
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def reset_mosquitto_config_desired(session: AsyncSession) -> BrokerDesiredState:
@@ -821,28 +855,29 @@ def _public_mosquitto_passwd_payload(payload: Dict[str, Any] | None) -> Dict[str
 
 
 def get_observed_mosquitto_passwd() -> Dict[str, Any]:
-    if not os.path.exists(_MOSQUITTO_PASSWD_PATH):
+    if os.path.exists(_MOSQUITTO_PASSWD_PATH):
+        with open(_MOSQUITTO_PASSWD_PATH, "r", encoding="utf-8") as handle:
+            content = _normalize_mosquitto_passwd_content(handle.read())
+
+        usernames = _parse_mosquitto_passwd_users(content)
+        raw_bytes = content.encode("utf-8")
         return {
-            "exists": False,
-            "content": "",
-            "users": [],
-            "userCount": 0,
-            "sizeBytes": 0,
-            "sha256": None,
+            "exists": True,
+            "content": content,
+            "users": usernames,
+            "userCount": len(usernames),
+            "sizeBytes": len(raw_bytes),
+            "sha256": _sha256_bytes(raw_bytes),
         }
 
-    with open(_MOSQUITTO_PASSWD_PATH, "r", encoding="utf-8") as handle:
-        content = _normalize_mosquitto_passwd_content(handle.read())
-
-    usernames = _parse_mosquitto_passwd_users(content)
-    raw_bytes = content.encode("utf-8")
-    return {
-        "exists": True,
-        "content": content,
-        "users": usernames,
-        "userCount": len(usernames),
-        "sizeBytes": len(raw_bytes),
-        "sha256": _sha256_bytes(raw_bytes),
+    payload = broker_observability_client.fetch_broker_passwd_sync()
+    return payload.get("passwd") or {
+        "exists": False,
+        "content": "",
+        "users": [],
+        "userCount": 0,
+        "sizeBytes": 0,
+        "sha256": None,
     }
 
 
@@ -875,9 +910,7 @@ async def _store_mosquitto_passwd_desired(
         state.last_error = None
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def set_mosquitto_passwd_desired(session: AsyncSession, payload: Dict[str, Any]) -> BrokerDesiredState:
@@ -921,9 +954,7 @@ async def reconcile_mosquitto_passwd(session: AsyncSession) -> BrokerDesiredStat
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def get_mosquitto_passwd_status(session: AsyncSession) -> Dict[str, Any]:
@@ -975,7 +1006,16 @@ async def get_mosquitto_passwd_status(session: AsyncSession) -> Dict[str, Any]:
 
 
 def get_observed_dynsec_config() -> Dict[str, Any]:
-    return normalize_dynsec_config_payload(dynsec_service.read_dynsec())
+    if os.path.isfile(settings.dynsec_path):
+        return normalize_dynsec_config_payload(dynsec_service.read_dynsec())
+
+    try:
+        return normalize_dynsec_config_payload(dynsec_service.read_dynsec())
+    except Exception:
+        pass
+
+    payload = broker_observability_client.fetch_broker_dynsec_sync()
+    return normalize_dynsec_config_payload(payload.get("config") or DEFAULT_DYNSEC_CONFIG)
 
 
 async def get_dynsec_config_state(session: AsyncSession) -> BrokerDesiredState | None:
@@ -1005,9 +1045,7 @@ async def set_dynsec_config_desired(session: AsyncSession, payload: Dict[str, An
         state.last_error = None
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def reset_dynsec_config_desired(session: AsyncSession) -> BrokerDesiredState:
@@ -1043,9 +1081,7 @@ async def reconcile_dynsec_config(session: AsyncSession) -> BrokerDesiredState:
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def get_dynsec_config_status(session: AsyncSession) -> Dict[str, Any]:
@@ -1262,9 +1298,7 @@ async def set_default_acl_desired(session: AsyncSession, payload: Dict[str, Any]
         state.last_error = None
         state.desired_updated_at = now
 
-    await session.commit()
-    await session.refresh(state)
-    return state
+    return await _commit_desired_state_change(session, state)
 
 
 async def reconcile_default_acl(session: AsyncSession) -> BrokerDesiredState:
@@ -1751,25 +1785,29 @@ def _effective_tls_cert_entries(raw_entries: List[Dict[str, Any]]) -> List[Dict[
 
 
 def get_observed_tls_cert_store() -> Dict[str, Any]:
-    os.makedirs(_CERTS_DIR, exist_ok=True)
-    entries: List[Dict[str, Any]] = []
-    for filename in sorted(os.listdir(_CERTS_DIR)):
-        path = os.path.join(_CERTS_DIR, filename)
-        extension = os.path.splitext(filename)[1].lower()
-        if not os.path.isfile(path) or extension not in _ALLOWED_CERT_EXTENSIONS:
-            continue
-        with open(path, "rb") as handle:
-            content = handle.read()
-        entries.append(
-            {
-                "filename": filename,
-                "extension": extension,
-                "size": len(content),
-                "sha256": _sha256_bytes(content),
-                "deleted": False,
-            }
-        )
-    return {"certs": entries}
+    if os.path.isdir(_CERTS_DIR):
+        os.makedirs(_CERTS_DIR, exist_ok=True)
+        entries: List[Dict[str, Any]] = []
+        for filename in sorted(os.listdir(_CERTS_DIR)):
+            path = os.path.join(_CERTS_DIR, filename)
+            extension = os.path.splitext(filename)[1].lower()
+            if not os.path.isfile(path) or extension not in _ALLOWED_CERT_EXTENSIONS:
+                continue
+            with open(path, "rb") as handle:
+                content = handle.read()
+            entries.append(
+                {
+                    "filename": filename,
+                    "extension": extension,
+                    "size": len(content),
+                    "sha256": _sha256_bytes(content),
+                    "deleted": False,
+                }
+            )
+        return {"certs": entries}
+
+    payload = broker_observability_client.fetch_broker_tls_certs_sync()
+    return {"certs": payload.get("certs") or []}
 
 
 async def get_tls_cert_store_state(session: AsyncSession) -> BrokerDesiredState | None:

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from core.config import settings
+from core.database_url import ensure_sqlite_url
 
 
 def _utc_now() -> datetime:
@@ -26,6 +27,7 @@ def _parse_iso(raw: str | None) -> datetime | None:
 
 
 def _resolve_sqlite_target(database_url: str) -> tuple[str, bool]:
+    ensure_sqlite_url(database_url, "HISTORY_DATABASE_URL")
     prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
     target = database_url
     for prefix in prefixes:
@@ -369,4 +371,4 @@ class SQLiteClientActivityStorage:
         }
 
 
-client_activity_storage = SQLiteClientActivityStorage(settings.database_url)
+client_activity_storage = SQLiteClientActivityStorage(settings.resolved_history_database_url)

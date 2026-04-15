@@ -14,6 +14,7 @@ import psycopg2
 from psycopg2.extras import Json, execute_values
 from datetime import datetime
 from pathlib import Path
+from sqlalchemy.engine import make_url
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -39,21 +40,19 @@ def get_postgres_connection():
     if not database_url:
         print("ERROR: DATABASE_URL not found in environment")
         sys.exit(1)
-    
-    # Parse DATABASE_URL: postgresql://user:pass@host:port/db
+
     try:
-        # Simple parsing (use urllib.parse for production)
-        parts = database_url.replace('postgresql://', '').split('@')
-        user_pass = parts[0].split(':')
-        host_port_db = parts[1].split('/')
-        host_port = host_port_db[0].split(':')
-        
+        url = make_url(database_url)
+        if url.get_backend_name() != 'postgresql':
+            raise ValueError(f"DATABASE_URL must target PostgreSQL, got: {database_url}")
+
         conn = psycopg2.connect(
-            host=host_port[0],
-            port=int(host_port[1]) if len(host_port) > 1 else 5432,
-            database=host_port_db[1],
-            user=user_pass[0],
-            password=user_pass[1] if len(user_pass) > 1 else ''
+            host=url.host or 'localhost',
+            port=int(url.port or 5432),
+            database=url.database,
+            user=url.username,
+            password=url.password or '',
+            connect_timeout=5,
         )
         return conn
     except Exception as e:

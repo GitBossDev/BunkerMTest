@@ -21,8 +21,8 @@ from paho.mqtt import client as mqtt_client
 
 # Importamos desde la ubicación original — no movemos ni copiamos el archivo
 from monitor.data_storage import PERIODS
-from monitor.sqlite_storage import BrokerTickSnapshot, SQLiteMonitorHistoryStorage
-from monitor.topic_sqlite_storage import topic_history_storage
+from monitor.history_storage import BrokerTickSnapshot, create_monitor_history_storage
+from monitor.topic_history_storage import topic_history_storage
 
 from core.config import settings
 from services import broker_observability_client
@@ -132,13 +132,13 @@ def read_max_connections() -> int:
         return _max_connections_cache["value"]
     limit = 0
     try:
-        with open(settings.mosquitto_conf_path) as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith("max_connections "):
-                    val = int(line.split()[1])
-                    if val > 0 and (limit == 0 or val < limit):
-                        limit = val
+        observed = broker_observability_client.fetch_broker_mosquitto_config_sync()
+        for listener in observed.get("listeners", []):
+            if not isinstance(listener, dict):
+                continue
+            val = int(listener.get("max_connections") or 0)
+            if val > 0 and (limit == 0 or val < limit):
+                limit = val
     except Exception:
         pass
     if limit <= 0:
@@ -482,10 +482,7 @@ class MQTTStats:
         self.last_broker_sample_at = ""
         self._ping_sent_at: float = 0.0
         self._is_connected: bool = False
-        self.data_storage = SQLiteMonitorHistoryStorage(
-            database_url=settings.database_url,
-            legacy_json_path=_HIST_DATA_PATH,
-        )
+        self.data_storage = create_monitor_history_storage(legacy_json_path=_HIST_DATA_PATH)
         self.last_storage_update = self._load_last_tick_time()
         self.messages_history: deque = deque(maxlen=15)
         self.published_history: deque = deque(maxlen=15)

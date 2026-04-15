@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from clientlogs.sqlite_activity_storage import client_activity_storage
+from clientlogs.activity_storage import client_activity_storage
 from core.auth import get_api_key
 from core.database import get_db
 from models.schemas import (
@@ -144,7 +144,7 @@ async def list_clients(
 ):
     """Lista clientes desde dynamic-security.json con paginación y búsqueda."""
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         raw_clients = data.get("clients", [])
 
@@ -187,7 +187,7 @@ async def list_clients(
 async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
     """Devuelve el mapa disabled y la lista de usernames para Connected Clients."""
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         clients = data.get("clients", [])
         disabled_map = {
@@ -208,7 +208,7 @@ async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
 async def get_client(username: str, api_key: str = Security(get_api_key)):
     """Devuelve los detalles de un cliente específico."""
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
         client = dynsec_svc.find_client(data, username)
         if client is None:
@@ -537,7 +537,7 @@ async def remove_client_role(username: str, role_name: str,
 @router.get("/roles")
 async def list_roles(api_key: str = Security(get_api_key)):
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         role_names = [r["rolename"] for r in data.get("roles", []) if "rolename" in r]
         return {"roles": "\n".join(role_names)}
     except FileNotFoundError:
@@ -550,7 +550,7 @@ async def list_roles(api_key: str = Security(get_api_key)):
 @router.get("/roles/{role_name}")
 async def get_role(role_name: str, api_key: str = Security(get_api_key)):
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         role_data = dynsec_svc.find_role(data, role_name)
         if role_data is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -763,7 +763,7 @@ async def remove_role_acl(role_name: str, acl_type: ACLType, topic: str,
 @router.get("/groups")
 async def list_groups(api_key: str = Security(get_api_key)):
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         group_names = [g["groupname"] for g in data.get("groups", []) if "groupname" in g]
         return {"groups": "\n".join(group_names)}
     except Exception as exc:
@@ -773,7 +773,7 @@ async def list_groups(api_key: str = Security(get_api_key)):
 @router.get("/groups/{group_name}")
 async def get_group(group_name: str, api_key: str = Security(get_api_key)):
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         group_data = dynsec_svc.find_group(data, group_name)
         if group_data is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
@@ -1062,7 +1062,7 @@ async def remove_client_from_group(group_name: str, username: str,
 @router.get("/default-acl")
 async def get_default_acl(api_key: str = Security(get_api_key)):
     try:
-        data = dynsec_svc.read_dynsec()
+        data = desired_state_svc.get_observed_dynsec_config()
         raw = data.get("defaultACLAccess", {})
         return {
             "publishClientSend": bool(raw.get("publishClientSend", True)),

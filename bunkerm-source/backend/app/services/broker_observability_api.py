@@ -36,3 +36,43 @@ async def get_broker_resource_stats() -> dict:
 @app.get("/internal/broker/resource-stats/source-status")
 async def get_broker_resource_stats_source_status() -> dict:
     return {"source": observability_svc.get_broker_resource_source_status()}
+
+
+@app.get("/internal/broker/dynsec")
+async def get_broker_dynsec() -> dict:
+    return observability_svc.read_broker_dynsec_payload()
+
+
+@app.get("/internal/broker/dynsec/source-status")
+async def get_broker_dynsec_source_status() -> dict:
+    return {"source": observability_svc.get_broker_dynsec_source_status()}
+
+
+@app.get("/internal/broker/mosquitto-config")
+async def get_broker_mosquitto_config() -> dict:
+    return observability_svc.read_broker_mosquitto_config_payload()
+
+
+@app.get("/internal/broker/mosquitto-config/source-status")
+async def get_broker_mosquitto_config_source_status() -> dict:
+    return {"source": observability_svc.get_broker_mosquitto_config_source_status()}
+
+
+@app.get("/internal/broker/passwd")
+async def get_broker_passwd() -> dict:
+    return observability_svc.read_broker_passwd_payload()
+
+
+@app.get("/internal/broker/passwd/source-status")
+async def get_broker_passwd_source_status() -> dict:
+    return {"source": observability_svc.get_broker_passwd_source_status()}
+
+
+@app.get("/internal/broker/tls-certs")
+async def get_broker_tls_certs() -> dict:
+    return observability_svc.read_broker_tls_certs_payload()
+
+
+@app.get("/internal/broker/tls-certs/source-status")
+async def get_broker_tls_certs_source_status() -> dict:
+    return {"source": observability_svc.get_broker_tls_certs_source_status()}

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 from core.config import settings
+from core.database_url import ensure_sqlite_url
 from monitor.data_storage import PERIODS
 
 
@@ -29,6 +30,7 @@ def _bucket_start(value: datetime, minutes: int) -> datetime:
 
 
 def _resolve_sqlite_target(database_url: str) -> tuple[str, bool]:
+    ensure_sqlite_url(database_url, "HISTORY_DATABASE_URL")
     prefixes = ("sqlite+aiosqlite:///", "sqlite:///")
     target = database_url
     for prefix in prefixes:
@@ -229,4 +231,4 @@ class SQLiteTopicHistoryStorage:
         }
 
 
-topic_history_storage = SQLiteTopicHistoryStorage(settings.database_url)
+topic_history_storage = SQLiteTopicHistoryStorage(settings.resolved_history_database_url)

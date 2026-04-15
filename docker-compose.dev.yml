@@ -168,10 +168,6 @@ services:
       - bunkerm-nextjs:/nextjs/data
       - bunkerm-logs-api:/var/log/api
       - bunkerm-logs-nginx:/var/log/nginx
-      # Volumenes compartidos heredados con mosquitto
-      # Se mantienen por compatibilidad transicional y no deben ampliarse.
-      - mosquitto-data:/var/lib/mosquitto:ro   # DynSec JSON y marcadores broker-facing: solo lectura desde web
-      - mosquitto-conf:/etc/mosquitto:ro    # mosquitto.conf/certs/passwd: lectura desde web; escritura solo via bhm-reconciler
     networks:
       bunkerm-network:
         aliases:
@@ -256,6 +252,8 @@ services:
       - -c
       - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/uvicorn services.broker_observability_api:app --host 0.0.0.0 --port 9102
     volumes:
+      - mosquitto-data:/var/lib/mosquitto:ro
+      - mosquitto-conf:/etc/mosquitto:ro
       - mosquitto-log:/var/log/mosquitto:ro
     networks:
       bunkerm-network:

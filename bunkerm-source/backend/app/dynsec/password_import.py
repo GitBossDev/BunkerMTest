@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import get_db
+from services import broker_observability_client
 from services import broker_desired_state_service as desired_state_svc
 from services import dynsec_service as dynsec_svc
 
@@ -102,7 +103,7 @@ def _ensure_reconcile_success(state, detail_prefix: str) -> None:
 
 
 def build_dynsec_config_with_passwd_users(usernames: List[str]) -> tuple[dict, int]:
-    dynsec_data = dynsec_svc.read_dynsec()
+    dynsec_data = desired_state_svc.get_observed_dynsec_config()
     dynsec_data.setdefault("clients", [])
     current_clients = dynsec_data.get("clients", [])
     current_usernames = {client.get("username") for client in current_clients}
@@ -341,10 +342,12 @@ async def check_password_file_status(
             "sha256": None,
         }
 
-        file_path = desired_state_svc._MOSQUITTO_PASSWD_PATH
         modified_time = None
-        if observed["exists"] and os.path.exists(file_path):
-            modified_time = datetime.fromtimestamp(os.stat(file_path).st_mtime).isoformat()
+        try:
+            source = broker_observability_client.fetch_broker_passwd_source_status_sync().get("source") or {}
+            modified_time = source.get("modifiedAt")
+        except Exception:
+            modified_time = None
 
         response = {
             "exists": observed["exists"],

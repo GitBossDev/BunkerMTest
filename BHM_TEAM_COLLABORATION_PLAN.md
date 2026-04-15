@@ -225,11 +225,14 @@ Regla:
 
 ### Persistencia y base de datos
 
-- [ ] Diseñar la estrategia de migración de SQLite a PostgreSQL.
-- [ ] Definir el esquema PostgreSQL del bounded context de BHM.
-- [ ] Definir estrategia de compatibilidad temporal para features ya persistidas en SQLite.
-- [ ] Implementar la capa de persistencia portable o repositorios de transición.
-- [ ] Coordinar con B qué endpoints y payloads cambiarán por la migración.
+- [x] Alinear el alcance y el orden recomendado de Fase 4 en `BHM_MICROSERVICES_MIGRATION_PLAN.md`.
+- [ ] Diseñar la estrategia de migración incremental de SQLite a PostgreSQL por capability o agregado.
+- [ ] Definir el esquema PostgreSQL inicial del bounded context de BHM, empezando por control-plane, auditoría y reconciliación.
+- [ ] Definir estrategia de compatibilidad temporal acotada para features ya persistidas en SQLite, evitando doble escritura estructural.
+- [~] Implementar la capa de persistencia portable o repositorios de transición. Ya existen factorías y backends SQLAlchemy reales para history/reporting, pero falta la activación operativa completa con PostgreSQL.
+- [~] Ejecutar el primer corte operativo: mover a PostgreSQL el estado durable del control-plane (`broker_desired_state` y auditoría asociada). La auditoría append-only ya quedó implementada en `broker_desired_state_audit`.
+- [~] Ejecutar el segundo corte operativo: mover broker history, topic history y client activity a PostgreSQL. Los storages SQLAlchemy ya quedaron implementados detrás de los seams existentes.
+- [ ] Coordinar con B qué endpoints y payloads cambiarán por la migración y cuáles mantendrán compatibilidad temporal.
 
 ### APIs y contratos
 
@@ -272,11 +275,17 @@ Estado actual ya disponible para coordinación con B:
 - El flujo de importación/sync de `mosquitto_passwd` ya no escribe `dynamic-security.json` directamente; ahora genera desired state del documento DynSec completo y lo delega al reconciliador explícito.
 - La integración real sobre el stack Podman activo ya cubre también import/reset del documento DynSec, `import-password-file` y el sync desde `mosquitto_passwd`, no solo el lifecycle principal de clientes.
 - El baseline local ya fue revalidado en runtime real tras ese recorte: `podman compose ... up -d mosquitto bunkerm bhm-reconciler` recreó el stack y `deploy.ps1 -Action smoke` cerró en `5/5 OK`.
+- Fase 3 puede considerarse cerrada: el runtime HTTP ya no depende de mounts broker-facing para escrituras ni lecturas activas, y el siguiente carril estructural pasa a ser PostgreSQL.
+- Fase 4 ya quedó ordenada en tres cortes para coordinación: primero control-plane durable y auditoría, después broker history/topic history/client activity, y por último read models o tablas auxiliares que sigan en SQLite.
+- Mientras A no cierre un dominio en PostgreSQL, B debe evitar consolidar almacenamiento definitivo nuevo en SQLite para históricos o reporting técnico; puede seguir avanzando en UX, filtros, tablas, payloads esperados y contratos provisionales.
+- A ya implementó el tramo actual de Fase 4 en código: URLs de base por dominio, engine del control-plane separable, migrador seguro de `broker_desired_state`, auditoría append-only del control-plane y backends SQLAlchemy para históricos/reporting detrás de las factorías existentes.
+- La capa HTTP y los servicios de monitor, clientlogs y reporting ya dejaron de depender de imports SQLite concretos para esos dominios; esto reduce el riesgo de merge cuando llegue la activación operativa de PostgreSQL.
+- La validación enfocada del estado actual de Fase 4 ya pasó con `36 passed, 1 warning`, así que B puede seguir trabajando sobre contratos/UI de históricos y reporting sin tocar de nuevo la capa de persistencia ni asumir imports directos a SQLite.
 
 ### Coordinación
 
 - [ ] Notificar a B cuando una dependencia quede desbloqueada.
-- [ ] Marcar en este documento qué tareas ya pueden ejecutarse sin riesgo.
+- [x] Marcar en este documento qué tareas ya pueden ejecutarse sin riesgo.
 
 ---
 
@@ -421,14 +430,14 @@ Usar esta sección como tablero rápido de coordinación.
 ### Bloqueos actuales
 
 - [ ] Definir si whitelist por IP vivirá como política de broker, capa de aplicación o ambas.
-- [ ] Definir qué endpoints históricos pasarán primero a PostgreSQL.
+- [x] Definir qué endpoints históricos pasarán primero a PostgreSQL.
 - [ ] Definir el contrato para alertas con canales externos.
 - [ ] Definir si el histórico de logs se alimentará de la fuente actual o de la futura capa de observabilidad.
 
 ### Decisiones que deben tomarse con prioridad
 
 - [ ] Prioridad de features de B que necesitan soporte temprano de A.
-- [ ] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
+- [x] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
 - [ ] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend.
 - [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; si se usa más adelante, será solo como validación opcional.
 
@@ -453,6 +462,10 @@ Usar esta sección como tablero rápido de coordinación.
 - A ya retiró también las superficies legacy ejecutables de `aws_bridge.py`, `azure_bridge.py`, `app/aws-bridge/main.py`, `app/azure-bridge/main.py` y `app/dynsec/main.py`; ya no quedan writers broker-facing alternativos en esos caminos históricos.
 - A ya auditó también el mount `mosquitto-log`: sigue siendo necesario por `clientlogs`, por `GET /api/v1/config/broker` y por `broker-resource-stats.json`, así que el siguiente recorte no era quitar el volumen sino volver esa dependencia explícita y degradable.
 - A ya hizo ese corte preparatorio en `clientlogs`: el tail del log puede deshabilitarse, la ausencia del fichero ya no se trata como supuesto implícito de arranque y existe un endpoint de estado de fuentes para debugging operativo.
+- A ya cerró el remate pendiente de Fase 3: `bunkerm-platform` quedó sin mounts broker-facing sobre logs, data y config; esas lecturas viven ahora en `bhm-broker-observability` por HTTP interno.
+- A ya dejó definida la secuencia recomendada de Fase 4: primero control-plane durable y auditoría en PostgreSQL, después históricos principales (`broker history`, `topic history`, `client activity`) y por último read models auxiliares.
+- Durante Fase 4, la regla de compatibilidad temporal queda así: no habrá doble escritura generalizada SQLite/PostgreSQL; cada dominio debe tener un único writer y, si hace falta transición, se resolverá con migración de datos y lecturas/imports acotadas.
+- A ya dejó además un seam explícito para históricos y reporting, de modo que el siguiente cambio estructural esperado será sustituir el backend de esos seams y no volver a tocar contratos HTTP por el simple hecho de cambiar de SQLite a PostgreSQL.
 - B ya no debe considerar AWS/Azure Bridge ni el runtime standalone de DynSec como puntos reutilizables de implementación; cualquier trabajo futuro sobre esas capacidades deberá arrancar directamente desde el control-plane y no desde esos archivos legacy.
 - B debe seguir considerando estos contratos como transicionales, pero ya puede apoyarse en endpoints de estado para UI técnica o debugging si los necesita.
 

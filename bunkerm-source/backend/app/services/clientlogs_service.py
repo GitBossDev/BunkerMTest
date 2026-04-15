@@ -16,9 +16,9 @@ from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
 
-from clientlogs.sqlite_activity_storage import client_activity_storage
+from clientlogs.activity_storage import client_activity_storage
 from core.config import settings
-from monitor.topic_sqlite_storage import topic_history_storage
+from monitor.topic_history_storage import topic_history_storage
 from services import broker_observability_client
 
 # ---------------------------------------------------------------------------

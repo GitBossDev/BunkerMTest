@@ -29,7 +29,19 @@ SAMPLE_CONFIG = {
 
 async def test_get_config_returns_200(client, monkeypatch):
     """El endpoint retorna 200 con la configuracion parseada."""
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
+    monkeypatch.setattr(
+        desired_state_svc,
+        "get_observed_mosquitto_config",
+        lambda: {
+            "config": SAMPLE_CONFIG["config"],
+            "listeners": SAMPLE_CONFIG["listeners"],
+            "max_inflight_messages": None,
+            "max_queued_messages": None,
+            "tls": None,
+            "content": "listener 1900\nallow_anonymous false\n",
+        },
+    )
+    monkeypatch.setattr(desired_state_svc, "get_observed_tls_cert_store", lambda: {"certs": []})
     resp = await client.get("/api/v1/config/mosquitto-config")
     assert resp.status_code == 200
     body = resp.json()
@@ -39,7 +51,19 @@ async def test_get_config_returns_200(client, monkeypatch):
 
 async def test_get_config_requires_auth(raw_client, monkeypatch):
     """Sin autenticacion retorna 401 o 403."""
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
+    monkeypatch.setattr(
+        desired_state_svc,
+        "get_observed_mosquitto_config",
+        lambda: {
+            "config": SAMPLE_CONFIG["config"],
+            "listeners": SAMPLE_CONFIG["listeners"],
+            "max_inflight_messages": None,
+            "max_queued_messages": None,
+            "tls": None,
+            "content": "listener 1900\nallow_anonymous false\n",
+        },
+    )
+    monkeypatch.setattr(desired_state_svc, "get_observed_tls_cert_store", lambda: {"certs": []})
     resp = await raw_client.get("/api/v1/config/mosquitto-config")
     assert resp.status_code in (401, 403)
 
@@ -49,8 +73,19 @@ async def test_get_config_parse_failure(client, monkeypatch):
     Si parse_mosquitto_conf devuelve config vacia, el router retorna
     success=False (degrada con gracia, no lanza 500).
     """
-    empty_config = {"config": {}, "listeners": [], "certs": []}
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: empty_config)
+    monkeypatch.setattr(
+        desired_state_svc,
+        "get_observed_mosquitto_config",
+        lambda: {
+            "config": {},
+            "listeners": [],
+            "max_inflight_messages": None,
+            "max_queued_messages": None,
+            "tls": None,
+            "content": "",
+        },
+    )
+    monkeypatch.setattr(desired_state_svc, "get_observed_tls_cert_store", lambda: {"certs": []})
     resp = await client.get("/api/v1/config/mosquitto-config")
     assert resp.status_code == 200
     assert resp.json().get("success") is False
@@ -85,8 +120,6 @@ async def test_save_mosquitto_config_uses_desired_state_and_returns_control_plan
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
-
     payload = {
         "config": {
             "allow_anonymous": "false",
@@ -194,8 +227,6 @@ async def test_mosquitto_config_status_detects_drift_after_external_change(clien
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
-
     payload = {
         "config": {
             "allow_anonymous": "false",
@@ -231,8 +262,6 @@ async def test_save_mosquitto_config_returns_500_and_rolls_back_when_reload_fail
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(config_router, "parse_mosquitto_conf", lambda: SAMPLE_CONFIG)
-
     signal_calls = {"count": 0}
 
     def fail_then_succeed():

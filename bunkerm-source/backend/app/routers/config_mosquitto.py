@@ -25,13 +25,7 @@ from core.config import settings
 from core.database import get_db
 
 # Importar lógica de negocio del módulo original (se mantiene intacto)
-from config.mosquitto_config import (
-    DEFAULT_CONFIG,
-    _generate_tls_listener_block,
-    generate_mosquitto_conf,
-    parse_mosquitto_conf,
-    validate_listeners,
-)
+from config.mosquitto_config import DEFAULT_CONFIG, _generate_tls_listener_block, generate_mosquitto_conf, validate_listeners
 from models.schemas import MosquittoConfig, TLSListenerConfig
 from services import broker_observability_client
 from services import broker_desired_state_service as desired_state_svc
@@ -96,47 +90,19 @@ async def get_mosquitto_config_status(
 async def get_mosquitto_config(api_key: str = Security(get_api_key)):
     """Devuelve la configuración actual de Mosquitto junto a info TLS y certs disponibles."""
     try:
-        config_data = parse_mosquitto_conf()
-
-        if not config_data["config"]:
+        observed = desired_state_svc.get_observed_mosquitto_config()
+        if not observed["config"]:
             return {"success": False, "message": "Failed to parse Mosquitto configuration"}
-
-        # Detectar listener TLS (tiene cafile o certfile en metadatos _raw)
-        listeners = config_data.get("listeners", [])
-        tls_info = None
-        for lst in listeners:
-            raw = lst.get("_raw", {})
-            if raw.get("cafile") or raw.get("certfile"):
-                tls_info = {
-                    "enabled": True,
-                    "port": lst["port"],
-                    "cafile": raw.get("cafile"),
-                    "certfile": raw.get("certfile"),
-                    "keyfile": raw.get("keyfile"),
-                    "require_certificate": raw.get("require_certificate", "false") == "true",
-                    "tls_version": raw.get("tls_version"),
-                }
-                break
-
-        # Listar archivos de certificado disponibles
-        certs: list = []
-        try:
-            os.makedirs(_CERTS_DIR, exist_ok=True)
-            certs = [
-                f for f in os.listdir(_CERTS_DIR)
-                if os.path.isfile(os.path.join(_CERTS_DIR, f))
-            ]
-        except Exception:
-            pass
+        tls_certs = desired_state_svc.get_observed_tls_cert_store()
 
         return {
             "success": True,
-            "config": config_data["config"],
-            "listeners": config_data["listeners"],
-            "max_inflight_messages": config_data.get("max_inflight_messages"),
-            "max_queued_messages": config_data.get("max_queued_messages"),
-            "tls": tls_info,
-            "available_certs": certs,
+            "config": observed["config"],
+            "listeners": observed["listeners"],
+            "max_inflight_messages": observed.get("max_inflight_messages"),
+            "max_queued_messages": observed.get("max_queued_messages"),
+            "tls": observed.get("tls"),
+            "available_certs": [entry["filename"] for entry in tls_certs.get("certs", [])],
             "certs_dir": _CERTS_DIR,
         }
 
@@ -160,7 +126,7 @@ async def save_mosquitto_config(
         listeners_list = payload["listeners"]
 
         # Validar puertos duplicados
-        current = parse_mosquitto_conf()
+        current = desired_state_svc.get_observed_mosquitto_config()
         is_valid, err_msg = validate_listeners(current.get("listeners", []), listeners_list)
         if not is_valid:
             logger.error("Listener validation error: %s", err_msg)
@@ -277,7 +243,7 @@ async def remove_mosquitto_listener(
                 detail="Listener port is required",
             )
 
-        config_data = parse_mosquitto_conf()
+        config_data = desired_state_svc.get_observed_mosquitto_config()
         listeners_list = config_data["listeners"]
         found = False
         for i, lst in enumerate(listeners_list):
@@ -412,10 +378,8 @@ async def delete_tls_cert(
     safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
     if os.path.splitext(safe_name)[1].lower() not in _ALLOWED_CERT_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid certificate filename")
-    dest = os.path.join(_CERTS_DIR, safe_name)
-    if not os.path.abspath(dest).startswith(os.path.abspath(_CERTS_DIR)):
-        raise HTTPException(status_code=400, detail="Invalid path")
-    if not os.path.isfile(dest):
+    observed = desired_state_svc.get_observed_tls_cert_store()
+    if safe_name not in {entry["filename"] for entry in observed.get("certs", [])}:
         raise HTTPException(status_code=404, detail="File not found")
     state = await desired_state_svc.delete_tls_cert_desired(db, safe_name)
     state = await desired_state_svc.reconcile_or_wait(

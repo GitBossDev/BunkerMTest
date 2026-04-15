@@ -72,3 +72,67 @@ async def fetch_broker_resource_source_status() -> Dict[str, Any]:
 
 def fetch_broker_resource_source_status_sync() -> Dict[str, Any]:
     return _get_json_sync("/internal/broker/resource-stats/source-status")
+
+
+async def fetch_broker_dynsec() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/dynsec")
+
+
+def fetch_broker_dynsec_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/dynsec")
+
+
+async def fetch_broker_dynsec_source_status() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/dynsec/source-status")
+
+
+def fetch_broker_dynsec_source_status_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/dynsec/source-status")
+
+
+async def fetch_broker_mosquitto_config() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/mosquitto-config")
+
+
+def fetch_broker_mosquitto_config_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/mosquitto-config")
+
+
+async def fetch_broker_mosquitto_config_source_status() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/mosquitto-config/source-status")
+
+
+def fetch_broker_mosquitto_config_source_status_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/mosquitto-config/source-status")
+
+
+async def fetch_broker_passwd() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/passwd")
+
+
+def fetch_broker_passwd_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/passwd")
+
+
+async def fetch_broker_passwd_source_status() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/passwd/source-status")
+
+
+def fetch_broker_passwd_source_status_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/passwd/source-status")
+
+
+async def fetch_broker_tls_certs() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/tls-certs")
+
+
+def fetch_broker_tls_certs_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/tls-certs")
+
+
+async def fetch_broker_tls_certs_source_status() -> Dict[str, Any]:
+    return await _get_json("/internal/broker/tls-certs/source-status")
+
+
+def fetch_broker_tls_certs_source_status_sync() -> Dict[str, Any]:
+    return _get_json_sync("/internal/broker/tls-certs/source-status")

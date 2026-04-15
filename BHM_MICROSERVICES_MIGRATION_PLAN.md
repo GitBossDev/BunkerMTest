@@ -176,7 +176,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Separar claramente frontend, backend de gestión, broker y persistencia.
 - [x] Identificar si se necesita un servicio adicional de reconciliación desde esta fase o si entra en la siguiente.
 - [x] Revisar variables de entorno y configuración para que cada servicio tenga responsabilidades claras.
-- [ ] Eliminar dependencias no necesarias entre contenedores.
+- [x] Eliminar dependencias no necesarias entre contenedores.
 - [x] Revisar healthchecks, readiness y orden de arranque.
 - [x] Garantizar que la aplicación puede levantarse completa con un flujo reproducible de `build`, `start`, `stop` y `restart`.
 - [x] Asegurar que la topología en Compose no introduzca decisiones incompatibles con una futura migración a Kubernetes.
@@ -221,6 +221,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] El broker registró `Credentials already synchronized for admin`, confirmando sincronización idempotente en arranque.
 - [x] La inspección runtime confirmó que `bunkerm-platform` ya no monta `/var/log/mosquitto`, mientras que `bunkerm-broker-observability` sí mantiene ese mount en solo lectura como consumidor broker-owned.
 - [x] Desde `bunkerm-platform` se validó por HTTP interno que `bhm-broker-observability` expone `source-status` disponible para `mosquitto.log` y `broker-resource-stats.json`, confirmando el nuevo camino runtime de observabilidad desacoplada del proceso web.
+- [x] La validación final de runtime confirmó que `bunkerm-platform` ya no monta `/var/lib/mosquitto` ni `/etc/mosquitto`; sólo conserva mounts propios de plataforma, mientras `bhm-broker-observability` concentra `/var/log/mosquitto`, `/var/lib/mosquitto` y `/etc/mosquitto` en solo lectura.
+- [x] Desde `bunkerm-platform` se validó por HTTP interno que `bhm-broker-observability` expone `source-status` operativo para `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y el directorio de certificados, cerrando el último camino runtime que seguía dependiendo de mounts broker-facing en la plataforma.
 
 ### Hallazgos abiertos
 
@@ -264,7 +266,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Equivalencia conceptual para Kubernetes: cerrada a nivel conceptual para la salida de Fase 3. El baseline actual ya mapea config/secretos/estado deseado/observabilidad broker-owned a componentes portables y deja `bridge_bundle` como capability diferida sin bloquear la traducción posterior a Jobs, sidecars o controladores en Kubernetes.
 - [x] Bridges y certificados en el modelo de reconciliación: reportable. TLS ya quedó absorbido por el control-plane y los bridges futuros tienen ahora placeholder explícito `broker.bridge_bundle` sin reactivar AWS/Azure Bridge.
 - [x] Rollback por capability: reportable. Existe rollback o degradación controlada para las capabilities broker-facing activas y queda explícita la excepción de observabilidad histórica, que se mueve a Fase 5.
-- [x] Deuda residual de Fase 3: cerrada para el criterio de salida actual. El núcleo broker-facing del proceso web ya no mantiene escritura cruzada ni lectura directa de logs/stats del broker; el trabajo restante queda ya reubicado como evolución posterior de Fase 5/Fase 8 y no como bloqueo del baseline Compose-first.
+- [x] Deuda residual de Fase 3 cerrada. El runtime HTTP activo ya no mantiene mounts broker-facing sobre logs, data ni config; las lecturas observadas de `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y certs quedaron desplazadas a `bhm-broker-observability` mediante HTTP interno broker-owned.
 
 ### Cortes restantes propuestos para cerrar Fase 3
 
@@ -273,6 +275,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Corte 23 implementado: se añadió el scope transicional `broker.bridge_bundle` para modelar bridges futuros como desired state diferido, sin reactivar AWS/Azure Bridge.
 - [x] Corte 24 implementado: se documentó una matriz explícita de `desired/generated/applied/observed`, drift y rollback por capability para el baseline activo de Fase 3.
 - [x] Corte 25 implementado: se cerró la validación reportable del criterio de salida de Fase 3, dejando evidencia de qué mounts broker-facing ya no son dependencia del backend principal y cuál deuda residual pasa a Fase 5.
+- [x] Corte final implementado para cierre real de Fase 3: `mosquitto-data` y `mosquitto-conf` fueron retirados de `bunkerm-platform`; las lecturas activas de `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y certs quedaron movidas a `bhm-broker-observability` y consumidas por HTTP interno u observed-state helpers.
 
 ### Matriz reportable de capacidades Fase 3
 
@@ -288,6 +291,19 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 | `config/broker` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | `503` explícito | Transicional |
 | `monitor/stats/resources` observabilidad | no aplica | payload servido por `bhm-broker-observability` | servicio interno broker-owned | source-status HTTP | No | fallback-process / unavailable | Transicional |
 | `clientlogs/logTail` observabilidad | no aplica | snapshot de logs servido por `bhm-broker-observability` | polling interno broker-owned | source-status HTTP | No | degradación explícita + reintento | Transicional |
+
+### Evidencia final de cierre de Fase 3
+
+- [x] Suite enfocada de regresión ejecutada tras el corte final: `79 passed, 4 warnings in 9.18s` sobre `test_architecture.py`, `test_config.py`, `test_dynsec.py`, `test_clientlogs.py`, `test_clientlogs_service.py` y `test_monitor.py`.
+- [x] `deploy.ps1 -Action build` reconstruyó correctamente `bunkermtest-mosquitto:latest` y `bunkermtest-bunkerm:latest` con la nueva topología.
+- [x] `deploy.ps1 -Action start` levantó `bunkerm-mosquitto`, `bunkerm-platform`, `bunkerm-reconciler` y `bunkerm-broker-observability`; el smoke automático volvió a cerrar en `5/5 OK`.
+- [x] La inspección de mounts confirmó que `bunkerm-platform` quedó sin acceso directo a `/var/log/mosquitto`, `/var/lib/mosquitto` ni `/etc/mosquitto`, y que `bhm-broker-observability` asumió esos mounts en solo lectura.
+- [x] La validación por HTTP interno confirmó disponibilidad runtime de los nuevos endpoints `source-status` para DynSec, configuración Mosquitto, passwd y certs.
+
+### Criterio de salida
+
+- [x] Fase 3 queda cerrada: el control-plane broker-facing opera por desired state + reconciliación, y el runtime HTTP principal ya no depende del filesystem compartido del broker para escrituras ni lecturas activas.
+- [x] Fase 4 puede iniciarse sobre un baseline Compose-first validado en runtime y con separación explícita entre plataforma web, reconciliador broker-facing y observabilidad broker-owned.
 
 ### Primer corte implementado
 
@@ -475,6 +491,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `docker-compose.dev.yml` ya no monta `mosquitto-log` dentro de `bunkerm-platform`; ese volumen queda acotado al broker y al servicio interno broker-owned de observabilidad.
 - [x] Con este corte, el proceso web principal ya no mantiene accesos directos activos ni a `mosquitto.log` ni a `broker-resource-stats.json`, cerrando la deuda ejecutable detectada en la revisión general de los cortes de Fase 3.
 - [x] La validación runtime ampliada sobre el stack activo confirmó además que `bunkerm-platform` consume `source-status` de logs y resource stats por HTTP interno contra `bhm-broker-observability`, y que el mount `/var/log/mosquitto` ya no existe en el contenedor web.
+- [x] La revisión adicional del punto pendiente confirmó, sin embargo, que `bunkerm-platform` todavía necesita `mosquitto-data` y `mosquitto-conf` en solo lectura para rutas activas que leen `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y certs del broker.
 
 ### Consideraciones Docker/Podman ahora
 
@@ -488,8 +505,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Las superficies legacy históricas de AWS/Azure Bridge y el runtime standalone de DynSec ya no son ejecutables como writers alternativos del broker; quedaron explicitadas como compatibilidad retirada con respuesta `410 Gone` hasta que exista una migración real al control-plane.
 - [x] `bunkerm-platform` ya no monta `mosquitto-log`; la observabilidad de logs y resource stats del broker quedó trasladada a `bhm-broker-observability`, que es ahora el único consumidor broker-owned de ese volumen compartido.
 - [x] `clientlogs`, `config` y `monitor` ya consumen observabilidad broker-owned por HTTP interno y exponen estado de fuente explícito, de modo que el acoplamiento observacional residual dejó de vivir dentro del proceso web principal.
-- [x] La solución ya no depende de que el backend principal comparta ownership del filesystem del broker; el web mantiene solo mounts transicionales en solo lectura y las escrituras broker-facing viven fuera del proceso HTTP.
-- [x] Si existe un volumen persistente del broker, su manipulación efectiva queda encapsulada en los componentes broker-owned que aplican cambios u observan artefactos (`bhm-reconciler` y `bhm-broker-observability`).
+- [~] La solución ya no depende de que el backend principal comparta ownership de escritura del filesystem del broker, pero el web sigue dependiendo de mounts read-only sobre `mosquitto-data` y `mosquitto-conf` para parte del estado observado/configuración activa.
+- [~] Si existe un volumen persistente del broker, su manipulación efectiva de escritura ya queda encapsulada en componentes broker-owned (`bhm-reconciler` y `bhm-broker-observability`), aunque la lectura de ciertos artefactos sigue residiendo parcialmente en el proceso web.
 - [x] Las capacidades AWS/Azure Bridge quedaron fuera de la superficie activa del producto y no deben considerarse parte del baseline funcional de Fase 3.
 
 ### Consideraciones Kubernetes después
@@ -536,6 +553,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `clientlogs` conserva trazabilidad operativa mediante polling HTTP interno y `source-status`, sin requerir el mount de logs en `bunkerm-platform`.
 - [x] El stack runtime validado con `deploy.ps1 -Action start` ya incluye `bunkerm-mosquitto`, `bunkerm-reconciler`, `bunkerm-broker-observability` y `bunkerm-platform` operativos en la misma red Compose-first, con smoke `5/5 OK` posterior al arranque.
 - [x] La validación interna desde `bunkerm-platform` confirmó `source-status.available=true` para logs y resource stats en `bhm-broker-observability`, reforzando que la observabilidad broker-owned ya no depende del filesystem local del proceso web.
+- [x] El runtime HTTP ya puede prescindir de `mosquitto-data` y `mosquitto-conf`: las lecturas activas de `dynamic-security.json`, `mosquitto.conf`, `mosquitto_passwd` y certs quedaron movidas a `bhm-broker-observability` y a observed-state helpers consumidos por HTTP interno.
 
 ### Tests
 
@@ -607,43 +625,74 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Criterio de salida
 
-- [ ] BHM deja de gestionar el broker mediante escritura cruzada y pasa a un control-plane compatible con Compose hoy y Kubernetes mañana.
+- [x] BHM deja de gestionar el broker mediante escritura cruzada y pasa a un control-plane compatible con Compose hoy y Kubernetes mañana.
 
 ---
 
 ## Fase 4 - Persistencia PostgreSQL por bounded context
 
-**Objetivo**: Migrar el estado operativo y la configuración persistente de BHM desde SQLite a PostgreSQL sin romper la operación.
+**Objetivo**: Mover el ownership durable de BHM a PostgreSQL por bounded context, empezando por el control-plane y continuando por los históricos y read models técnicos sin romper la operación ni reintroducir doble escritura estructural.
+
+### Avance inicial ya implementado
+
+- [x] Se separaron las URLs de persistencia por dominio en configuración (`control_plane_database_url`, `history_database_url`, `reporting_database_url`) manteniendo fallback controlado al `database_url` actual durante la transición.
+- [x] El motor async principal del backend ya consume `resolved_control_plane_database_url`, dejando preparado el primer corte operativo del control-plane durable sobre PostgreSQL.
+- [x] Se añadió una utilidad específica `scripts/migrate-control-plane-state.py` para migrar `broker_desired_state` desde SQLite al datastore configurado del control-plane, endurecida con timeouts y modo `--dry-run` para evitar bloqueos del entorno durante esta fase.
+- [x] El control-plane ya deja rastro durable append-only de cambios solicitados mediante la nueva tabla `broker_desired_state_audit`, versionada junto a `broker_desired_state` para cubrir la parte auditable del corte 1.
+- [x] Históricos y reporting ya no solo pasan por seams: las factorías de dominio seleccionan ahora backends SQLAlchemy reales para `client activity`, `broker history`, `topic history` y `reporting` cuando el dominio apunte a PostgreSQL.
+- [x] Se añadieron implementaciones SQLAlchemy reutilizando los modelos ORM existentes del backend unificado, de modo que el cambio de backend no exige reescribir routers ni servicios en los cortes 2 y 3.
+- [x] La validación enfocada del estado actual de Fase 4 quedó ejecutada con `36 passed, 1 warning` sobre utilidades de URL, factorías, auditoría del control-plane, storages SQLAlchemy nuevos y regresiones existentes de config, monitor, clientlogs y reporting.
 
 ### Actividades
 
-- [ ] Definir el esquema PostgreSQL para el bounded context de BHM.
-- [ ] Mantener la base de datos separada del producto externo de reporting/transformación.
-- [ ] Crear estrategia de migración incremental desde SQLite.
-- [ ] Decidir si la migración será por tablas, por capacidades o con doble escritura temporal.
-- [ ] Introducir una capa de persistencia que abstraiga SQLite/PostgreSQL durante la transición.
-- [ ] Migrar broker history, topic history, client activity y reporting técnico.
-- [ ] Migrar también la configuración deseada del broker, cambios solicitados y auditoría.
-- [ ] Añadir migraciones de esquema y versionado de base de datos.
-- [ ] Ajustar configuración de entorno, backup y restore para PostgreSQL.
+- [ ] Definir el esquema PostgreSQL inicial del bounded context de BHM, separando al menos: control-plane del broker, auditoría/reconciliación y reporting técnico.
+- [ ] Mantener la base de datos separada del producto externo de reporting/transformación, sin compartir tablas ni ownership de dominio.
+- [ ] Introducir una capa de persistencia o repositorios de transición que permitan mover cada dominio sin seguir acoplando el código al backend SQLite actual.
+- [ ] Ejecutar una migración incremental por capability o agregado, no por big bang, y evitar una doble escritura generalizada; la compatibilidad temporal debe ser acotada por dominio, con un único writer y lecturas/imports transicionales cuando hagan falta.
+- [ ] Migrar primero el estado durable del control-plane: `broker_desired_state`, auditoría de cambios solicitados, estado aplicado/observado y metadatos necesarios para `bhm-reconciler` y `bhm-api`.
+- [ ] Migrar después los históricos ya existentes en SQLite que más condicionan a producto: broker history, topic history, client activity y reporting técnico asociado.
+- [ ] Migrar por último los read models o tablas auxiliares que sigan quedando en SQLite y que no bloqueen el primer corte operativo sobre PostgreSQL.
+- [ ] Añadir migraciones de esquema y versionado de base de datos con Alembic para PostgreSQL.
+- [ ] Hacer explícita la dependencia funcional de `bhm-api` y `bhm-reconciler` respecto a PostgreSQL en Compose cuando el primer corte operativo esté listo.
+- [ ] Ajustar configuración de entorno, backup, restore y utilidades de migración para PostgreSQL.
+
+### Orden recomendado de Fase 4
+
+- [ ] Corte 1: mover a PostgreSQL el control-plane durable del broker y su auditoría, manteniendo SQLite solo como origen legado de transición donde siga siendo imprescindible.
+- [ ] Corte 2: mover a PostgreSQL broker history, topic history y client activity, que son los dominios que más condicionan el trabajo paralelo de producto.
+- [ ] Corte 3: cerrar reporting técnico, retención, purgas y read models auxiliares para que SQLite deje de ser backend operativo y pase a estado legado o de importación puntual.
+
+### Estado actual de los cortes
+
+- [~] Corte 1 en progreso: el control-plane ya puede correr sobre la URL dedicada y ahora persiste auditoría append-only (`broker_desired_state_audit`); falta ejecutar el corte operativo completo sobre PostgreSQL y migrar el baseline SQLite con la utilidad segura.
+- [~] Corte 2 en progreso: monitor, topic history y client activity ya tienen factorías y backends SQLAlchemy listos para PostgreSQL; falta completar la migración de datos y validar runtime real de esos dominios contra el contenedor PostgreSQL.
+- [~] Corte 3 en progreso: reporting ya tiene backend SQLAlchemy propio y mantiene retención/purgas sobre el seam de dominio; falta cerrar el read model operativo definitivo cuando `reporting_database_url` deje de compartir fallback con history.
+
+### Riesgos a controlar
+
+- [ ] No convertir la transición en una convivencia indefinida SQLite/PostgreSQL sin ownership claro por dominio.
+- [ ] No romper la semántica auditable del control-plane mientras se sustituye `broker_desired_state` y sus lecturas asociadas.
+- [ ] No forzar a frontend o a producto a reescribir contratos varias veces por falta de orden en la migración de persistencia.
+- [ ] No mezclar en el mismo corte la migración del control-plane durable con cambios amplios de observabilidad que pertenecen a Fase 5.
 
 ### Verificaciones
 
-- [ ] BHM puede operar con PostgreSQL como datastore principal.
-- [ ] No existen accesos directos de dominio al SQLite antiguo en flujos ya migrados.
-- [ ] Los datos históricos y operativos esenciales se conservan.
+- [ ] `bhm-api` y `bhm-reconciler` pueden operar con PostgreSQL como datastore principal en los dominios ya migrados.
+- [ ] No existen accesos directos de dominio al SQLite antiguo en los flujos ya migrados; cualquier acceso residual queda acotado a importación, fallback transicional o dominios pendientes de corte.
+- [ ] Los datos históricos y operativos esenciales se conservan y siguen siendo auditables tras cada corte.
+- [ ] Los contratos HTTP consumidos por frontend y reporting técnico mantienen compatibilidad razonable durante la transición o documentan claramente su cambio.
 
 ### Tests
 
-- [ ] Test unitario de repositorios y servicios de persistencia.
-- [ ] Test de integración contra PostgreSQL real en contenedor.
-- [ ] Test de migración de datos desde SQLite.
-- [ ] Test de compatibilidad de API en endpoints afectados.
-- [ ] Test de rollback o recuperación ante fallo de migración.
+- [ ] Test unitario de repositorios, servicios de persistencia y adapters de transición SQLite/PostgreSQL.
+- [ ] Test de integración contra PostgreSQL real en contenedor para `bhm-api` y `bhm-reconciler`.
+- [ ] Test de migración de datos desde SQLite por dominio o capability, empezando por el control-plane y siguiendo por históricos.
+- [ ] Test de compatibilidad de API en endpoints afectados por cada corte de persistencia.
+- [ ] Test de rollback o recuperación ante fallo de migración, incluyendo restauración de datos y vuelta controlada al datastore previo cuando aplique.
 
 ### Criterio de salida
 
-- [ ] PostgreSQL queda establecido como base persistente principal de BHM en los dominios migrados.
+- [ ] PostgreSQL queda establecido como base persistente principal de BHM para el control-plane y para los dominios históricos priorizados de Fase 4; SQLite deja de ser backend operativo de esos dominios y queda, como mucho, congelado como legado transicional o fuente de importación puntual.
 
 ---
 

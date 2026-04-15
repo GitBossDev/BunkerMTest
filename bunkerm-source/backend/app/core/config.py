@@ -52,6 +52,9 @@ class Settings(BaseSettings):
 
     # --- Base de datos ---
     database_url: str = "sqlite+aiosqlite:////nextjs/data/bunkerm.db"
+    control_plane_database_url: Optional[str] = None
+    history_database_url: Optional[str] = None
+    reporting_database_url: Optional[str] = None
 
     # --- Umbrales de alertas (monitor) ---
     alert_cpu_warning: float = 70.0
@@ -73,6 +76,18 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+
+    @property
+    def resolved_control_plane_database_url(self) -> str:
+        return self.control_plane_database_url or self.database_url
+
+    @property
+    def resolved_history_database_url(self) -> str:
+        return self.history_database_url or self.database_url
+
+    @property
+    def resolved_reporting_database_url(self) -> str:
+        return self.reporting_database_url or self.resolved_history_database_url
 
 
 @lru_cache(maxsize=1)
