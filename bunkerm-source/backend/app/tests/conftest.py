@@ -11,6 +11,7 @@ Estrategia:
 """
 import asyncio
 import os
+import tempfile
 
 import pytest
 import pytest_asyncio
@@ -21,9 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 TEST_API_KEY = "bunkerm-test-api-key-pytest"
 os.environ["API_KEY"] = TEST_API_KEY
 
-# Motor SQLite en memoria para tests (aislado del volumen de produccion)
-TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
-test_engine = create_async_engine(TEST_DB_URL, echo=False)
+# Motor SQLite temporal para tests (aislado del volumen de produccion)
+TEST_DB_FILE = os.path.join(tempfile.gettempdir(), "bunkerm_backend_test.sqlite3")
+if os.path.exists(TEST_DB_FILE):
+    os.remove(TEST_DB_FILE)
+TEST_DB_URL = f"sqlite+aiosqlite:///{TEST_DB_FILE}"
+test_engine = create_async_engine(
+    TEST_DB_URL,
+    echo=False,
+)
 TestSessionLocal = async_sessionmaker(
     test_engine, class_=AsyncSession, expire_on_commit=False
 )
@@ -51,14 +58,13 @@ async def setup_db():
     Crea todas las tablas ORM del backend unificado en la base de datos de test.
     Los modelos deben importarse aqui para que SQLAlchemy los registre en Base.metadata.
     """
-    from models import orm  # noqa: F401 — registra HistoricalTick, AlertConfigEntry, etc.
-    from core.database import Base
+    from models.orm import Base as ORMBase
 
     async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(ORMBase.metadata.create_all)
     yield
     async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(ORMBase.metadata.drop_all)
 
 
 # ---------------------------------------------------------------------------
@@ -75,13 +81,37 @@ async def client():
     """
     from core.database import get_db
     from core.auth import get_api_key
+    from models.orm import Base as ORMBase
     from main import app
+    import routers.dynsec as dynsec_router
+    import routers.config_mosquitto as config_mosquitto_router
+    import routers.config_dynsec as config_dynsec_router
+    import routers.monitor as monitor_router
+    import routers.clientlogs as clientlogs_router
+    import routers.reporting as reporting_router
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(ORMBase.metadata.create_all)
 
     async def override_get_db():
         async with TestSessionLocal() as session:
             yield session
 
-    app.dependency_overrides[get_db] = override_get_db
+    db_dependencies = {
+        dependency
+        for dependency in [
+            get_db,
+            getattr(dynsec_router, "get_db", None),
+            getattr(config_mosquitto_router, "get_db", None),
+            getattr(config_dynsec_router, "get_db", None),
+            getattr(monitor_router, "get_db", None),
+            getattr(clientlogs_router, "get_db", None),
+            getattr(reporting_router, "get_db", None),
+        ]
+        if dependency is not None
+    }
+    for dependency in db_dependencies:
+        app.dependency_overrides[dependency] = override_get_db
     app.dependency_overrides[get_api_key] = lambda: TEST_API_KEY
 
     async with AsyncClient(

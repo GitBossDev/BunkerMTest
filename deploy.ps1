@@ -260,7 +260,7 @@ function Invoke-Start {
     }
 
     # Limpiar contenedores huerfanos con el mismo nombre (ej. iniciados manualmente)
-    $orphanContainers = @('bunkerm-platform')
+    $orphanContainers = @('bunkerm-platform', 'bunkerm-reconciler')
     foreach ($cname in $orphanContainers) {
         $exists = & $script:CE ps -a --format "{{.Names}}" 2>&1 | Select-String "^${cname}$"
         if ($exists) {
@@ -916,11 +916,13 @@ function Invoke-PatchBackend {
         exit 1
     }
 
-    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
-    if (-not $containerRunning) {
+    $platformRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "^bunkerm-platform$"
+    if (-not $platformRunning) {
         Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo." -ForegroundColor Red
         exit 1
     }
+
+    $reconcilerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "^bunkerm-reconciler$"
 
     # Patch único: copiar todo el directorio app/ de una vez y recargar el proceso uvicorn unificado
     $serviceNames = @('dynsec', 'monitor', 'clientlogs', 'config', 'smart-anomaly')
@@ -928,6 +930,9 @@ function Invoke-PatchBackend {
         Write-Info "  Copiando $name..."
     }
     & $script:CE cp "${backendPath}/." "bunkerm-platform:/app/"
+    if ($reconcilerRunning) {
+        & $script:CE cp "${backendPath}/." "bunkerm-reconciler:/app/"
+    }
 
     # Recargar el proceso uvicorn unificado (puerto 9001)
     $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
@@ -949,6 +954,11 @@ function Invoke-PatchBackend {
         Write-Host "  El backend puede no estar respondiendo. Comprueba con: .\deploy.ps1 -Action smoke" -ForegroundColor Yellow
     } else {
         Write-Success "[OK] Backend actualizado. Los servicios afectados se han recargado."
+    }
+
+    if ($reconcilerRunning) {
+        & $script:CE restart bunkerm-reconciler 2>&1 | Out-Null
+        Write-Info "    Contenedor bunkerm-reconciler reiniciado para recargar el daemon broker-facing"
     }
     Write-Host ""
 }

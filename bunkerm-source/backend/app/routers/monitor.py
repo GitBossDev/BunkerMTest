@@ -15,11 +15,11 @@ from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from monitor.topic_sqlite_storage import topic_history_storage
 from models.schemas import AlertConfigUpdate, PublishRequest
 from routers.clientlogs import build_activity_summary
+from services import broker_observability_client
 from services.monitor_service import (
     alert_engine,
     mqtt_stats,
     nonce_manager,
-    read_broker_resource_stats,
     read_alert_config,
     save_alert_config,
     topic_store,
@@ -137,7 +137,21 @@ async def get_health_stats(api_key: str = Security(get_api_key)):
 @router.get("/stats/resources")
 async def get_resource_stats(api_key: str = Security(get_api_key)):
     """Recursos del broker Mosquitto desde cgroups o fallback local."""
-    broker_stats = read_broker_resource_stats()
+    broker_stats = {}
+    source = {
+        "enabled": True,
+        "available": False,
+        "mode": "broker-observability-service",
+        "lastError": None,
+    }
+
+    try:
+        observability_payload = await broker_observability_client.fetch_broker_resource_stats()
+        broker_stats = observability_payload.get("stats") or {}
+        source = observability_payload.get("source") or source
+    except broker_observability_client.BrokerObservabilityUnavailable as exc:
+        source["lastError"] = str(exc)
+
     if broker_stats:
         return {
             "mosquitto_cpu_pct": broker_stats.get("cpu_pct"),
@@ -147,6 +161,7 @@ async def get_resource_stats(api_key: str = Security(get_api_key)):
             "mosquitto_memory_pct": broker_stats.get("memory_pct"),
             "mosquitto_cpu_limit_cores": broker_stats.get("cpu_limit_cores"),
             "resource_timestamp": broker_stats.get("timestamp"),
+            "source": source,
         }
 
     cpu_pct = None
@@ -169,7 +184,27 @@ async def get_resource_stats(api_key: str = Security(get_api_key)):
         "mosquitto_memory_pct": None,
         "mosquitto_cpu_limit_cores": None,
         "resource_timestamp": None,
+        "source": {
+            **source,
+            "mode": "fallback-process" if cpu_pct is not None or heap_cur > 0 or heap_max > 0 else "unavailable",
+        },
     }
+
+
+@router.get("/stats/resources/source-status")
+async def get_resource_source_status(api_key: str = Security(get_api_key)):
+    """Expone el estado operativo de la fuente compartida de resource stats del broker."""
+    try:
+        return await broker_observability_client.fetch_broker_resource_source_status()
+    except broker_observability_client.BrokerObservabilityUnavailable as exc:
+        return {
+            "source": {
+                "enabled": True,
+                "available": False,
+                "mode": "broker-observability-service",
+                "lastError": str(exc),
+            }
+        }
 
 
 @router.get("/stats/qos")

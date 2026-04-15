@@ -25,6 +25,7 @@ from monitor.sqlite_storage import BrokerTickSnapshot, SQLiteMonitorHistoryStora
 from monitor.topic_sqlite_storage import topic_history_storage
 
 from core.config import settings
+from services import broker_observability_client
 
 logger = logging.getLogger(__name__)
 
@@ -646,14 +647,49 @@ nonce_manager = NonceManager()
 # Referencia al cliente MQTT activo (inicializada en el lifespan de main.py)
 mqtt_client_instance: Any = None
 
+_resource_source_lock = threading.Lock()
+_resource_source_status: Dict[str, object] = {
+    "enabled": settings.broker_resource_stats_file_enabled,
+    "path": settings.broker_resource_stats_path,
+    "available": False,
+    "mode": "uninitialized",
+    "lastError": None,
+    "lastReadAt": None,
+}
+
+
+def _update_resource_source_status(**changes: object) -> None:
+    with _resource_source_lock:
+        _resource_source_status.update(changes)
+
+
+def get_broker_resource_source_status() -> Dict[str, object]:
+    with _resource_source_lock:
+        return dict(_resource_source_status)
+
 
 def read_broker_resource_stats() -> Dict[str, Any]:
-    """Lee métricas del contenedor Mosquitto desde un archivo compartido."""
+    """Lee métricas del broker vía servicio interno de observabilidad broker-owned."""
     try:
-        with open(settings.broker_resource_stats_path, "r") as fh:
-            data = json.load(fh)
-        return data if isinstance(data, dict) else {}
-    except Exception:
+        payload = broker_observability_client.fetch_broker_resource_stats_sync()
+        source = payload.get("source") or {}
+        _update_resource_source_status(
+            enabled=bool(source.get("enabled", True)),
+            path=str(source.get("path") or settings.broker_resource_stats_path),
+            available=bool(source.get("available", False)),
+            mode=str(source.get("mode") or "broker-observability-service"),
+            lastError=source.get("lastError"),
+            lastReadAt=source.get("lastReadAt") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+        stats = payload.get("stats")
+        return stats if isinstance(stats, dict) else {}
+    except broker_observability_client.BrokerObservabilityUnavailable as exc:
+        _update_resource_source_status(
+            enabled=True,
+            available=False,
+            mode="broker-observability-service",
+            lastError=str(exc),
+        )
         return {}
 
 

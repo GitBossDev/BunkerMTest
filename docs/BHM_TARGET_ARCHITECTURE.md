@@ -213,12 +213,18 @@ Responsabilidad:
 - seguir siendo el broker MQTT gestionado
 - mantener un ciclo de vida independiente de la plataforma de gestion
 
-### 6. `bhm-observability-collector` (opcional en Compose-first, recomendado como siguiente paso)
+### 6. `bhm-observability-collector` (implementado de forma mínima en Compose-first como `bhm-broker-observability`)
 
 Responsabilidad:
 
 - desacoplar la captura tecnica de logs, eventos o metricas
 - alimentar reporting tecnico e incidentes sin `tail -f` desde `bhm-api`
+
+Traduccion Compose-first ya aplicada:
+
+- `bhm-broker-observability` actua como servicio interno broker-owned con mount read-only sobre `/var/log/mosquitto`
+- expone por HTTP interno snapshots y `source-status` de `mosquitto.log` y `broker-resource-stats.json`
+- `bhm-api` y la funcionalidad consolidada temporalmente en `bunkerm-platform` consumen esa observabilidad por red interna, no por lectura directa del filesystem del broker
 
 ---
 
@@ -281,7 +287,7 @@ Optional path:
 | `bhm-reconciler` | Nuevo servicio o proceso dedicado | Recomendado separarlo del API para marcar ownership operacional |
 | `bhm-postgres` | Servicio `postgres` del compose | Pasara de opcional a componente central de BHM |
 | `bunkerm-mosquitto` | Se mantiene | Su ciclo de vida sigue desacoplado de la plataforma |
-| `bhm-observability-collector` | Servicio adicional posterior | Puede empezar como sidecar o collector simple |
+| `bhm-observability-collector` | `bhm-broker-observability` como servicio interno transicional | Puede evolucionar despues a sidecar, collector o deployment dedicado |
 
 ### Redes
 
@@ -297,6 +303,11 @@ Optional path:
 
 Nota de transicion ya implementada:
 
+- el proceso web principal ya no monta `/var/log/mosquitto`; ese ownership observacional quedo aislado en `bhm-broker-observability`
+- los mounts compartidos que siguen existiendo en `bunkerm-platform` quedan en solo lectura y responden a compatibilidad transicional del control-plane, no a ownership operativo del broker
+
+Nota de transicion ya implementada:
+
 - mientras PostgreSQL aun no es el datastore operativo del control-plane, el primer slice de estado deseado usa persistencia transicional en SQLite mediante la tabla `broker_desired_state`
 - esto no cambia el objetivo final de mover el ownership durable del control-plane a PostgreSQL en la fase correspondiente
 
@@ -305,6 +316,15 @@ Nota de transicion ya implementada:
 - Variables de entorno por servicio, limitadas a su responsabilidad.
 - Secretos preparados para evolucion posterior a mecanismos mas robustos en Kubernetes.
 - Evitar defaults inseguros como contrato final de arquitectura.
+
+Equivalencia conceptual hacia Kubernetes:
+
+- `mosquitto.conf` y configuraciones derivadas se proyectan naturalmente a `ConfigMap` o volumen generado por controlador
+- `mosquitto_passwd`, TLS y cualquier material sensible del broker se alinean con `Secret`
+- `dynamic-security.json` permanece como artefacto privado reconciliado por el componente broker-facing, no por la capa HTTP
+- `bhm-reconciler` traduce a `Deployment` o `Job` especializado con ownership broker-facing
+- `bhm-broker-observability` puede traducirse a sidecar, `Deployment` interno o collector dedicado segun el modelo operativo elegido
+- `broker.bridge_bundle` queda como capability de desired state portable, sin obligar a mantener bridges legacy dentro del API
 
 ### Healthchecks y orden de arranque
 

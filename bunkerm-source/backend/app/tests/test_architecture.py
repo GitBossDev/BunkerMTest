@@ -6,12 +6,31 @@ no sean revertidas inadvertidamente en cambios futuros.
 
 Invariantes que se verifican:
   - El backend unificado escucha en el puerto 9001 (no en los puertos legacy 1000-1005).
-  - Los 7 routers del backend unificado estan registrados en main.py.
+    - Los routers activos del backend unificado estan registrados en main.py.
   - No hay imports circulares en el paquete core/.
   - core/config.py puede instanciarse con variables minimas sin explotar.
 """
 import importlib
 import sys
+import pathlib
+
+
+def _compose_service_block(compose_text: str, service_name: str) -> str:
+    lines = compose_text.splitlines()
+    block: list[str] = []
+    capturing = False
+    service_header = f"  {service_name}:"
+
+    for line in lines:
+        if line.startswith(service_header):
+            capturing = True
+        elif capturing and line.startswith("  ") and not line.startswith("    "):
+            break
+
+        if capturing:
+            block.append(line)
+
+    return "\n".join(block)
 
 
 # ---------------------------------------------------------------------------
@@ -65,14 +84,12 @@ EXPECTED_ROUTERS = [
     "routers.clientlogs",
     "routers.config_mosquitto",
     "routers.config_dynsec",
-    "routers.aws_bridge",
-    "routers.azure_bridge",
 ]
 
 
 def test_all_routers_registered_in_main():
     """
-    Importa main.py y verifica que los 7 routers del backend unificado
+    Importa main.py y verifica que los routers activos del backend unificado
     estan incluidos en la aplicacion FastAPI.
     """
     from main import app
@@ -81,7 +98,7 @@ def test_all_routers_registered_in_main():
     registered_prefixes = {route.path.split("/")[1] for route in app.routes if hasattr(route, "path")}
 
     # Los tags declarados en cada router deben aparecer en alguna ruta
-    expected_tags = {"dynsec", "monitor", "clientlogs", "config-mosquitto", "config-dynsec", "aws-bridge", "azure-bridge"}
+    expected_tags = {"dynsec", "monitor", "clientlogs", "config-mosquitto", "config-dynsec"}
     registered_tags: set[str] = set()
     for route in app.routes:
         if hasattr(route, "tags") and route.tags:
@@ -179,3 +196,74 @@ def test_config_instantiates_with_minimal_env(monkeypatch):
             get_settings.cache_clear()
         except Exception:
             pass
+
+
+def test_compose_baseline_includes_dedicated_bhm_reconciler_service():
+    """Protege que el baseline Compose-first incluya el daemon broker-facing dedicado."""
+    compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
+    assert compose_path.exists(), f"Compose file not found: {compose_path}"
+
+    compose_text = compose_path.read_text(encoding="utf-8")
+    assert "bhm-reconciler:" in compose_text
+    assert "container_name: bunkerm-reconciler" in compose_text
+    assert "services.broker_reconcile_daemon" in compose_text
+
+
+def test_compose_web_service_uses_daemon_mode_and_read_only_broker_mounts():
+    """Protege el siguiente recorte: el web container no debe escribir mounts broker-facing."""
+    compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
+    compose_text = compose_path.read_text(encoding="utf-8")
+    bunkerm_block = _compose_service_block(compose_text, "bunkerm")
+
+    assert "BROKER_RECONCILE_MODE=daemon" in compose_text
+    assert "BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102" in compose_text
+    assert "mosquitto-data:/var/lib/mosquitto:ro" in bunkerm_block
+    assert "mosquitto-conf:/etc/mosquitto:ro" in bunkerm_block
+    assert "mosquitto-log:/var/log/mosquitto:ro" not in bunkerm_block
+
+
+def test_compose_baseline_includes_broker_observability_service():
+    """Protege el recorte donde config/monitor consumen observabilidad broker-owned por HTTP interno."""
+    compose_path = pathlib.Path(__file__).parents[4] / "docker-compose.dev.yml"
+    compose_text = compose_path.read_text(encoding="utf-8")
+    observability_block = _compose_service_block(compose_text, "bhm-broker-observability")
+
+    assert "bhm-broker-observability:" in compose_text
+    assert "container_name: bunkerm-broker-observability" in compose_text
+    assert "services.broker_observability_api:app" in compose_text
+    assert "mosquitto-log:/var/log/mosquitto:ro" in observability_block
+
+
+def test_config_and_monitor_routers_no_longer_read_shared_broker_files_directly():
+    """Protege que config y monitor usen el cliente HTTP interno y no lean archivos broker-facing."""
+    app_root = pathlib.Path(__file__).parents[1]
+    config_text = (app_root / "routers" / "config_mosquitto.py").read_text(encoding="utf-8")
+    monitor_text = (app_root / "routers" / "monitor.py").read_text(encoding="utf-8")
+
+    assert "broker_observability_client" in config_text
+    assert "broker_observability_client" in monitor_text
+    assert "settings.broker_log_path" not in config_text
+    assert "settings.broker_resource_stats_path" not in monitor_text
+    assert 'open(log_path' not in config_text
+
+
+def test_legacy_bridge_and_dynsec_surfaces_no_longer_embed_broker_writes():
+    """Protege que las superficies legacy retiradas no vuelvan a contener writers broker-facing."""
+    app_root = pathlib.Path(__file__).parents[1]
+    files_to_check = [
+        app_root / "routers" / "aws_bridge.py",
+        app_root / "routers" / "azure_bridge.py",
+        app_root / "dynsec" / "main.py",
+    ]
+    forbidden_markers = (
+        "mosquitto_ctrl",
+        "/var/lib/mosquitto/.reload",
+        "dynamic-security.json",
+        "MOSQUITTO_CONF_PATH",
+        "MOSQUITTO_CERT_PATH",
+        "DYNSEC_PATH =",
+    )
+
+    for file_path in files_to_check:
+        text = file_path.read_text(encoding="utf-8")
+        assert all(marker not in text for marker in forbidden_markers), file_path

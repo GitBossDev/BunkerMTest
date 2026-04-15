@@ -121,58 +121,13 @@ def _normalize_group_entries(raw_groups: List[Any]) -> List[Dict[str, Any]]:
 # Helper
 # ---------------------------------------------------------------------------
 
-def _cmd_or_raise(subcommand: List[str], err_code: int = status.HTTP_400_BAD_REQUEST) -> str:
-    """Ejecuta mosquitto_ctrl y lanza HTTPException si falla. Devuelve stdout."""
-    r = dynsec_svc.execute_mosquitto_command(subcommand)
-    if not r["success"]:
-        if r.get("timeout"):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Broker unreachable: command timed out",
-            )
-        raise HTTPException(status_code=err_code, detail=r["error_output"])
-    return r["output"]
 
-
-def _write_or_raise(
-    data: Dict[str, Any],
-    rollback_cmd: Optional[List[str]],
-    context: str,
-) -> None:
-    """
-    Escribe el JSON de DynSec. Si la escritura falla (HIGH-1):
-    - Ejecuta rollback_cmd en mosquitto_ctrl para revertir el cambio en el broker
-      (solo cuando sea posible invertir la operacion).
-    - Lanza HTTP 500 con un mensaje claro al llamador.
-    Sin este helper, los fallos del dual-write se ignoraban silenciosamente y el
-    broker quedaba en un estado diferente al JSON, causando inconsistencias.
-    """
-    try:
-        dynsec_svc.write_dynsec(data)
-    except Exception as exc:
-        if rollback_cmd:
-            logger.error(
-                "Dual-write fallido para %s: %s — ejecutando rollback: %s",
-                context, exc, rollback_cmd[0],
-            )
-            dynsec_svc.execute_mosquitto_command(rollback_cmd)
-            detail = (
-                "DynSec config write failed. The broker change was reverted. "
-                "Retry the operation."
-            )
-        else:
-            logger.error(
-                "Dual-write fallido para %s: %s — sin rollback disponible. "
-                "El broker y el JSON pueden estar desincronizados.",
-                context, exc,
-            )
-            detail = (
-                "DynSec config write failed. The broker and the config file "
-                "may be out of sync. Check server logs."
-            )
+def _ensure_reconcile_success(state, detail_prefix: str) -> None:
+    if state.reconcile_status == "error":
+        detail = state.last_error or "Unknown reconciliation error"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=detail,
+            detail=f"{detail_prefix}: {detail}",
         )
 
 
@@ -274,114 +229,305 @@ async def get_client(username: str, api_key: str = Security(get_api_key)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.post("/clients", status_code=status.HTTP_201_CREATED)
-async def create_client(client: ClientCreate, api_key: str = Security(get_api_key)):
-    """Crea un nuevo cliente MQTT."""
-    _cmd_or_raise(["createClient", client.username, "-p", client.password])
-    # Dual-write al JSON
+@router.get("/clients/{username}/status")
+async def get_client_status(
+    username: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            if not dynsec_svc.find_client(data, client.username):
-                data.setdefault("clients", []).append({
-                    "username": client.username,
-                    "textname": "",
-                    "groups": [],
-                    "roles": [],
-                    "disabled": False,
-                })
-            _write_or_raise(data, ["deleteClient", client.username], f"create_client:{client.username}")
+        return await desired_state_svc.get_client_status(db, username)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load client control-plane status: {exc}",
+        )
+
+
+@router.post("/clients", status_code=status.HTTP_201_CREATED)
+async def create_client(
+    client: ClientCreate,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    """Crea un nuevo cliente MQTT."""
+    try:
+        state = await desired_state_svc.set_client_desired(
+            db,
+            {
+                "username": client.username,
+                "textname": "",
+                "groups": [],
+                "roles": [],
+                "disabled": False,
+            },
+        )
+        if desired_state_svc.is_daemon_reconcile_mode():
+            desired_state_svc.stage_client_creation_secret(client.username, state.version, client.password)
+            state = await desired_state_svc.reconcile_or_wait(
+                state,
+                desired_state_svc.reconcile_client,
+                db,
+                client.username,
+            )
+        else:
+            state = await desired_state_svc.reconcile_or_wait(
+                state,
+                desired_state_svc.reconcile_client,
+                db,
+                client.username,
+                creation_password=client.password,
+            )
+        _ensure_reconcile_success(state, "Client reconciliation failed")
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando desired state de cliente %s: %s", client.username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
     client_activity_storage.upsert_client(client.username, disabled=False)
-    return {"message": f"Client {client.username} created successfully"}
+    return {
+        "message": f"Client {client.username} created successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.put("/clients/{username}/enable")
-async def enable_client(username: str, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["enableClient", username])
+async def enable_client(
+    username: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for c in data.get("clients", []):
-                if c.get("username") == username:
-                    c["disabled"] = False
-                    break
-            _write_or_raise(data, ["disableClient", username], f"enable_client:{username}")
+        observed = desired_state_svc.get_observed_client(username)
+        payload = observed or {
+            "username": username,
+            "textname": "",
+            "groups": [],
+            "roles": [],
+            "disabled": False,
+        }
+        payload["disabled"] = False
+        state = await desired_state_svc.set_client_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
+        _ensure_reconcile_success(state, "Client enable reconciliation failed")
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando enable de cliente %s: %s", username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
     client_activity_storage.upsert_client(username, disabled=False)
-    return {"message": f"Client {username} enabled successfully"}
+    return {
+        "message": f"Client {username} enabled successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.put("/clients/{username}/disable")
-async def disable_client(username: str, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["disableClient", username])
+async def disable_client(
+    username: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for c in data.get("clients", []):
-                if c.get("username") == username:
-                    c["disabled"] = True
-                    break
-            _write_or_raise(data, ["enableClient", username], f"disable_client:{username}")
+        observed = desired_state_svc.get_observed_client(username)
+        payload = observed or {
+            "username": username,
+            "textname": "",
+            "groups": [],
+            "roles": [],
+            "disabled": True,
+        }
+        payload["disabled"] = True
+        state = await desired_state_svc.set_client_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
+        _ensure_reconcile_success(state, "Client disable reconciliation failed")
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando disable de cliente %s: %s", username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
     client_activity_storage.upsert_client(username, disabled=True)
-    return {"message": f"Client {username} disabled successfully"}
+    return {
+        "message": f"Client {username} disabled successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/clients/{username}")
-async def delete_client(username: str, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["deleteClient", username])
+async def delete_client(
+    username: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            data["clients"] = [c for c in data.get("clients", [])
-                                if c.get("username") != username]
-            # Sin rollback: no es posible recrear el cliente con su password original
-            _write_or_raise(data, None, f"delete_client:{username}")
+        observed = desired_state_svc.get_observed_client(username)
+        payload = observed or {
+            "username": username,
+            "textname": "",
+            "groups": [],
+            "roles": [],
+            "disabled": True,
+        }
+        payload["deleted"] = True
+        state = await desired_state_svc.set_client_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
+        _ensure_reconcile_success(state, "Client delete reconciliation failed")
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando delete de cliente %s: %s", username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
     client_activity_storage.mark_client_deleted(username)
-    return {"message": f"Client {username} removed successfully"}
+    return {
+        "message": f"Client {username} removed successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.post("/clients/{username}/roles")
 async def add_client_role(username: str, role: RoleAssignment,
-                          api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["addClientRole", username, role.role_name, str(role.priority or 1)])
+                          api_key: str = Security(get_api_key),
+                          db: AsyncSession = Depends(get_db)):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for c in data.get("clients", []):
-                if c.get("username") == username:
-                    roles = c.setdefault("roles", [])
-                    if not any(r.get("rolename") == role.role_name for r in roles):
-                        roles.append({"rolename": role.role_name, "priority": role.priority or 1})
-                    break
-            _write_or_raise(data, ["removeClientRole", username, role.role_name], f"add_client_role:{username}/{role.role_name}")
+        observed = desired_state_svc.get_observed_client(username)
+        payload = observed or {
+            "username": username,
+            "textname": "",
+            "groups": [],
+            "roles": [],
+            "disabled": False,
+        }
+        roles = payload.setdefault("roles", [])
+        if not any(r.get("rolename") == role.role_name for r in roles):
+            roles.append({"rolename": role.role_name, "priority": role.priority or 1})
+        state = await desired_state_svc.set_client_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
+        _ensure_reconcile_success(state, "Client role reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Role {role.role_name} assigned to client {username}"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando rol %s para cliente %s: %s", role.role_name, username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
+    return {
+        "message": f"Role {role.role_name} assigned to client {username}",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/clients/{username}/roles/{role_name}")
 async def remove_client_role(username: str, role_name: str,
-                             api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["removeClientRole", username, role_name])
+                             api_key: str = Security(get_api_key),
+                             db: AsyncSession = Depends(get_db)):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for c in data.get("clients", []):
-                if c.get("username") == username:
-                    c["roles"] = [r for r in c.get("roles", [])
-                                  if r.get("rolename") != role_name]
-                    break
-            _write_or_raise(data, ["addClientRole", username, role_name, "1"], f"remove_client_role:{username}/{role_name}")
+        observed = desired_state_svc.get_observed_client(username)
+        payload = observed or {
+            "username": username,
+            "textname": "",
+            "groups": [],
+            "roles": [],
+            "disabled": False,
+        }
+        payload["roles"] = [
+            role for role in payload.get("roles", [])
+            if role.get("rolename") != role_name
+        ]
+        state = await desired_state_svc.set_client_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_client,
+            db,
+            username,
+        )
+        _ensure_reconcile_success(state, "Client role reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Role {role_name} removed from client {username}"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando remocion de rol %s para cliente %s: %s", role_name, username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Client desired state reconciliation failed: {exc}",
+        )
+    return {
+        "message": f"Role {role_name} removed from client {username}",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -425,86 +571,189 @@ async def get_role(role_name: str, api_key: str = Security(get_api_key)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.post("/roles", status_code=status.HTTP_201_CREATED)
-async def create_role(role: RoleCreate, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["createRole", role.name])
+@router.get("/roles/{role_name}/status")
+async def get_role_status(
+    role_name: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            if not dynsec_svc.find_role(data, role.name):
-                data.setdefault("roles", []).append({"rolename": role.name, "acls": []})
-            _write_or_raise(data, ["deleteRole", role.name], f"create_role:{role.name}")
+        return await desired_state_svc.get_role_status(db, role_name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load role control-plane status: {exc}",
+        )
+
+
+@router.post("/roles", status_code=status.HTTP_201_CREATED)
+async def create_role(
+    role: RoleCreate,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        state = await desired_state_svc.set_role_desired(
+            db,
+            {"rolename": role.name, "acls": [], "deleted": False},
+        )
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role.name,
+        )
+        _ensure_reconcile_success(state, "Role reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Role {role.name} created successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando create role %s: %s", role.name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Role desired state reconciliation failed.",
+        )
+    return {
+        "message": f"Role {role.name} created successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/roles/{role_name}")
-async def delete_role(role_name: str, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["deleteRole", role_name])
+async def delete_role(
+    role_name: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            data["roles"] = [r for r in data.get("roles", [])
-                             if r.get("rolename") != role_name]
-            # Sin rollback: no es posible recrear el rol con todas sus ACLs originales
-            _write_or_raise(data, None, f"delete_role:{role_name}")
+        observed = desired_state_svc.get_observed_role(role_name)
+        payload = observed or {"rolename": role_name, "acls": []}
+        payload["deleted"] = True
+        state = await desired_state_svc.set_role_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
+        _ensure_reconcile_success(state, "Role deletion reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Role {role_name} deleted successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando delete role %s: %s", role_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Role desired state reconciliation failed after broker deletion. Check control-plane status.",
+        )
+    return {
+        "message": f"Role {role_name} deleted successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.post("/roles/{role_name}/acls")
 async def add_role_acl(role_name: str, acl: ACLRequest,
-                       api_key: str = Security(get_api_key)):
+                       api_key: str = Security(get_api_key),
+                       db: AsyncSession = Depends(get_db)):
     if acl.aclType not in VALID_ACL_TYPES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail=f"Invalid aclType. Must be one of: {', '.join(VALID_ACL_TYPES)}")
     if acl.permission not in ("allow", "deny"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Invalid permission. Must be 'allow' or 'deny'")
-    _cmd_or_raise(["addRoleACL", role_name, acl.aclType, acl.topic, acl.permission])
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for r in data.get("roles", []):
-                if r.get("rolename") == role_name:
-                    acls_list = r.setdefault("acls", [])
-                    if not any(a.get("acltype") == acl.aclType and a.get("topic") == acl.topic
-                               for a in acls_list):
-                        acls_list.append({
-                            "acltype": acl.aclType,
-                            "topic": acl.topic,
-                            "allow": acl.permission == "allow",
-                            "priority": -1,
-                        })
-                    break
-            _write_or_raise(data, ["removeRoleACL", role_name, acl.aclType, acl.topic], f"add_role_acl:{role_name}")
+        observed = desired_state_svc.get_observed_role(role_name)
+        payload = observed or {"rolename": role_name, "acls": []}
+        acls_list = payload.setdefault("acls", [])
+        if not any(entry.get("acltype") == acl.aclType and entry.get("topic") == acl.topic for entry in acls_list):
+            acls_list.append(
+                {
+                    "acltype": acl.aclType,
+                    "topic": acl.topic,
+                    "allow": acl.permission == "allow",
+                    "priority": -1,
+                }
+            )
+        state = await desired_state_svc.set_role_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
+        _ensure_reconcile_success(state, "Role ACL reconciliation failed")
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando ACL %s/%s para role %s: %s", acl.aclType, acl.topic, role_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Role desired state reconciliation failed.",
+        )
     return {"message": f"ACL added successfully to role {role_name}",
             "details": {"role": role_name, "topic": acl.topic,
-                        "aclType": acl.aclType, "permission": acl.permission}}
+                        "aclType": acl.aclType, "permission": acl.permission},
+            "controlPlane": {
+                "scope": state.scope,
+                "version": state.version,
+                "status": state.reconcile_status,
+                "driftDetected": state.drift_detected,
+            }}
 
 
 @router.delete("/roles/{role_name}/acls")
 async def remove_role_acl(role_name: str, acl_type: ACLType, topic: str,
-                          api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["removeRoleACL", role_name, acl_type.value, topic])
+                          api_key: str = Security(get_api_key),
+                          db: AsyncSession = Depends(get_db)):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for r in data.get("roles", []):
-                if r.get("rolename") == role_name:
-                    r["acls"] = [a for a in r.get("acls", [])
-                                 if not (a.get("acltype") == acl_type.value
-                                         and a.get("topic") == topic)]
-                    break
-            # Sin rollback: no conocemos el permiso original (allow/deny) para recrear la ACL
-            _write_or_raise(data, None, f"remove_role_acl:{role_name}")
+        observed = desired_state_svc.get_observed_role(role_name)
+        payload = observed or {"rolename": role_name, "acls": []}
+        payload["acls"] = [
+            entry for entry in payload.get("acls", [])
+            if not (entry.get("acltype") == acl_type.value and entry.get("topic") == topic)
+        ]
+        state = await desired_state_svc.set_role_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_role,
+            db,
+            role_name,
+        )
+        _ensure_reconcile_success(state, "Role ACL removal reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"ACL removed from role {role_name} successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando remocion ACL %s/%s para role %s: %s", acl_type.value, topic, role_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Role desired state reconciliation failed after broker mutation. Check control-plane status.",
+        )
+    return {
+        "message": f"ACL removed from role {role_name} successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -547,110 +796,263 @@ async def get_group(group_name: str, api_key: str = Security(get_api_key)):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 
-@router.post("/groups", status_code=status.HTTP_201_CREATED)
-async def create_group(group: GroupCreate, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["createGroup", group.name])
+@router.get("/groups/{group_name}/status")
+async def get_group_status(
+    group_name: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            if not dynsec_svc.find_group(data, group.name):
-                data.setdefault("groups", []).append({
-                    "groupname": group.name, "roles": [], "clients": []
-                })
-            _write_or_raise(data, ["deleteGroup", group.name], f"create_group:{group.name}")
+        return await desired_state_svc.get_group_status(db, group_name)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to load group control-plane status: {exc}",
+        )
+
+
+@router.post("/groups", status_code=status.HTTP_201_CREATED)
+async def create_group(
+    group: GroupCreate,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        state = await desired_state_svc.set_group_desired(
+            db,
+            {"groupname": group.name, "roles": [], "clients": [], "deleted": False},
+        )
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group.name,
+        )
+        _ensure_reconcile_success(state, "Group reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Group {group.name} created successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando create group %s: %s", group.name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Group desired state reconciliation failed.",
+        )
+    return {
+        "message": f"Group {group.name} created successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/groups/{group_name}")
-async def delete_group(group_name: str, api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["deleteGroup", group_name])
+async def delete_group(
+    group_name: str,
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            data["groups"] = [g for g in data.get("groups", [])
-                              if g.get("groupname") != group_name]
-            # Sin rollback: no es posible recrear el grupo con sus miembros y roles originales
-            _write_or_raise(data, None, f"delete_group:{group_name}")
+        observed = desired_state_svc.get_observed_group(group_name)
+        payload = observed or {"groupname": group_name, "roles": [], "clients": []}
+        payload["deleted"] = True
+        state = await desired_state_svc.set_group_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
+        _ensure_reconcile_success(state, "Group deletion reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Group {group_name} deleted successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando delete group %s: %s", group_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Group desired state reconciliation failed after broker deletion. Check control-plane status.",
+        )
+    return {
+        "message": f"Group {group_name} deleted successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.post("/groups/{group_name}/roles")
 async def add_group_role(group_name: str, role: RoleAssignment,
-                         api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["addGroupRole", group_name, role.role_name])
-    return {"message": f"Role {role.role_name} assigned to group {group_name}"}
+                         api_key: str = Security(get_api_key),
+                         db: AsyncSession = Depends(get_db)):
+    try:
+        observed = desired_state_svc.get_observed_group(group_name)
+        payload = observed or {"groupname": group_name, "roles": [], "clients": []}
+        roles = payload.setdefault("roles", [])
+        if not any(entry.get("rolename") == role.role_name for entry in roles):
+            roles.append({"rolename": role.role_name, "priority": role.priority or 1})
+        state = await desired_state_svc.set_group_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
+        _ensure_reconcile_success(state, "Group role reconciliation failed")
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando addGroupRole %s/%s: %s", group_name, role.role_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Group desired state reconciliation failed.",
+        )
+    return {
+        "message": f"Role {role.role_name} assigned to group {group_name}",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/groups/{group_name}/roles/{role_name}")
 async def remove_group_role(group_name: str, role_name: str,
-                            api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["removeGroupRole", group_name, role_name])
+                            api_key: str = Security(get_api_key),
+                            db: AsyncSession = Depends(get_db)):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for g in data.get("groups", []):
-                if g.get("groupname") == group_name:
-                    g["roles"] = [r for r in g.get("roles", [])
-                                  if r.get("rolename") != role_name]
-                    break
-            _write_or_raise(data, ["addGroupRole", group_name, role_name], f"remove_group_role:{group_name}/{role_name}")
+        observed = desired_state_svc.get_observed_group(group_name)
+        payload = observed or {"groupname": group_name, "roles": [], "clients": []}
+        payload["roles"] = [
+            entry for entry in payload.get("roles", [])
+            if entry.get("rolename") != role_name
+        ]
+        state = await desired_state_svc.set_group_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
+        _ensure_reconcile_success(state, "Group role removal reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Role {role_name} removed from group {group_name}"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando removeGroupRole %s/%s: %s", group_name, role_name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Group desired state reconciliation failed after broker mutation. Check control-plane status.",
+        )
+    return {
+        "message": f"Role {role_name} removed from group {group_name}",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.post("/groups/{group_name}/clients")
 async def add_client_to_group(group_name: str, body: dict,
-                              api_key: str = Security(get_api_key)):
+                              api_key: str = Security(get_api_key),
+                              db: AsyncSession = Depends(get_db)):
     username = body.get("username")
     if not username:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Username is required")
     priority = body.get("priority")
-    cmd = ["addGroupClient", group_name, username]
-    if priority:
-        cmd.extend(["--priority", str(priority)])
-    _cmd_or_raise(cmd)
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for g in data.get("groups", []):
-                if g.get("groupname") == group_name:
-                    gc = g.setdefault("clients", [])
-                    if not any(
-                        (c.get("username") if isinstance(c, dict) else c) == username
-                        for c in gc
-                    ):
-                        gc.append({"username": username})
-                    break
-            _write_or_raise(data, ["removeGroupClient", group_name, username], f"add_client_to_group:{group_name}/{username}")
+        observed = desired_state_svc.get_observed_group(group_name)
+        payload = observed or {"groupname": group_name, "roles": [], "clients": []}
+        clients = payload.setdefault("clients", [])
+        if not any(entry.get("username") == username for entry in clients):
+            client_entry: Dict[str, Any] = {"username": username}
+            if priority is not None:
+                client_entry["priority"] = int(priority)
+            clients.append(client_entry)
+        state = await desired_state_svc.set_group_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
+        _ensure_reconcile_success(state, "Group membership reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Client {username} added to group {group_name} successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando addGroupClient %s/%s: %s", group_name, username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Group desired state reconciliation failed: {exc}",
+        )
+    return {
+        "message": f"Client {username} added to group {group_name} successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 @router.delete("/groups/{group_name}/clients/{username}")
 async def remove_client_from_group(group_name: str, username: str,
-                                   api_key: str = Security(get_api_key)):
-    _cmd_or_raise(["removeGroupClient", group_name, username])
+                                   api_key: str = Security(get_api_key),
+                                   db: AsyncSession = Depends(get_db)):
     try:
-        with dynsec_svc._dynsec_lock:
-            data = dynsec_svc.read_dynsec()
-            for g in data.get("groups", []):
-                if g.get("groupname") == group_name:
-                    g["clients"] = [
-                        c for c in g.get("clients", [])
-                        if (c.get("username") if isinstance(c, dict) else c) != username
-                    ]
-                    break
-            _write_or_raise(data, ["addGroupClient", group_name, username], f"remove_client_from_group:{group_name}/{username}")
+        observed = desired_state_svc.get_observed_group(group_name)
+        payload = observed or {"groupname": group_name, "roles": [], "clients": []}
+        payload["clients"] = [
+            entry for entry in payload.get("clients", [])
+            if entry.get("username") != username
+        ]
+        state = await desired_state_svc.set_group_desired(db, payload)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_group,
+            db,
+            group_name,
+        )
+        _ensure_reconcile_success(state, "Group membership reconciliation failed")
     except HTTPException:
         raise
-    return {"message": f"Client {username} removed from group {group_name} successfully"}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except Exception as exc:
+        logger.error("Error reconciliando removeGroupClient %s/%s: %s", group_name, username, exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Group desired state reconciliation failed: {exc}",
+        )
+    return {
+        "message": f"Client {username} removed from group {group_name} successfully",
+        "controlPlane": {
+            "scope": state.scope,
+            "version": state.version,
+            "status": state.reconcile_status,
+            "driftDetected": state.drift_detected,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -699,7 +1101,11 @@ async def set_default_acl(acl_config: DefaultACLConfig,
     }
     try:
         state = await desired_state_svc.set_default_acl_desired(db, updates)
-        state = await desired_state_svc.reconcile_default_acl(db)
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_default_acl,
+            db,
+        )
     except HTTPException:
         raise
     except ValueError as exc:
@@ -710,11 +1116,7 @@ async def set_default_acl(acl_config: DefaultACLConfig,
             detail=f"Failed to reconcile default ACL access: {exc}",
         )
 
-    if state.reconcile_status == "error":
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=state.last_error or "Failed to reconcile default ACL access",
-        )
+    _ensure_reconcile_success(state, "Default ACL reconciliation failed")
 
     return {
         "message": "Default ACL access updated successfully",

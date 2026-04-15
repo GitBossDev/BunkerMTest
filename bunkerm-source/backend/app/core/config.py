@@ -34,7 +34,21 @@ class Settings(BaseSettings):
     mosquitto_conf_backup_dir: str = "/nextjs/data/backups"
     broker_log_path: str = "/var/log/mosquitto/mosquitto.log"
     broker_resource_stats_path: str = "/var/log/mosquitto/broker-resource-stats.json"
+    broker_log_tail_enabled: bool = True
+    broker_publish_monitor_enabled: bool = True
+    broker_log_read_enabled: bool = True
+    broker_resource_stats_file_enabled: bool = True
+    broker_observability_enabled: bool = True
+    broker_observability_url: str = "http://bhm-broker-observability:9102"
+    broker_observability_timeout_seconds: float = 2.0
+    broker_observability_log_poll_interval_seconds: float = 2.0
+    broker_observability_log_snapshot_lines: int = 5000
     api_log_file: str = "/nextjs/data/api.log"
+    broker_reconcile_mode: str = "inline"
+    broker_reconcile_wait_timeout_seconds: float = 10.0
+    broker_reconcile_poll_interval_seconds: float = 0.2
+    broker_reconcile_secret_dir: str = "/nextjs/data/reconcile-secrets"
+    broker_reconcile_secret_ttl_seconds: float = 120.0
 
     # --- Base de datos ---
     database_url: str = "sqlite+aiosqlite:////nextjs/data/bunkerm.db"

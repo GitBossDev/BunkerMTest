@@ -129,19 +129,27 @@ async def test_stats_health_requires_auth(raw_client):
 
 
 async def test_stats_resources_returns_shared_broker_stats(client, monkeypatch):
-    """El endpoint debe exponer stats del broker standalone cuando el archivo existe."""
-    monkeypatch.setattr(
-        monitor_router,
-        "read_broker_resource_stats",
-        lambda: {
-            "cpu_pct": 12.5,
-            "memory_bytes": 10485760,
-            "memory_limit_bytes": 20971520,
-            "memory_pct": 50.0,
-            "cpu_limit_cores": 1.5,
-            "timestamp": "2026-04-13T10:00:00Z",
-        },
-    )
+    """El endpoint debe exponer stats del broker standalone vía servicio interno."""
+
+    async def fake_fetch_resource_stats():
+        return {
+            "stats": {
+                "cpu_pct": 12.5,
+                "memory_bytes": 10485760,
+                "memory_limit_bytes": 20971520,
+                "memory_pct": 50.0,
+                "cpu_limit_cores": 1.5,
+                "timestamp": "2026-04-13T10:00:00Z",
+            },
+            "source": {
+                "mode": "shared-file",
+                "available": True,
+                "path": "/var/log/mosquitto/broker-resource-stats.json",
+            },
+        }
+
+    monkeypatch.setattr(monitor_router.broker_observability_client, "fetch_broker_resource_stats", fake_fetch_resource_stats)
+
     resp = await client.get("/api/v1/monitor/stats/resources")
     assert resp.status_code == 200
     body = resp.json()
@@ -151,6 +159,39 @@ async def test_stats_resources_returns_shared_broker_stats(client, monkeypatch):
     assert body["mosquitto_memory_pct"] == 50.0
     assert body["mosquitto_cpu_limit_cores"] == 1.5
     assert body["resource_timestamp"] == "2026-04-13T10:00:00Z"
+    assert "source" in body
+
+
+async def test_stats_resources_source_status_returns_200(client, monkeypatch):
+    """El endpoint de estado de source para resource stats debe responder siempre."""
+
+    async def fake_fetch_source_status():
+        return {"source": {"path": "/var/log/mosquitto/broker-resource-stats.json", "available": True}}
+
+    monkeypatch.setattr(monitor_router.broker_observability_client, "fetch_broker_resource_source_status", fake_fetch_source_status)
+
+    resp = await client.get("/api/v1/monitor/stats/resources/source-status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "source" in body
+    assert "path" in body["source"]
+
+
+async def test_stats_resources_falls_back_when_observability_service_is_unavailable(client, monkeypatch):
+    """Si el servicio interno falla, el endpoint degrada a fallback-process/unavailable."""
+
+    async def failing_fetch_resource_stats():
+        raise monitor_router.broker_observability_client.BrokerObservabilityUnavailable("connection refused")
+
+    monkeypatch.setattr(monitor_router.broker_observability_client, "fetch_broker_resource_stats", failing_fetch_resource_stats)
+    monitor_svc.mqtt_stats.heap_current = 0
+    monitor_svc.mqtt_stats.heap_maximum = 0
+
+    resp = await client.get("/api/v1/monitor/stats/resources")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"]["lastError"] == "connection refused"
+    assert body["source"]["mode"] in {"fallback-process", "unavailable"}
 
 
 # ---------------------------------------------------------------------------

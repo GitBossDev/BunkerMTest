@@ -11,8 +11,6 @@ import {
   Activity,
   Upload,
   Settings,
-  Cloud,
-  Layers,
   Lock,
   ChevronRight,
   Wifi,
@@ -74,13 +72,6 @@ const BASE_NAV_GROUPS: NavGroup[] = [
       { label: 'Security & ACL', href: '/mqtt/dynsec-config', icon: Lock },
       { label: 'Import Password', href: '/mqtt/import-password', icon: Upload },
       { label: 'Settings', href: '/settings', icon: KeyRound },
-    ],
-  },
-  {
-    title: 'Cloud',
-    items: [
-      { label: 'AWS Bridge', href: '/cloud/aws-bridge', icon: Cloud },
-      { label: 'Azure Bridge', href: '/cloud/azure-bridge', icon: Layers },
     ],
   },
 ]

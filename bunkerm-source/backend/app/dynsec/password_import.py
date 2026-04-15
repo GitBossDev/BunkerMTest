@@ -9,15 +9,19 @@
 import logging
 import os
 import re
-import shutil
-import json
 import random
 import string
-import time
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Security, status
 from fastapi.security.api_key import APIKeyHeader
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import List
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.config import settings
+from core.database import get_db
+from services import broker_desired_state_service as desired_state_svc
+from services import dynsec_service as dynsec_svc
 
 # Router setup
 router = APIRouter(tags=["password_import"])
@@ -27,15 +31,9 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 API_KEY = os.getenv("API_KEY")
-MOSQUITTO_PASSWD_PATH = os.getenv("MOSQUITTO_PASSWD_PATH", "/var/lib/mosquitto/mosquitto_passwd")
-DYNSEC_PATH = os.getenv("DYNSEC_PATH", "/var/lib/mosquitto/dynamic-security.json")
-UPLOAD_DIR = "/tmp/mosquitto_uploads"
 
 # Security
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
-
-# Create upload directory if it doesn't exist
-os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
     from core.auth import get_active_api_key
@@ -51,124 +49,106 @@ def validate_mosquitto_passwd_file(file_path: str) -> tuple[bool, str, list]:
     Validates if a file has the correct mosquitto_passwd format.
     Returns (success, message, users)
     """
-    users = []
     try:
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
-            
-        if not lines:
-            return False, "File is empty", []
-            
-        valid_pattern = re.compile(r'^[^:]+:\$\d+\$[^:]+$')
-        
-        for i, line in enumerate(lines):
-            line = line.strip()
-            if not line:
-                continue
-                
-            if not valid_pattern.match(line):
-                return False, f"Invalid format at line {i+1}: {line}", []
-                
-            username = line.split(':')[0]
-            users.append(username)
-            
-        return True, f"Valid mosquitto_passwd file with {len(users)} users", users
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return validate_mosquitto_passwd_file_from_content(f.read())
     except Exception as e:
         logger.error(f"Error validating mosquitto_passwd file: {str(e)}")
         return False, f"Error reading file: {str(e)}", []
+
+
+def validate_mosquitto_passwd_file_from_content(content: str) -> tuple[bool, str, list]:
+    users = []
+    lines = content.splitlines()
+
+    if not any(line.strip() for line in lines):
+        return False, "File is empty", []
+
+    valid_pattern = re.compile(r'^[^:]+:\$\d+\$[^:]+$')
+
+    for i, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if not valid_pattern.match(line):
+            return False, f"Invalid format at line {i+1}: {line}", []
+
+        username = line.split(':')[0]
+        users.append(username)
+
+    return True, f"Valid mosquitto_passwd file with {len(users)} users", users
 
 def generate_random_salt(length=16):
     """Generate a random salt for dynamic security users"""
     return ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
-def update_dynsec_with_passwd_users(usernames: List[str]) -> tuple[bool, str, int]:
-    """
-    Update dynamic-security.json file with users from mosquitto_passwd
-    """
-    try:
-        # Check if dynsec file exists
-        if not os.path.exists(DYNSEC_PATH):
-            return False, f"Dynamic security file not found at {DYNSEC_PATH}", 0
-            
-        # Read the current dynsec file
-        with open(DYNSEC_PATH, 'r') as f:
-            dynsec_data = json.load(f)
-            
-        # Initialize clients array if it doesn't exist
-        if 'clients' not in dynsec_data:
-            dynsec_data['clients'] = []
-            
-        # Get the current list of clients
-        current_clients = dynsec_data.get('clients', [])
-        current_usernames = {client.get('username') for client in current_clients}
-        
-        # Track added users
-        added_users = []
-        
-        # For each username from passwd file, add to dynsec if not exists
-        for username in usernames:
-            if username not in current_usernames:
-                # Create a new client entry without password
-                # Following the exact format seen in after.json
-                new_client = {
-                    "username": username,
-                    "roles": [],  # Always include an empty roles array
-                    "salt": generate_random_salt(),
-                    "iterations": 101
-                }
-                
-                # Add to clients list
-                current_clients.append(new_client)
-                current_usernames.add(username)
-                added_users.append(username)
-                
-        # Only update the file if changes were made
-        if added_users:
-            # Make sure we maintain the exact structure of the file
-            dynsec_data['clients'] = current_clients
-            
-            # Create a backup of the dynsec file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = f"{DYNSEC_PATH}.bak.{timestamp}"
-            shutil.copy2(DYNSEC_PATH, backup_path)
-            logger.info(f"Created backup of dynamic security file at {backup_path}")
-            
-            # Write the updated dynsec file
-            with open(DYNSEC_PATH, 'w') as f:
-                json.dump(dynsec_data, f, indent="\t")
-                
-            logger.info(f"Updated dynamic security file with {len(added_users)} users: {', '.join(added_users)}")
-            return True, f"Added {len(added_users)} users to dynamic security", len(added_users)
-        else:
-            return True, "No new users to add to dynamic security", 0
-            
-    except Exception as e:
-        logger.error(f"Error updating dynamic security with passwd users: {str(e)}")
-        return False, f"Error updating dynamic security: {str(e)}", 0
+
+def _control_plane_metadata(state) -> dict:
+    return {
+        "scope": state.scope,
+        "version": state.version,
+        "status": state.reconcile_status,
+        "driftDetected": state.drift_detected,
+    }
+
+def _ensure_reconcile_success(state, detail_prefix: str) -> None:
+    if state.reconcile_status == "error":
+        detail = state.last_error or "Unknown reconciliation error"
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{detail_prefix}: {detail}",
+        )
+
+
+def build_dynsec_config_with_passwd_users(usernames: List[str]) -> tuple[dict, int]:
+    dynsec_data = dynsec_svc.read_dynsec()
+    dynsec_data.setdefault("clients", [])
+    current_clients = dynsec_data.get("clients", [])
+    current_usernames = {client.get("username") for client in current_clients}
+    added_count = 0
+
+    for username in usernames:
+        if username in current_usernames:
+            continue
+        current_clients.append(
+            {
+                "username": username,
+                "roles": [],
+                "salt": generate_random_salt(),
+                "iterations": 101,
+            }
+        )
+        current_usernames.add(username)
+        added_count += 1
+
+    dynsec_data["clients"] = current_clients
+    return dynsec_data, added_count
 
 @router.post("/import-password-file")
 async def import_password_file(
     file: UploadFile = File(...),
-    api_key: str = Security(get_api_key)
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Import a mosquitto_passwd file and update dynamic security
     """
     logger.info(f"Password file import requested: {file.filename}")
-    
-    # Create a unique filename
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    temp_file_path = os.path.join(UPLOAD_DIR, f"{timestamp}_{file.filename}")
-    
+
     try:
-        # Save uploaded file to temporary location
-        with open(temp_file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        
-        # Validate the file
-        is_valid, message, users = validate_mosquitto_passwd_file(temp_file_path)
-        
+        raw_content = await file.read()
+        try:
+            passwd_content = raw_content.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Password file must be valid UTF-8: {exc}",
+            ) from exc
+
+        normalized_content = desired_state_svc._normalize_mosquitto_passwd_content(passwd_content)
+        is_valid, message, users = validate_mosquitto_passwd_file_from_content(normalized_content)
+
         if not is_valid:
             logger.warning(f"Invalid mosquitto_passwd file: {message}")
             return {
@@ -182,23 +162,24 @@ async def import_password_file(
                     "details": []
                 }
             }
-        
-        # Backup existing file if it exists
-        if os.path.exists(MOSQUITTO_PASSWD_PATH):
-            backup_path = f"{MOSQUITTO_PASSWD_PATH}.bak.{timestamp}"
-            shutil.copy2(MOSQUITTO_PASSWD_PATH, backup_path)
-            logger.info(f"Created backup of existing password file at {backup_path}")
-        
-        # Import the file to the destination
-        shutil.copy2(temp_file_path, MOSQUITTO_PASSWD_PATH)
-        
-        # Ensure proper permissions - using 644 to match your Dockerfile configuration
-        # This allows owner read/write and everyone else read access
-        os.chmod(MOSQUITTO_PASSWD_PATH, 0o644)
-        
-        # Update dynamic security with users from the password file
-        dynsec_success, dynsec_message, dynsec_count = update_dynsec_with_passwd_users(users)
-        
+
+        passwd_state = await desired_state_svc.set_mosquitto_passwd_desired_from_content(db, normalized_content)
+        passwd_state = await desired_state_svc.reconcile_or_wait(
+            passwd_state,
+            desired_state_svc.reconcile_mosquitto_passwd,
+            db,
+        )
+        _ensure_reconcile_success(passwd_state, "Mosquitto passwd reconciliation failed")
+
+        desired_dynsec, dynsec_count = build_dynsec_config_with_passwd_users(users)
+        dynsec_state = await desired_state_svc.set_dynsec_config_desired(db, desired_dynsec)
+        dynsec_state = await desired_state_svc.reconcile_or_wait(
+            dynsec_state,
+            desired_state_svc.reconcile_dynsec_config,
+            db,
+        )
+        _ensure_reconcile_success(dynsec_state, "DynSec password import reconciliation failed")
+
         # Create results for the frontend
         details = []
         for username in users:
@@ -210,11 +191,8 @@ async def import_password_file(
         
         # If dynsec update failed, add a warning message
         result_message = f"Successfully imported password file with {len(users)} users"
-        if dynsec_success:
-            if dynsec_count > 0:
-                result_message += f" and added {dynsec_count} users to dynamic security"
-        else:
-            result_message += f" but failed to update dynamic security: {dynsec_message}"
+        if dynsec_count > 0:
+            result_message += f" and added {dynsec_count} users to dynamic security"
             
         logger.info(result_message)
         
@@ -227,9 +205,11 @@ async def import_password_file(
                 "skipped": 0,
                 "failed": 0,
                 "details": details,
-                "dynsec_updated": dynsec_success,
+                "dynsec_updated": True,
                 "dynsec_added": dynsec_count
-            }
+            },
+            "controlPlane": _control_plane_metadata(passwd_state),
+            "dynsecControlPlane": _control_plane_metadata(dynsec_state),
         }
     
     except Exception as e:
@@ -238,58 +218,64 @@ async def import_password_file(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to import password file: {str(e)}"
         )
-    finally:
-        # Clean up temporary file
-        if os.path.exists(temp_file_path):
-            os.remove(temp_file_path)
 
 @router.post("/sync-passwd-to-dynsec")
 async def sync_passwd_to_dynsec(
-    api_key: str = Security(get_api_key)
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Sync all users from mosquitto_passwd file to dynamic security
     """
     try:
         logger.info("Syncing mosquitto_passwd users to dynamic security")
-        
-        # Check if password file exists
-        if not os.path.exists(MOSQUITTO_PASSWD_PATH):
+
+        observed_passwd = desired_state_svc.get_observed_mosquitto_passwd()
+        if not observed_passwd["exists"]:
             return {
                 "success": False,
                 "message": "Password file not found"
             }
-            
-        # Extract users from the password file
-        users = []
-        with open(MOSQUITTO_PASSWD_PATH, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if line and ':' in line:
-                    username = line.split(':')[0]
-                    users.append(username)
-                    
+
+        passwd_state = await desired_state_svc.set_mosquitto_passwd_desired_from_content(
+            db,
+            observed_passwd["content"],
+        )
+        passwd_state = await desired_state_svc.reconcile_or_wait(
+            passwd_state,
+            desired_state_svc.reconcile_mosquitto_passwd,
+            db,
+        )
+        _ensure_reconcile_success(passwd_state, "Mosquitto passwd sync reconciliation failed")
+
+        users = observed_passwd["users"]
         if not users:
             return {
                 "success": True,
                 "message": "No users found in password file to sync"
             }
-                    
-        # Update dynamic security with these users
-        success, message, count = update_dynsec_with_passwd_users(users)
-        
-        if success:
-            return {
-                "success": True,
-                "message": message,
-                "count": count,
-                "users": users[:10] + (["..."] if len(users) > 10 else [])  # Show first 10 users
-            }
-        else:
-            return {
-                "success": False,
-                "message": message
-            }
+
+        desired_dynsec, count = build_dynsec_config_with_passwd_users(users)
+        dynsec_state = await desired_state_svc.set_dynsec_config_desired(db, desired_dynsec)
+        dynsec_state = await desired_state_svc.reconcile_or_wait(
+            dynsec_state,
+            desired_state_svc.reconcile_dynsec_config,
+            db,
+        )
+        _ensure_reconcile_success(dynsec_state, "DynSec passwd sync reconciliation failed")
+
+        message = "No new users to add to dynamic security"
+        if count > 0:
+            message = f"Added {count} users to dynamic security"
+
+        return {
+            "success": True,
+            "message": message,
+            "count": count,
+            "users": users[:10] + (["..."] if len(users) > 10 else []),
+            "controlPlane": _control_plane_metadata(dynsec_state),
+            "passwdControlPlane": _control_plane_metadata(passwd_state),
+        }
     
     except Exception as e:
         logger.error(f"Error syncing passwd to dynsec: {str(e)}")
@@ -300,22 +286,35 @@ async def sync_passwd_to_dynsec(
 
 @router.post("/restart-mosquitto")
 async def restart_mosquitto(
-    api_key: str = Security(get_api_key)
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Restart the Mosquitto broker service
     """
     try:
         logger.info("Restart Mosquitto broker requested")
-
-        # Signal the standalone mosquitto container to reload via SIGHUP.
-        # Writing .reload to the shared volume triggers the entrypoint's signal
-        # relay which sends SIGHUP — mosquitto re-reads config + DynSec without
-        # dropping any existing client connections.
-        with open("/var/lib/mosquitto/.reload", "w") as _f:
-            _f.write("")
-        logger.info("Reload signal written for mosquitto standalone container")
-        return {"success": True, "message": "Mosquitto broker reloading configuration"}
+        state = await desired_state_svc.set_broker_reload_desired(
+            db,
+            {"reason": "manual-dynsec-reload", "requestedBy": "dynsec-password-import-router"},
+        )
+        state = await desired_state_svc.reconcile_or_wait(
+            state,
+            desired_state_svc.reconcile_broker_reload_signal,
+            db,
+        )
+        _ensure_reconcile_success(state, "Mosquitto reload signal failed")
+        logger.info("Reload signal delegated to broker-facing control-plane")
+        return {
+            "success": True,
+            "message": "Mosquitto broker reloading configuration",
+            "controlPlane": {
+                "scope": state.scope,
+                "version": state.version,
+                "status": state.reconcile_status,
+                "driftDetected": state.drift_detected,
+            },
+        }
     
     except Exception as e:
         logger.error(f"Error restarting Mosquitto: {str(e)}")
@@ -325,38 +324,48 @@ async def restart_mosquitto(
         )
 
 @router.get("/password-file-status")
-async def check_password_file_status(api_key: str = Security(get_api_key)):
+async def check_password_file_status(
+    api_key: str = Security(get_api_key),
+    db: AsyncSession = Depends(get_db),
+):
     """
     Check if the password file exists and get basic stats
     """
     try:
-        if not os.path.exists(MOSQUITTO_PASSWD_PATH):
-            return {
-                "exists": False,
-                "message": "Password file does not exist"
-            }
-            
-        # Get file stats and user count
-        file_stats = os.stat(MOSQUITTO_PASSWD_PATH)
-        file_size = file_stats.st_size
-        modified_time = datetime.fromtimestamp(file_stats.st_mtime).isoformat()
-        
-        # Count users in the file
-        user_count = 0
-        try:
-            with open(MOSQUITTO_PASSWD_PATH, 'r') as f:
-                for line in f:
-                    if line.strip():
-                        user_count += 1
-        except Exception as e:
-            logger.warning(f"Error reading password file: {str(e)}")
-                
-        return {
-            "exists": True,
-            "size_bytes": file_size,
-            "modified": modified_time,
-            "user_count": user_count
+        status_payload = await desired_state_svc.get_mosquitto_passwd_status(db)
+        observed = status_payload["observed"] or {
+            "exists": False,
+            "sizeBytes": 0,
+            "userCount": 0,
+            "users": [],
+            "sha256": None,
         }
+
+        file_path = desired_state_svc._MOSQUITTO_PASSWD_PATH
+        modified_time = None
+        if observed["exists"] and os.path.exists(file_path):
+            modified_time = datetime.fromtimestamp(os.stat(file_path).st_mtime).isoformat()
+
+        response = {
+            "exists": observed["exists"],
+            "size_bytes": observed["sizeBytes"],
+            "modified": modified_time,
+            "user_count": observed["userCount"],
+            "scope": status_payload["scope"],
+            "version": status_payload["version"],
+            "status": status_payload["status"],
+            "desired": status_payload["desired"],
+            "applied": status_payload["applied"],
+            "observed": status_payload["observed"],
+            "driftDetected": status_payload["driftDetected"],
+            "lastError": status_payload["lastError"],
+            "desiredUpdatedAt": status_payload["desiredUpdatedAt"],
+            "reconciledAt": status_payload["reconciledAt"],
+            "appliedAt": status_payload["appliedAt"],
+        }
+        if not observed["exists"]:
+            response["message"] = "Password file does not exist"
+        return response
     
     except Exception as e:
         logger.error(f"Error checking password file status: {str(e)}")
