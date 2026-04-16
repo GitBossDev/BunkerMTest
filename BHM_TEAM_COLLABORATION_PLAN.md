@@ -3,7 +3,7 @@
 > Proyecto: BHM (Broker Health Manager)
 > Objetivo: Coordinar el trabajo paralelo de dos compañeros sin solapamientos, reduciendo conflictos de merge y evitando trabajo duplicado.
 > Tipo de documento: Archivo vivo de coordinación
-> Última actualización: 2026-04-15
+> Última actualización: 2026-04-16
 
 ---
 
@@ -15,6 +15,18 @@ Este documento organiza el trabajo en paralelo de dos responsables:
 - Compañero B: funcionalidades de producto, refinamiento funcional, historial, alertas, logs, estilos y UI.
 
 El objetivo principal es que ambos puedan trabajar en paralelo con un criterio claro de ownership, dependencias y puntos de integración, usando este archivo como referencia compartida y como contexto para sus respectivos agentes.
+
+---
+
+## Estado tras el cierre funcional de Fase 4
+
+Conclusión operativa actual:
+
+- B no puede completar todavía el 100% de sus actividades asignadas.
+- B sí puede cerrar de punta a punta el trabajo funcional sobre histórico de actividades de clientes, historial de dashboard, historia de topics, estilos/UI, tests funcionales asociados y documentación funcional apoyándose en el baseline PostgreSQL ya validado.
+- B todavía no debería cerrar como definitivas la whitelist por IP, las alertas con canales externos ni el histórico final de logs de broker/clientes, porque siguen dependiendo de definiciones estructurales de A y del arrastre de Fase 5.
+
+El motivo principal de este corte es que Fase 4 ya dejó de bloquear la persistencia operativa de históricos y reporting técnico, pero no resolvió todavía tres decisiones estructurales: el modelo final de whitelist sobre el broker/control-plane, el contrato técnico de delivery para alertas y la fuente final de observabilidad desacoplada para logs históricos.
 
 ---
 
@@ -117,16 +129,13 @@ Esta sección es la más importante para evitar doble trabajo.
 
 Impacta a B en:
 
-- histórico de actividades de clientes
-- historial para dashboard
-- historia de topics
 - histórico de logs de broker y clientes
 - alertas si persisten configuración, historial o entregas
 
 Regla:
 
-- B no debe consolidar nueva persistencia definitiva si A va a mover esa lógica a PostgreSQL.
-- B sí puede trabajar en reglas de negocio, UX, payloads, filtros, tablas, vistas y contratos esperados, siempre que el almacenamiento final quede desacoplado.
+- B ya puede asumir PostgreSQL como backend operativo para histórico de actividades de clientes, historial de dashboard, historia de topics y reporting técnico asociado dentro del baseline actual.
+- B no debe reintroducir almacenamiento nuevo en SQLite ni cambiar seams de persistencia; si necesita nuevos datos o filtros, debe pedir contrato o endpoint sobre la base PostgreSQL ya consolidada.
 
 #### 2. APIs frontend-backend
 
@@ -151,6 +160,7 @@ Regla:
 
 - B debe evitar implementar soluciones que dependan de shared volumes como contrato final.
 - Si necesita una solución temporal, debe dejarla claramente marcada como transicional y validada con A.
+- Mientras Fase 5 no cierre la observabilidad desacoplada, el histórico final de logs debe tratarse como capacidad parcialmente desbloqueada, no como carril totalmente libre.
 
 #### 4. Control-plane del broker
 
@@ -168,29 +178,28 @@ Regla:
 
 ## Estado de dependencias para el Compañero B
 
-### Puede avanzar ya con riesgo bajo
+### Puede completar ya sin bloqueo estructural
 
-- [ ] Diseño UI de pantallas nuevas
-- [ ] Refinamiento visual de dashboard y vistas existentes
-- [ ] Composición de tablas, filtros y navegación de históricos
-- [ ] Definición de payloads esperados y estados vacíos/error/loading
-- [ ] Tests funcionales de frontend desacoplados de persistencia final
-- [ ] Documentación funcional de features pendientes
+- [x] Refinamiento del histórico de actividades de clientes.
+- [x] Refinar o ampliar historial para dashboard.
+- [x] Refinar o ampliar historia de topics.
+- [x] Diseño UI de pantallas nuevas y refinamiento visual de dashboard y vistas existentes.
+- [x] Composición de tablas, filtros, navegación, estados vacíos/error/loading y tests funcionales sobre históricos ya soportados por el baseline PostgreSQL actual.
+- [x] Documentación funcional y de uso para las features históricas y de reporting técnico ya estabilizadas.
+- [x] Mejoras de estilos y UI donde aplique.
 
 ### Puede avanzar, pero coordinando contrato con A
 
-- [ ] Histórico de actividades de clientes
-- [ ] Historial para dashboard
-- [ ] Historia de topics
 - [ ] Histórico de logs de broker y clientes
 - [ ] Alertas por correo y redes
+- [ ] Nuevos endpoints, payloads o exportaciones que no estén ya cubiertos por los contratos HTTP revalidados en Fase 4.
 
 ### Debe esperar definición o implementación previa de A
 
-- [ ] Persistencia definitiva de las features históricas en PostgreSQL
-- [ ] Endpoints finales que dependan de nueva arquitectura de datos
-- [ ] Funcionalidades que dependan de reconciliación del broker
-- [ ] Solución final de whitelist si requiere tocar configuración efectiva del broker
+- [x] La persistencia definitiva de las features históricas priorizadas en PostgreSQL ya no bloquea a B en el baseline actual.
+- [ ] Solución final de whitelist si requiere tocar configuración efectiva del broker.
+- [ ] Contrato final de delivery para alertas por correo, redes o webhooks si implica workers, credenciales o servicios auxiliares.
+- [ ] Definición final de la fuente de observabilidad para el histórico de logs de broker y clientes dentro de Fase 5.
 
 ---
 
@@ -226,20 +235,20 @@ Regla:
 ### Persistencia y base de datos
 
 - [x] Alinear el alcance y el orden recomendado de Fase 4 en `BHM_MICROSERVICES_MIGRATION_PLAN.md`.
-- [ ] Diseñar la estrategia de migración incremental de SQLite a PostgreSQL por capability o agregado.
-- [ ] Definir el esquema PostgreSQL inicial del bounded context de BHM, empezando por control-plane, auditoría y reconciliación.
-- [ ] Definir estrategia de compatibilidad temporal acotada para features ya persistidas en SQLite, evitando doble escritura estructural.
-- [~] Implementar la capa de persistencia portable o repositorios de transición. Ya existen factorías y backends SQLAlchemy reales para history/reporting, el motor async del control-plane ya normaliza URLs PostgreSQL async de forma automática, el control-plane ya tiene Alembic propio y el arranque runtime ya lo usa en PostgreSQL; falta la activación operativa completa del resto de dominios.
-- [~] Ejecutar el primer corte operativo: mover a PostgreSQL el estado durable del control-plane (`broker_desired_state` y auditoría asociada). La auditoría append-only ya quedó implementada en `broker_desired_state_audit`, Compose ya inyecta URLs por dominio, el control-plane ya tiene versión inicial Alembic y la integración real contra PostgreSQL ya pasó en el stack Compose.
-- [~] Ejecutar el segundo corte operativo: mover broker history, topic history y client activity a PostgreSQL. Los storages SQLAlchemy ya quedaron implementados detrás de los seams existentes, ya pasaron una validación real enfocada contra PostgreSQL y ahora cuentan también con un migrador específico desde SQLite.
-- [ ] Coordinar con B qué endpoints y payloads cambiarán por la migración y cuáles mantendrán compatibilidad temporal.
+- [x] Diseñar la estrategia de migración incremental de SQLite a PostgreSQL por capability o agregado.
+- [x] Definir el esquema PostgreSQL inicial del bounded context de BHM, empezando por control-plane, auditoría y reconciliación.
+- [x] Definir estrategia de compatibilidad temporal acotada para features ya persistidas en SQLite, evitando doble escritura estructural.
+- [x] Implementar la capa de persistencia portable o repositorios de transición. El baseline actual ya opera con factorías y backends SQLAlchemy reales para control-plane, históricos y reporting técnico sobre PostgreSQL.
+- [x] Ejecutar el primer corte operativo: mover a PostgreSQL el estado durable del control-plane (`broker_desired_state` y auditoría asociada).
+- [x] Ejecutar el segundo corte operativo: mover broker history, topic history y client activity a PostgreSQL.
+- [x] Coordinar con B qué carriles quedaron desbloqueados tras la migración: históricos principales, reporting técnico y contratos HTTP revalidados de monitor, clientlogs y reports ya pueden consumirse sin reabrir la capa de persistencia.
 
 ### APIs y contratos
 
-- [ ] Definir contratos API para features que B necesita implementar o refinar.
-- [ ] Implementar o adaptar endpoints backend necesarios para frontend.
-- [ ] Documentar breaking changes o compatibilidad temporal.
-- [ ] Mantener tests de integración para endpoints afectados.
+- [~] Definir contratos API para features que B necesita implementar o refinar. Los contratos de históricos/reporting técnico ya tienen baseline estable; siguen pendientes whitelist, alertas y el ajuste final de logs desacoplados.
+- [~] Implementar o adaptar endpoints backend necesarios para frontend. El backend ya cubre los contratos actuales revalidados en Fase 4, pero aún puede requerir endpoints nuevos para alertas, whitelist o refinamientos de logs.
+- [x] Documentar breaking changes o compatibilidad temporal del cierre de Fase 4 y del baseline PostgreSQL actual.
+- [x] Mantener tests de integración para endpoints afectados. La regresión ampliada cerró con `40 passed` sobre `monitor`, `clientlogs`, `reports` y la suite enfocada de Fase 4.
 
 Estado actual ya disponible para coordinación con B:
 
@@ -290,7 +299,7 @@ Estado actual ya disponible para coordinación con B:
 
 ### Coordinación
 
-- [ ] Notificar a B cuando una dependencia quede desbloqueada.
+- [x] Notificar a B cuando una dependencia quede desbloqueada.
 - [x] Marcar en este documento qué tareas ya pueden ejecutarse sin riesgo.
 
 ---
@@ -311,10 +320,10 @@ Estado actual ya disponible para coordinación con B:
 
 ### Trabajo seguro sin bloquearse
 
-- [ ] Diseñar UX y estados UI para funcionalidades dependientes de nuevas APIs.
-- [ ] Definir con A los contratos de datos antes de consumirlos.
-- [ ] Evitar fijar almacenamiento definitivo si A aún no cerró la capa PostgreSQL.
-- [ ] Añadir tests funcionales y de interfaz donde no haya dependencia estructural pendiente.
+- [x] Diseñar UX y estados UI para funcionalidades dependientes de nuevas APIs.
+- [x] Definir con A los contratos de datos antes de consumirlos cuando el flujo ya tenga baseline estable en Fase 4.
+- [x] Evitar fijar almacenamiento definitivo propio: PostgreSQL ya quedó cerrado para los históricos priorizados y B no debe tocar la capa de persistencia.
+- [x] Añadir tests funcionales y de interfaz donde no haya dependencia estructural pendiente.
 
 ### Coordinación
 
@@ -328,14 +337,14 @@ Estado actual ya disponible para coordinación con B:
 
 | Feature | Responsable principal | Dependencia de A | Puede avanzar B ya | Nota |
 |--------|------------------------|------------------|--------------------|------|
-| Whitelist por IP | B | Alta | Parcial | Diseñar UX y reglas; validar antes la forma final de aplicación al broker |
-| Histórico actividad clientes | B | Alta | Parcial | Ya existe base en SQLite; no cerrar persistencia final sin A |
-| Historial dashboard | B | Alta | Parcial | Puede avanzar en UI y consultas esperadas |
-| Historia de topics | B | Alta | Parcial | Ya existe base en SQLite; evitar rehacer persistencia final |
+| Whitelist por IP | B | Alta | Parcial | Puede diseñar UX y reglas, pero la forma final depende de decidir si vive en broker policy, control-plane o capa de aplicación |
+| Histórico actividad clientes | B | Baja | Sí | PostgreSQL ya es baseline operativo para este dominio; puede cerrarse funcionalmente sin tocar persistencia |
+| Historial dashboard | B | Baja | Sí | Puede cerrarse sobre contratos HTTP actuales; coordinar solo si pide endpoints o filtros nuevos |
+| Historia de topics | B | Baja | Sí | PostgreSQL ya cubre el dominio; no hace falta esperar más cambios estructurales para refinamiento funcional |
 | Alertas por correo | B | Media/Alta | Parcial | Requiere validar delivery, configuración y quizá worker |
 | Alertas por redes/webhooks | B | Media/Alta | Parcial | Igual que correo; mejor acordar contrato técnico antes |
-| Histórico logs broker | B | Alta | Parcial | Afectado por futura observabilidad desacoplada |
-| Histórico logs clientes | B | Alta | Parcial | Afectado por persistencia y observabilidad |
+| Histórico logs broker | B | Media/Alta | Parcial | Hay baseline funcional actual, pero el carril final depende de la definición de observabilidad desacoplada de Fase 5 |
+| Histórico logs clientes | B | Media/Alta | Parcial | Igual que broker logs: puede refinar UX/consumo actual, pero no cerrar aún la solución final |
 | Estilos y UI | B | Baja | Sí | Puede avanzar salvo pantallas atadas a contratos inestables |
 | PostgreSQL migration | A | N/A | No | Ownership de A |
 | APIs frontend-backend | A | N/A | No, salvo mocks | Ownership de A cuando el cambio es estructural |
@@ -442,12 +451,16 @@ Usar esta sección como tablero rápido de coordinación.
 
 ### Decisiones que deben tomarse con prioridad
 
-- [ ] Prioridad de features de B que necesitan soporte temprano de A.
+- [x] Prioridad de features de B que necesitan soporte temprano de A. En el estado actual, la prioridad estructural pasa a whitelist, alertas y observabilidad de logs; históricos de actividad/dashboard/topics quedan desbloqueados.
 - [x] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
-- [ ] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend.
+- [~] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend. Para históricos principales ya no es bloqueo; sigue pendiente solo para whitelist, alertas y logs si B necesita avanzar antes del contrato final.
 - [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; si se usa más adelante, será solo como validación opcional.
 
 ### Actualización operativa reciente
+
+- A ya cerró funcionalmente Fase 4 sobre PostgreSQL para el baseline de desarrollo actual, con runtime Compose-first validado, smoke `7/7 OK`, regresión ampliada `40 passed` y backup/restore PostgreSQL verificado.
+- A ya dejó desbloqueados para B los carriles funcionales de histórico de actividades de clientes, historial de dashboard, historia de topics y reporting técnico asociado sin necesidad de reabrir la capa de persistencia.
+- A mantiene todavía como decisiones estructurales pendientes la whitelist por IP, el contrato técnico de alertas externas y la definición final del carril de observabilidad para logs históricos, por lo que esas actividades de B siguen siendo parciales o bloqueadas.
 
 - A ya movió `defaultACLAccess` y el lifecycle básico de clientes DynSec al patrón de estado deseado + reconciliación.
 - A ya movió también roles, ACLs, grupos y memberships DynSec al mismo patrón transicional.

@@ -1,7 +1,8 @@
-# requirements.txt - BunkerM Extended Utilities
+# requirements.txt - Broker Health Manager Utilities
 
 # Core dependencies for scripts
-psycopg2-binary>=2.9.9    # PostgreSQL adapter
+psycopg[binary]>=3.2.1    # PostgreSQL adapter for current sync runtime and tests
+psycopg2-binary>=2.9.9    # Legacy PostgreSQL adapter kept for migration scripts still using psycopg2
 requests>=2.31.0           # HTTP library
 
 # Optional for advanced features

@@ -1,5 +1,5 @@
 """
-Fixtures compartidos para los tests del backend unificado de BunkerM.
+Fixtures compartidos para los tests del backend unificado de BHM.
 
 Estrategia:
 - Base de datos: SQLite en memoria (evita dependencia del volumen /nextjs/data)

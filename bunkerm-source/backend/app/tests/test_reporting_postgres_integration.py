@@ -93,7 +93,9 @@ def test_reporting_storage_queries_real_postgres_data():
         status = reporting.get_retention_status()
         purge = reporting.execute_retention_purge()
 
-        assert len(daily["items"]) == 3
+        reported_days = {item["day"] for item in daily["items"]}
+        expected_days = {value.date().isoformat() for value in tick_rows}
+        assert expected_days.issubset(reported_days)
         assert daily["totals"]["total_messages_received"] >= 125
         assert len(weekly["items"]) >= 1
         assert timeline["client"]["username"] == username

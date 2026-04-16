@@ -61,7 +61,7 @@ services:
   # ==========================================
   # Mosquitto Standalone - Broker MQTT Independiente
   #
-  # Ciclo de vida separado del monolito BunkerM. Los dispositivos y la
+  # Ciclo de vida separado de la plataforma BHM. Los dispositivos y la
   # app de procesamiento conectan aquí directamente (puerto 1900).
   # BHM conecta a este broker para monitorizacion y gestion transicional.
   # ==========================================
@@ -87,7 +87,7 @@ services:
     volumes:
       - mosquitto-data:/var/lib/mosquitto   # DynSec JSON + persistencia
       - mosquitto-conf:/etc/mosquitto       # mosquitto.conf + conf.d/
-      - mosquitto-log:/var/log/mosquitto    # logs (leídos también por BunkerM/clientlogs)
+      - mosquitto-log:/var/log/mosquitto    # logs (leidos tambien por BHM/clientlogs)
     networks:
       bunkerm-network:
         aliases:
@@ -125,7 +125,7 @@ services:
       # Sobreescribir en .env.dev para entornos distintos de desarrollo local.
       # ------------------------------------------------------------------
       # UI admin credentials — used by Next.js to seed the first user
-      - ADMIN_INITIAL_EMAIL=${ADMIN_INITIAL_EMAIL:-admin@brokerpanel.com}
+      - ADMIN_INITIAL_EMAIL=${ADMIN_INITIAL_EMAIL:-admin@bhm.local}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-Usuario@1}
       # API key — tambien referenciada en build args con el mismo fallback
       - API_KEY=${API_KEY:-default_api_key_replace_in_production}
@@ -319,11 +319,11 @@ volumes:
   # Datos de postgres (Fase 3-4)
   postgres-data:
   pgadmin-data:
-  # Datos exclusivos de BunkerM platform
+  # Datos exclusivos de BHM platform
   bunkerm-nextjs:
   bunkerm-logs-api:
   bunkerm-logs-nginx:
-  # Volúmenes compartidos entre BunkerM y mosquitto standalone
+  # Volumenes compartidos entre BHM y mosquitto standalone
   mosquitto-data:    # /var/lib/mosquitto — DynSec JSON, persistencia MQTT
   mosquitto-conf:    # /etc/mosquitto     — mosquitto.conf + conf.d/
   mosquitto-log:     # /var/log/mosquitto — logs del broker

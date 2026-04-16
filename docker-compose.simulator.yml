@@ -2,8 +2,8 @@
 # Docker Compose - Simulador de Planta de Tratamiento de Agua
 # ============================================================================
 # 
-# PREREQUISITO: BunkerM debe estar corriendo (.\deploy.ps1 start-bunkerm)
-# El simulador publica datos al broker MQTT de BunkerM
+# PREREQUISITO: BHM debe estar corriendo (.\deploy.ps1 start-bunkerm)
+# El simulador publica datos al broker MQTT de Broker Health Manager
 #
 # Ejecutar con: docker-compose -f docker-compose.simulator.yml --env-file .env.dev up
 # O usar: .\simulator.ps1 start
@@ -37,7 +37,7 @@ services:
     networks:
       - bunkerm-network
     
-    # Nota: No hay depends_on porque BunkerM debe iniciarse por separado
+    # Nota: No hay depends_on porque BHM debe iniciarse por separado
     # Esto permite reiniciar el simulador independientemente
     
     healthcheck:
