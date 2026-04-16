@@ -226,6 +226,20 @@ Traduccion Compose-first ya aplicada:
 - expone por HTTP interno snapshots y `source-status` de `mosquitto.log` y `broker-resource-stats.json`
 - `bhm-api` y la funcionalidad consolidada temporalmente en `bunkerm-platform` consumen esa observabilidad por red interna, no por lectura directa del filesystem del broker
 
+### 7. `bhm-alert-delivery`
+
+Responsabilidad:
+
+- consumir eventos canónicos de alertas técnicas desde PostgreSQL
+- entregar notificaciones externas por email o webhook
+- aplicar reintentos, idempotencia y auditoría de delivery fuera del hilo del monitor
+
+Notas:
+
+- el ownership de detección sigue en `bhm-api`
+- el ownership de entrega vive en este worker dedicado
+- el contrato técnico asociado queda fijado en `docs/BHM_ALERT_DELIVERY_CONTRACT.md`
+
 ---
 
 ## Topologia objetivo Compose-first

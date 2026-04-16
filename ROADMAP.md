@@ -148,7 +148,7 @@ Desarrollo de BHM, una plataforma de gestión de broker MQTT basada en un fork d
 ### Objetivos
 - [x] Fork de BunkerM clonado localmente
 - [x] Fork de BunkerM integrado en repositorio propio (GitBossDev/BunkerMTest)
-- [x] Docker Compose configurado (Podman compatible, postgres opcional con -WithTools)
+- [x] Docker Compose configurado (Podman compatible, PostgreSQL integrado en el baseline Compose-first)
 - [x] Arquitectura monolitica: todo en bunkerm-platform con SQLite
 - [x] Entorno desplegado y funcionando en localhost:2000
 - [x] Script de gestión automatizado (deploy.ps1) con hot-patch
@@ -190,8 +190,8 @@ BunkerMTest/
 | Servicio | Imagen | Puerto(s) | Propósito |
 |----------|--------|-----------|----------|
 | **bunkerm** | Build from source | 2000, 1000-1005, 8100, 1901 | Plataforma completa (nginx + Next.js + FastAPI + Mosquitto) |
-| **postgres** | postgres:16-alpine | 5432 | BD para Fase 3-4 (solo con -WithTools) |
-| **pgadmin** (opcional) | dpage/pgadmin4 | 5050 | Admin de PostgreSQL (solo con -WithTools) |
+| **postgres** | postgres:16-alpine | 5432 | Persistencia principal del baseline Compose-first |
+| **pgadmin** (opcional) | dpage/pgadmin4 | 5050 | Admin de PostgreSQL levantado manualmente con perfil `tools` |
 
 #### 1.3 Variables de Entorno (.env.dev)
 
@@ -209,7 +209,7 @@ DYSEC_PATH=/var/lib/mosquitto/dynamic-security.json
 # Timezone
 TZ=Europe/Madrid
 
-# PostgreSQL (reservado para Fase 3-4, solo activo con -WithTools)
+# PostgreSQL (baseline activo del stack)
 POSTGRES_USER=bunkerm
 POSTGRES_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 POSTGRES_DB=bunkerm_db
@@ -252,8 +252,8 @@ PGADMIN_DEFAULT_PASSWORD=<CAMBIAR_EN_PRODUCCION>
 # 4. Verificar estado
 .\deploy.ps1 -Action status
 
-# Opcional: con PostgreSQL + pgAdmin (Fase 3-4)
-.\deploy.ps1 -Action start -WithTools
+# pgAdmin opcional, fuera del flujo normal de deploy
+docker compose --env-file .env.dev -f docker-compose.dev.yml --profile tools up -d pgadmin
 ```
 
 #### 1.6 Criterios de Éxito Fase 1

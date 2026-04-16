@@ -66,12 +66,10 @@ POSTGRES_DB=bunkerm_db
 POSTGRES_PORT=5432
 
 # Database connection string
-DATABASE_URL=sqlite+aiosqlite:////nextjs/data/bunkerm.db
-
-# Optional Phase 4 domain URLs (enable together with -WithTools when validating PostgreSQL)
-# CONTROL_PLANE_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
-# HISTORY_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
-# REPORTING_DATABASE_URL=postgresql+asyncpg://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+CONTROL_PLANE_DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+HISTORY_DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
+REPORTING_DATABASE_URL=postgresql://bunkerm:{postgres_password}@postgres:5432/bunkerm_db
 
 # ------------------------------------------
 # MQTT Broker (Mosquitto) Configuration

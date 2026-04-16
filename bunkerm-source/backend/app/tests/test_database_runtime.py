@@ -31,33 +31,56 @@ class _DummyEngine:
 
 
 @pytest.mark.asyncio
-async def test_init_db_uses_create_all_for_sqlite(monkeypatch):
-    dummy_engine = _DummyEngine()
-    create_all_calls: list[str] = []
+async def test_init_db_rejects_sqlite_runtime(monkeypatch):
+    monkeypatch.setattr(
+        database_module,
+        "settings",
+        SimpleNamespace(
+            resolved_control_plane_database_url="sqlite+aiosqlite:////tmp/test.db",
+            resolved_history_database_url="postgresql://bhm:secret@localhost:5432/bhm_history",
+            resolved_reporting_database_url="postgresql://bhm:secret@localhost:5432/bhm_reporting",
+        ),
+    )
 
-    monkeypatch.setattr(database_module, "settings", SimpleNamespace(resolved_control_plane_database_url="sqlite+aiosqlite:////tmp/test.db"))
-    monkeypatch.setattr(database_module, "engine", dummy_engine)
-    monkeypatch.setattr(database_module.Base.metadata, "create_all", lambda *_args, **_kwargs: create_all_calls.append("create_all"))
-
-    await database_module.init_db()
-
-    assert create_all_calls == ["create_all"]
-    assert dummy_engine.context.calls == 1
+    with pytest.raises(ValueError):
+        await database_module.init_db()
 
 
 @pytest.mark.asyncio
 async def test_init_db_uses_alembic_for_non_sqlite(monkeypatch):
     migration_calls: list[str] = []
+    history_migration_calls: list[tuple[str, ...]] = []
 
     async def _fake_upgrade(database_url: str) -> None:
         migration_calls.append(database_url)
 
-    monkeypatch.setattr(database_module, "settings", SimpleNamespace(resolved_control_plane_database_url="postgresql://bhm:secret@localhost:5432/bhm"))
+    async def _fake_history_upgrade(database_urls: list[str]) -> None:
+        history_migration_calls.append(tuple(database_urls))
+
+    monkeypatch.setattr(
+        database_module,
+        "settings",
+        SimpleNamespace(
+            resolved_control_plane_database_url="postgresql://bhm:secret@localhost:5432/bhm_control",
+            resolved_history_database_url="postgresql://bhm:secret@localhost:5432/bhm_history",
+            resolved_reporting_database_url="postgresql://bhm:secret@localhost:5432/bhm_reporting",
+        ),
+    )
     monkeypatch.setattr(
         "core.database_migrations.upgrade_control_plane_database",
         _fake_upgrade,
     )
+    monkeypatch.setattr(
+        "core.history_reporting_database_migrations.upgrade_history_reporting_databases",
+        _fake_history_upgrade,
+    )
 
     await database_module.init_db()
 
-    assert migration_calls == ["postgresql://bhm:secret@localhost:5432/bhm"]
+    assert migration_calls == ["postgresql://bhm:secret@localhost:5432/bhm_control"]
+    assert history_migration_calls == [
+        (
+            "postgresql://bhm:secret@localhost:5432/bhm_history",
+            "postgresql://bhm:secret@localhost:5432/bhm_reporting",
+        )
+    ]

@@ -231,4 +231,17 @@ class SQLiteTopicHistoryStorage:
         }
 
 
-topic_history_storage = SQLiteTopicHistoryStorage(settings.resolved_history_database_url)
+class _LazySQLiteTopicHistoryStorage:
+    def __init__(self) -> None:
+        self._storage: SQLiteTopicHistoryStorage | None = None
+
+    def _get_storage(self) -> SQLiteTopicHistoryStorage:
+        if self._storage is None:
+            self._storage = SQLiteTopicHistoryStorage(settings.resolved_history_database_url)
+        return self._storage
+
+    def __getattr__(self, name: str):
+        return getattr(self._get_storage(), name)
+
+
+topic_history_storage = _LazySQLiteTopicHistoryStorage()

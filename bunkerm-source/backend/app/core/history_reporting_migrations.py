@@ -11,6 +11,7 @@ from sqlalchemy.sql.sqltypes import Boolean, Date, DateTime
 
 from core.config import Settings
 from core.database_url import ensure_sqlite_url, get_host_accessible_database_url
+from core.history_reporting_database_migrations import ensure_history_reporting_database_sync
 from core.sync_database import create_sync_engine_for_url, ensure_tables
 from models.orm import (
     BrokerDailySummary,
@@ -110,7 +111,10 @@ def _read_sqlite_rows(database_url: str, table_name: str) -> list[dict[str, obje
 
 def _count_target_rows(target_url: str, tables: Sequence[object]) -> dict[str, int]:
     engine = create_sync_engine_for_url(target_url)
-    ensure_tables(engine, list(tables))
+    if target_url.startswith("sqlite"):
+        ensure_tables(engine, list(tables))
+    else:
+        ensure_history_reporting_database_sync(target_url)
     with engine.begin() as connection:
         return {
             table.name: int(connection.execute(select(func.count()).select_from(table)).scalar_one() or 0)
@@ -147,7 +151,10 @@ def _copy_tables(
     dry_run: bool,
 ) -> dict[str, int]:
     engine = create_sync_engine_for_url(target_url)
-    ensure_tables(engine, list(tables))
+    if target_url.startswith("sqlite"):
+        ensure_tables(engine, list(tables))
+    else:
+        ensure_history_reporting_database_sync(target_url)
 
     source_counts = {table.name: len(_read_sqlite_rows(source_url, table.name)) for table in tables}
     target_counts = _count_target_rows(target_url, tables)

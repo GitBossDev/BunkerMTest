@@ -532,7 +532,14 @@ async def test_import_dynsec_json_uses_control_plane_and_updates_status(client, 
             "subscribe": False,
             "unsubscribe": True,
         },
-        "clients": [{"username": "sensor-55", "roles": [], "groups": []}],
+        "clients": [{
+            "username": "sensor-55",
+            "password": "U2VjdXJlUGFzc3dvcmRIYXNo",
+            "salt": "U2FsdFZhbHVl",
+            "iterations": 101,
+            "roles": [],
+            "groups": [],
+        }],
         "groups": [],
         "roles": [],
     }
@@ -553,6 +560,125 @@ async def test_import_dynsec_json_uses_control_plane_and_updates_status(client, 
 
     stored = __import__("json").loads(dynsec_path.read_text(encoding="utf-8"))
     assert any(client_entry["username"] == "sensor-55" for client_entry in stored["clients"])
+
+
+async def test_import_dynsec_json_accepts_broker_managed_clients_without_password_hash(client, monkeypatch, tmp_path):
+    """La importación debe aceptar clientes broker-managed sin hash explícito para mantener el round-trip export/import."""
+    dynsec_path = tmp_path / "dynamic-security.json"
+    backup_dir = tmp_path / "dynsec-backups"
+    backup_dir.mkdir()
+    dynsec_path.write_text(
+        __import__("json").dumps(dynsec_config_module.DEFAULT_CONFIG, indent=2),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "DYNSEC_JSON_PATH", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "BACKUP_DIR", str(backup_dir))
+
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": False,
+            "publishClientReceive": True,
+            "subscribe": False,
+            "unsubscribe": True,
+        },
+        "clients": [{"username": "sensor-56", "roles": [], "groups": []}],
+        "groups": [],
+        "roles": [],
+    }
+
+    resp = await client.post(
+        "/api/v1/config/import-dynsec-json",
+        files={"file": ("dynsec.json", __import__("json").dumps(payload), "application/json")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True
+    assert body["controlPlane"]["status"] == "applied"
+
+
+async def test_import_dynsec_json_rejects_partial_client_credentials(client, monkeypatch, tmp_path):
+    """La importación debe rechazar clientes con credenciales parciales porque el documento quedaría ambiguo."""
+    dynsec_path = tmp_path / "dynamic-security.json"
+    backup_dir = tmp_path / "dynsec-backups"
+    backup_dir.mkdir()
+    dynsec_path.write_text(
+        __import__("json").dumps(dynsec_config_module.DEFAULT_CONFIG, indent=2),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "DYNSEC_JSON_PATH", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "BACKUP_DIR", str(backup_dir))
+
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": False,
+            "publishClientReceive": True,
+            "subscribe": False,
+            "unsubscribe": True,
+        },
+        "clients": [{"username": "sensor-56", "password": "abc", "roles": [], "groups": []}],
+        "groups": [],
+        "roles": [],
+    }
+
+    resp = await client.post(
+        "/api/v1/config/import-dynsec-json",
+        files={"file": ("dynsec.json", __import__("json").dumps(payload), "application/json")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "password, salt and iterations together" in body["message"]
+
+
+async def test_import_dynsec_json_rejects_invalid_merged_document(client, monkeypatch, tmp_path):
+    """Si la fusión produce un DynSec inválido, el router debe frenarlo antes del reconciliador."""
+    dynsec_path = tmp_path / "dynamic-security.json"
+    backup_dir = tmp_path / "dynsec-backups"
+    backup_dir.mkdir()
+    dynsec_path.write_text(
+        __import__("json").dumps(dynsec_config_module.DEFAULT_CONFIG, indent=2),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "DYNSEC_JSON_PATH", str(dynsec_path))
+    monkeypatch.setattr(dynsec_config_module, "BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(
+        config_dynsec_router,
+        "merge_dynsec_configs",
+        lambda imported: {
+            **imported,
+            "clients": [{"username": "merged-broken", "password": "abc", "roles": [], "groups": []}],
+        },
+    )
+
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": False,
+            "publishClientReceive": True,
+            "subscribe": False,
+            "unsubscribe": True,
+        },
+        "clients": [],
+        "groups": [],
+        "roles": [],
+    }
+
+    resp = await client.post(
+        "/api/v1/config/import-dynsec-json",
+        files={"file": ("dynsec.json", __import__("json").dumps(payload), "application/json")},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is False
+    assert "Invalid merged dynamic security JSON format" in body["message"]
 
 
 async def test_reset_dynsec_json_uses_control_plane(client, monkeypatch, tmp_path):

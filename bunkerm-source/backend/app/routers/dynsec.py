@@ -263,7 +263,7 @@ async def create_client(
             },
         )
         if desired_state_svc.is_daemon_reconcile_mode():
-            desired_state_svc.stage_client_creation_secret(client.username, state.version, client.password)
+            await desired_state_svc.stage_client_creation_secret(db, client.username, state.version, client.password)
             state = await desired_state_svc.reconcile_or_wait(
                 state,
                 desired_state_svc.reconcile_client,

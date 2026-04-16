@@ -1,23 +1,27 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from core.config import settings
-from core.database_url import get_sync_database_url
-from core.database_url import is_sqlite_url
+from core.database_url import ensure_postgres_url, get_sync_database_url
 from reporting.sqlalchemy_reporting import SQLAlchemyReportingStorage
 
-if TYPE_CHECKING:
-    from reporting.sqlite_reporting import SQLiteReportingStorage
 
-
-def create_reporting_storage() -> SQLiteReportingStorage | SQLAlchemyReportingStorage:
+def create_reporting_storage() -> SQLAlchemyReportingStorage:
     database_url = settings.resolved_reporting_database_url
-    if is_sqlite_url(database_url):
-        from reporting.sqlite_reporting import SQLiteReportingStorage
-
-        return SQLiteReportingStorage(database_url)
+    ensure_postgres_url(database_url, "REPORTING_DATABASE_URL")
     return SQLAlchemyReportingStorage(get_sync_database_url(database_url))
 
 
-reporting_storage = create_reporting_storage()
+class _LazyReportingStorage:
+    def __init__(self) -> None:
+        self._storage: SQLAlchemyReportingStorage | None = None
+
+    def _get_storage(self) -> SQLAlchemyReportingStorage:
+        if self._storage is None:
+            self._storage = create_reporting_storage()
+        return self._storage
+
+    def __getattr__(self, name: str):
+        return getattr(self._get_storage(), name)
+
+
+reporting_storage = _LazyReportingStorage()

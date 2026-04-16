@@ -103,11 +103,18 @@ function Show-Banner {
     Write-Host ""
 }
 
+function Warn-DeprecatedWithTools {
+    if ($WithTools) {
+        Write-Warning "El argumento -WithTools ya no tiene efecto. PostgreSQL forma parte del baseline Compose-first y pgAdmin queda fuera del flujo normal de deploy."
+    }
+}
+
 function Test-Prerequisites {
     Write-Info "Verificando prerequisitos..."
 
     # Detectar motor de contenedores (Podman o Docker)
     Get-RuntimeEngines
+    Warn-DeprecatedWithTools
 
     # Check Python
     try {
@@ -340,10 +347,6 @@ function Invoke-Start {
 
     $envMap = Get-EnvMap -Path ".env.dev"
     $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    $pgAdminRequested = [bool]$WithTools
-    if ($postgresRequired -and -not $pgAdminRequested) {
-        Write-Warning "La configuracion activa PostgreSQL como datastore operativo; se iniciara postgres sin habilitar pgAdmin."
-    }
 
     # Si bunkerm-source existe pero no tiene .env, crear uno vacio para que compose no falle
     if (Test-Path "bunkerm-source") {
@@ -372,23 +375,9 @@ function Invoke-Start {
         }
     }
 
-    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
-
-    if ($pgAdminRequested) {
-        Write-Info "Starting with tools profile (includes pgAdmin)..."
-        $composeCmd += " --profile tools"
-    } elseif ($postgresRequired) {
-        Write-Info "Starting PostgreSQL runtime dependency without optional pgAdmin..."
-        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "No se pudo iniciar el servicio postgres requerido por la configuracion actual."
-            exit 1
-        }
-    }
-    
-    $composeCmd += " up -d"
-    
+    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d"
     Invoke-Expression $composeCmd
+
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Fallo el arranque del stack Compose-first. Revisa: .\deploy.ps1 -Action logs"
         exit 1
@@ -401,7 +390,7 @@ function Invoke-Start {
     if ($postgresRequired) {
         Write-Info "Esperando a que PostgreSQL quede healthy para el runtime de Fase 4..."
         if (-not (Wait-ContainerHealthy -ContainerName "bunkerm-postgres" -TimeoutSeconds 90)) {
-            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs -WithTools"
+            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs"
             exit 1
         }
     }
@@ -432,11 +421,8 @@ function Invoke-Start {
     Write-Info "Service URLs:"
     Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
     Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
-    
-    if ($pgAdminRequested) {
-        Write-Host "  - pgAdmin:   http://localhost:5050" -ForegroundColor Cyan
-    }
-    if ($pgAdminRequested -or $postgresRequired) {
+
+    if ($postgresRequired) {
         Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
     }
     
@@ -449,17 +435,7 @@ function Invoke-Stop {
     Write-Info "Stopping services..."
     Write-Host ""
 
-    $envMap = Get-EnvMap -Path ".env.dev"
-    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    $effectiveWithTools = [bool]$WithTools -or $postgresRequired
-    
-    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml"
-
-    if ($effectiveWithTools) {
-        $composeCmd += " --profile tools"
-    }
-
-    $composeCmd += " down"
+    $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml down"
     
     Invoke-Expression $composeCmd
     
@@ -542,15 +518,7 @@ function Invoke-Status {
 function Invoke-Logs {
     Write-Info "Showing logs..."
     Write-Host ""
-
-    $envMap = Get-EnvMap -Path ".env.dev"
-    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    $effectiveWithTools = [bool]$WithTools -or $postgresRequired
-    
     $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml logs"
-    if ($effectiveWithTools) {
-        $composeCmd += " --profile tools"
-    }
     
     if ($Follow) {
         $composeCmd += " -f"
@@ -571,7 +539,7 @@ function Invoke-Clean {
         Write-Host ""
         
         # Stop services
-        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml --profile tools down -v"
+        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml down -v"
         
         # Remove data directories
         Write-Info "Removing data directories..."
@@ -975,14 +943,14 @@ function Invoke-StartBunkerM {
     Start-Sleep -Seconds 15
 
     if ($postgresRequired) {
-        Write-Info "La configuracion actual requiere PostgreSQL. Iniciando servicio postgres del perfil tools..."
-        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml --profile tools up -d postgres"
+        Write-Info "La configuracion actual requiere PostgreSQL. Iniciando el servicio postgres del baseline Compose-first..."
+        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres"
         if ($LASTEXITCODE -ne 0) {
             Write-Error "No se pudo iniciar el servicio postgres requerido por la configuracion actual."
             exit 1
         }
         if (-not (Wait-ContainerHealthy -ContainerName "bunkerm-postgres" -TimeoutSeconds 90)) {
-            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs -WithTools"
+            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs"
             exit 1
         }
     }
@@ -1018,8 +986,12 @@ function Invoke-StartBunkerM {
 function Invoke-StopBunkerM {
     Write-Info "Deteniendo Broker Health Manager platform..."
     Write-Host ""
-    
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop bunkerm mosquitto"
+
+    $envMap = Get-EnvMap -Path ".env.dev"
+    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
+    $services = if ($postgresRequired) { "bunkerm mosquitto postgres" } else { "bunkerm mosquitto" }
+
+    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop $services"
 
     Write-Host ""
     Write-Success "[OK] Broker Health Manager y Mosquitto detenidos!"
@@ -1119,7 +1091,7 @@ function Invoke-PatchBackend {
     }
 
     # Recargar el proceso uvicorn unificado (puerto 9001)
-    $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep | awk '{print `$1}'" 2>&1 | Select-Object -First 1
+    $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep | awk '{print `$2; exit}'" 2>&1 | Select-Object -First 1
     if ($svcPid -match '\d+') {
         & $script:CE exec bunkerm-platform sh -c "kill -HUP $svcPid" 2>&1 | Out-Null
         Write-Info "    Proceso $svcPid recargado (SIGHUP)"

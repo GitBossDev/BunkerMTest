@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List
 
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.mosquitto_config import (
@@ -24,7 +25,7 @@ from config.mosquitto_config import (
 from config.dynsec_config import DEFAULT_CONFIG as DEFAULT_DYNSEC_CONFIG, validate_dynsec_json
 from core.config import settings
 from core.database import AsyncSessionLocal
-from models.orm import BrokerDesiredState, BrokerDesiredStateAudit
+from models.orm import BrokerDesiredState, BrokerDesiredStateAudit, BrokerReconcileSecret
 from services import broker_observability_client
 from services import broker_reconciler as broker_reconciler_svc
 from services import dynsec_service
@@ -49,7 +50,6 @@ _MOSQUITTO_CONF_PATH: str = settings.mosquitto_conf_path
 _BACKUP_DIR: str = settings.mosquitto_conf_backup_dir
 _MOSQUITTO_PASSWD_PATH: str = settings.mosquitto_passwd_path
 _CERTS_DIR: str = settings.mosquitto_certs_dir
-_BROKER_RECONCILE_SECRET_DIR: str = settings.broker_reconcile_secret_dir
 _ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
 _MOSQUITTO_PASSWD_LINE_PATTERN = re.compile(r"^[^:]+:\$\d+\$[^:]+$")
 _broker_reconciler = broker_reconciler_svc.BrokerReconciler()
@@ -216,32 +216,15 @@ def _reconcile_secret_cipher() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(hashlib.sha256(key_material).digest()))
 
 
-def _client_creation_secret_path(username: str, version: int) -> str:
-    secret_key = hashlib.sha256(f"{_client_scope(username)}:{version}".encode("utf-8")).hexdigest()
-    return os.path.join(_BROKER_RECONCILE_SECRET_DIR, f"{secret_key}.token")
+def _client_creation_secret_key(username: str, version: int) -> str:
+    return hashlib.sha256(f"{_client_scope(username)}:{version}".encode("utf-8")).hexdigest()
 
 
-def _safe_remove_file(path: str) -> None:
+def _decode_staged_client_creation_secret_payload(encrypted_payload: str) -> Dict[str, Any] | None:
     try:
-        os.remove(path)
-    except FileNotFoundError:
-        return
-
-
-def _load_staged_client_creation_secret_payload(secret_path: str) -> Dict[str, Any] | None:
-    try:
-        with open(secret_path, "rb") as handle:
-            encrypted_payload = handle.read()
-    except FileNotFoundError:
-        return None
-    except OSError:
-        return None
-
-    try:
-        decrypted_payload = _reconcile_secret_cipher().decrypt(encrypted_payload)
+        decrypted_payload = _reconcile_secret_cipher().decrypt(encrypted_payload.encode("utf-8"))
         payload = json.loads(decrypted_payload.decode("utf-8"))
     except (InvalidToken, json.JSONDecodeError, UnicodeDecodeError):
-        _safe_remove_file(secret_path)
         return None
 
     expires_at_raw = payload.get("expiresAt")
@@ -251,78 +234,90 @@ def _load_staged_client_creation_secret_payload(secret_path: str) -> Dict[str, A
         expires_at = None
 
     if expires_at is None:
-        _safe_remove_file(secret_path)
         return None
 
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
     if expires_at <= datetime.now(timezone.utc):
-        _safe_remove_file(secret_path)
         return None
 
     return payload
 
 
-def cleanup_staged_client_creation_secrets() -> None:
-    if not os.path.isdir(_BROKER_RECONCILE_SECRET_DIR):
-        return
-
-    for entry_name in os.listdir(_BROKER_RECONCILE_SECRET_DIR):
-        if not entry_name.endswith(".token"):
-            continue
-        _load_staged_client_creation_secret_payload(os.path.join(_BROKER_RECONCILE_SECRET_DIR, entry_name))
+async def cleanup_staged_client_creation_secrets(session: AsyncSession) -> None:
+    await session.execute(
+        delete(BrokerReconcileSecret).where(BrokerReconcileSecret.expires_at <= _utcnow())
+    )
 
 
-def stage_client_creation_secret(username: str, version: int, creation_password: str) -> None:
+async def stage_client_creation_secret(
+    session: AsyncSession,
+    username: str,
+    version: int,
+    creation_password: str,
+) -> None:
     if not creation_password:
         raise ValueError("Client creation password is required")
 
-    os.makedirs(_BROKER_RECONCILE_SECRET_DIR, exist_ok=True)
-    cleanup_staged_client_creation_secrets()
+    await cleanup_staged_client_creation_secrets(session)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(
+    expires_at_utc = datetime.now(timezone.utc) + timedelta(
         seconds=max(settings.broker_reconcile_secret_ttl_seconds, 5.0)
     )
     payload = {
         "username": username,
         "version": version,
         "password": creation_password,
-        "expiresAt": expires_at.isoformat(),
+        "expiresAt": expires_at_utc.isoformat(),
     }
-    encrypted_payload = _reconcile_secret_cipher().encrypt(_dump_json(payload).encode("utf-8"))
-    secret_path = _client_creation_secret_path(username, version)
-    temp_path = f"{secret_path}.tmp"
+    encrypted_payload = _reconcile_secret_cipher().encrypt(_dump_json(payload).encode("utf-8")).decode("utf-8")
+    secret_key = _client_creation_secret_key(username, version)
+    secret = await session.get(BrokerReconcileSecret, secret_key)
+    expires_at = expires_at_utc.astimezone(timezone.utc).replace(tzinfo=None)
+    if secret is None:
+        secret = BrokerReconcileSecret(
+            secret_key=secret_key,
+            scope=_client_scope(username),
+            version=version,
+            encrypted_payload=encrypted_payload,
+            expires_at=expires_at,
+            created_at=_utcnow(),
+        )
+        session.add(secret)
+    else:
+        secret.scope = _client_scope(username)
+        secret.version = version
+        secret.encrypted_payload = encrypted_payload
+        secret.expires_at = expires_at
+        secret.created_at = _utcnow()
 
-    with open(temp_path, "wb") as handle:
-        handle.write(encrypted_payload)
-
-    try:
-        os.chmod(temp_path, 0o600)
-    except OSError:
-        pass
-
-    os.replace(temp_path, secret_path)
-
-    try:
-        os.chmod(secret_path, 0o600)
-    except OSError:
-        pass
+    await session.commit()
 
 
-def get_staged_client_creation_secret(username: str, version: int) -> str | None:
-    cleanup_staged_client_creation_secrets()
-    payload = _load_staged_client_creation_secret_payload(_client_creation_secret_path(username, version))
+async def get_staged_client_creation_secret(session: AsyncSession, username: str, version: int) -> str | None:
+    await cleanup_staged_client_creation_secrets(session)
+    secret = await session.get(BrokerReconcileSecret, _client_creation_secret_key(username, version))
+    if secret is None:
+        return None
+
+    payload = _decode_staged_client_creation_secret_payload(secret.encrypted_payload)
     if payload is None:
+        await session.delete(secret)
         return None
     if payload.get("username") != username or int(payload.get("version", -1)) != version:
+        await session.delete(secret)
         return None
     password = payload.get("password")
     return password if isinstance(password, str) and password else None
 
 
-def clear_staged_client_creation_secret(username: str, version: int) -> None:
-    _safe_remove_file(_client_creation_secret_path(username, version))
+async def clear_staged_client_creation_secret(session: AsyncSession, username: str, version: int) -> None:
+    await session.execute(
+        delete(BrokerReconcileSecret).where(
+            BrokerReconcileSecret.secret_key == _client_creation_secret_key(username, version)
+        )
+    )
 
 
 def _client_scope(username: str) -> str:
@@ -1429,7 +1424,7 @@ async def reconcile_client(
 
     staged_creation_password = creation_password
     if staged_creation_password is None and not desired.get("deleted", False):
-        staged_creation_password = get_staged_client_creation_secret(username, state.version)
+        staged_creation_password = await get_staged_client_creation_secret(session, username, state.version)
 
     errors = get_broker_reconciler().apply_client_projection(
         username,
@@ -1454,7 +1449,7 @@ async def reconcile_client(
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
         if creation_password is None and staged_creation_password is not None:
-            clear_staged_client_creation_secret(username, state.version)
+            await clear_staged_client_creation_secret(session, username, state.version)
 
     await session.commit()
     await session.refresh(state)

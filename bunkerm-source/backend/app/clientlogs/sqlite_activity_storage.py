@@ -371,4 +371,17 @@ class SQLiteClientActivityStorage:
         }
 
 
-client_activity_storage = SQLiteClientActivityStorage(settings.resolved_history_database_url)
+class _LazySQLiteClientActivityStorage:
+    def __init__(self) -> None:
+        self._storage: SQLiteClientActivityStorage | None = None
+
+    def _get_storage(self) -> SQLiteClientActivityStorage:
+        if self._storage is None:
+            self._storage = SQLiteClientActivityStorage(settings.resolved_history_database_url)
+        return self._storage
+
+    def __getattr__(self, name: str):
+        return getattr(self._get_storage(), name)
+
+
+client_activity_storage = _LazySQLiteClientActivityStorage()

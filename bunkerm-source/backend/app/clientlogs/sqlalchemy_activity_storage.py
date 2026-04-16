@@ -7,6 +7,7 @@ from typing import Any, Dict
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.database_url import is_sqlite_url
 from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_utc, normalize_datetime, parse_iso, session_scope, utc_now
 from models.orm import (
     ClientDailyDistinctTopic,
@@ -25,17 +26,18 @@ class SQLAlchemyClientActivityStorage:
         self._retention_days = retention_days
         self._lock = threading.Lock()
         self._engine = create_sync_engine_for_url(database_url)
-        ensure_tables(
-            self._engine,
-            [
-                ClientRegistry.__table__,
-                ClientSessionEvent.__table__,
-                ClientTopicEvent.__table__,
-                ClientSubscriptionState.__table__,
-                ClientDailySummary.__table__,
-                ClientDailyDistinctTopic.__table__,
-            ],
-        )
+        if is_sqlite_url(database_url):
+            ensure_tables(
+                self._engine,
+                [
+                    ClientRegistry.__table__,
+                    ClientSessionEvent.__table__,
+                    ClientTopicEvent.__table__,
+                    ClientSubscriptionState.__table__,
+                    ClientDailySummary.__table__,
+                    ClientDailyDistinctTopic.__table__,
+                ],
+            )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     def upsert_client(self, username: str, textname: str | None = None, disabled: bool = False) -> None:

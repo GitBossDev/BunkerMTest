@@ -65,7 +65,7 @@ _smart_anomaly_ok: bool = False
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 1. Esquema del backend unificado (SQLite transicional o PostgreSQL segun config)
+    # 1. Esquema del backend unificado sobre PostgreSQL
     await init_db()
     logger.info("Base de datos inicializada")
 

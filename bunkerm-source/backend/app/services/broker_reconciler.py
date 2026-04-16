@@ -8,6 +8,7 @@ import shutil
 from datetime import datetime
 from typing import Any, Dict, List
 
+from config.dynsec_config import validate_dynsec_json
 from config.mosquitto_config import _signal_mosquitto_reload
 from core.config import settings
 from services.broker_runtime import BrokerRuntimePort, _signal_dynsec_reload, get_local_broker_runtime
@@ -528,6 +529,14 @@ class BrokerReconciler:
     def apply_dynsec_config(self, desired_data: Dict[str, Any]) -> Dict[str, Any]:
         rollback_note: str | None = None
         errors: List[str] = []
+
+        try:
+            validate_dynsec_json(desired_data)
+        except ValueError as exc:
+            return {
+                "errors": [f"invalid dynsec config: {exc}"],
+                "rollbackNote": rollback_note,
+            }
 
         with self.runtime.locked_dynsec():
             observed_before = self.runtime.read_dynsec()

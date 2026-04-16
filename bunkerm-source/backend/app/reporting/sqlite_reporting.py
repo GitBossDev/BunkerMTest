@@ -455,4 +455,17 @@ class SQLiteReportingStorage:
         return buffer.getvalue().encode("utf-8")
 
 
-reporting_storage = SQLiteReportingStorage(settings.resolved_reporting_database_url)
+class _LazySQLiteReportingStorage:
+    def __init__(self) -> None:
+        self._storage: SQLiteReportingStorage | None = None
+
+    def _get_storage(self) -> SQLiteReportingStorage:
+        if self._storage is None:
+            self._storage = SQLiteReportingStorage(settings.resolved_reporting_database_url)
+        return self._storage
+
+    def __getattr__(self, name: str):
+        return getattr(self._get_storage(), name)
+
+
+reporting_storage = _LazySQLiteReportingStorage()

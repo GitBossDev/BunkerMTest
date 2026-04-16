@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import settings
-from core.database_url import get_async_database_url, get_async_engine_connect_args, is_sqlite_url
+from core.database_url import ensure_postgres_url, get_async_database_url, get_async_engine_connect_args
 
 _async_database_url = get_async_database_url(settings.resolved_control_plane_database_url)
 
@@ -40,11 +40,22 @@ async def init_db() -> None:
     """
     from models import orm  # noqa: F401 — importar para que SQLAlchemy registre los modelos
 
-    if not is_sqlite_url(settings.resolved_control_plane_database_url):
-        from core.database_migrations import upgrade_control_plane_database
+    from core.history_reporting_database_migrations import upgrade_history_reporting_databases
+    from core.database_migrations import upgrade_control_plane_database
 
-        await upgrade_control_plane_database(settings.resolved_control_plane_database_url)
-        return
+    ensure_postgres_url(settings.resolved_control_plane_database_url, "CONTROL_PLANE_DATABASE_URL")
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    history_database_url = getattr(settings, "resolved_history_database_url", settings.resolved_control_plane_database_url)
+    reporting_database_url = getattr(settings, "resolved_reporting_database_url", history_database_url)
+
+    ensure_postgres_url(history_database_url, "HISTORY_DATABASE_URL")
+    ensure_postgres_url(reporting_database_url, "REPORTING_DATABASE_URL")
+
+    await upgrade_control_plane_database(settings.resolved_control_plane_database_url)
+
+    await upgrade_history_reporting_databases(
+        [
+            history_database_url,
+            reporting_database_url,
+        ]
+    )

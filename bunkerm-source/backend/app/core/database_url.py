@@ -19,6 +19,13 @@ def is_sqlite_url(database_url: str) -> bool:
     return get_backend_name(database_url) == "sqlite"
 
 
+def ensure_postgres_url(database_url: str, setting_name: str) -> None:
+    if get_backend_name(database_url) != "postgresql":
+        raise ValueError(
+            f"{setting_name} must use a PostgreSQL URL in the active BHM baseline: {database_url}"
+        )
+
+
 def get_async_engine_connect_args(database_url: str) -> dict[str, object]:
     if is_sqlite_url(database_url):
         return {"check_same_thread": False}

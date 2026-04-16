@@ -123,15 +123,21 @@ async def test_reconcile_client_consumes_staged_creation_secret_without_db_passw
         },
     )
     monkeypatch.setattr(desired_state_svc, "normalize_client_payload", lambda payload: payload)
+    async def fake_get_staged_client_creation_secret(session, username, version):
+        return "staged-pass-123"
+
+    async def fake_clear_staged_client_creation_secret(session, username, version):
+        cleared_refs.append((username, version))
+
     monkeypatch.setattr(
         desired_state_svc,
         "get_staged_client_creation_secret",
-        lambda username, version: "staged-pass-123",
+        fake_get_staged_client_creation_secret,
     )
     monkeypatch.setattr(
         desired_state_svc,
         "clear_staged_client_creation_secret",
-        lambda username, version: cleared_refs.append((username, version)),
+        fake_clear_staged_client_creation_secret,
     )
     monkeypatch.setattr(
         desired_state_svc,

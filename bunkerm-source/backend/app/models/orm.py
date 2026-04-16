@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -40,6 +40,79 @@ class AlertConfigEntry(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class AlertDeliveryChannel(Base):
+    """Delivery channel configuration for external technical alerts."""
+    __tablename__ = "alert_delivery_channel"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    channel_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    secret_ref: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    last_delivery_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AlertDeliveryEvent(Base):
+    """Canonical alert delivery outbox event persisted before delivery attempts."""
+    __tablename__ = "alert_delivery_event"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    alert_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    dedupe_key: Mapped[str] = mapped_column(String(256), nullable=False, unique=True, index=True)
+    transition: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    delivery_state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    channel_policy_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    channel_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class AlertDeliveryAttempt(Base):
+    """Per-channel delivery attempt audit for an outbox event."""
+    __tablename__ = "alert_delivery_attempt"
+    __table_args__ = (
+        UniqueConstraint(
+            "event_id",
+            "channel_id",
+            "attempt_number",
+            name="uq_alert_delivery_attempt_event_channel_attempt",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("alert_delivery_event.event_id"),
+        nullable=False,
+        index=True,
+    )
+    channel_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("alert_delivery_channel.id"),
+        nullable=False,
+        index=True,
+    )
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", index=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    provider_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_message_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    error_class: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
 class BrokerBaseline(Base):
@@ -276,3 +349,15 @@ class BrokerDesiredStateAudit(Base):
     drift_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+
+class BrokerReconcileSecret(Base):
+    """Encrypted ephemeral handoff material for broker-facing reconciliation flows."""
+    __tablename__ = "broker_reconcile_secret"
+
+    secret_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

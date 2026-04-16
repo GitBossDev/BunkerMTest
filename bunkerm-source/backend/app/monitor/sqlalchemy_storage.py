@@ -10,6 +10,7 @@ from typing import Any, Dict
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.database_url import is_sqlite_url
 from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_utc, normalize_datetime, session_scope, utc_now
 from models.orm import BrokerDailySummary, BrokerMetricTick, BrokerRuntimeState
 from monitor.data_storage import PERIODS
@@ -45,14 +46,15 @@ class SQLAlchemyMonitorHistoryStorage:
         self._legacy_json_path = legacy_json_path
         self._lock = threading.Lock()
         self._engine = create_sync_engine_for_url(database_url)
-        ensure_tables(
-            self._engine,
-            [
-                BrokerMetricTick.__table__,
-                BrokerRuntimeState.__table__,
-                BrokerDailySummary.__table__,
-            ],
-        )
+        if is_sqlite_url(database_url):
+            ensure_tables(
+                self._engine,
+                [
+                    BrokerMetricTick.__table__,
+                    BrokerRuntimeState.__table__,
+                    BrokerDailySummary.__table__,
+                ],
+            )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         self._bootstrap_from_legacy_json()
 

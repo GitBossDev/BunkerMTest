@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     broker_reconcile_secret_ttl_seconds: float = 120.0
 
     # --- Base de datos ---
-    database_url: str = "sqlite+aiosqlite:////nextjs/data/bunkerm.db"
+    database_url: str = "postgresql://bunkerm:bunkerm@postgres:5432/bunkerm_db"
     control_plane_database_url: Optional[str] = None
     history_database_url: Optional[str] = None
     reporting_database_url: Optional[str] = None

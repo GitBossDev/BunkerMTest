@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
+from core.database_url import is_sqlite_url
 from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_utc, normalize_datetime, parse_iso, session_scope, utc_now
 from models.orm import (
     BrokerDailySummary,
@@ -40,20 +41,21 @@ class SQLAlchemyReportingStorage:
         self._broker_raw_retention_days = broker_raw_retention_days
         self._broker_daily_retention_days = broker_daily_retention_days
         self._engine = create_sync_engine_for_url(database_url)
-        ensure_tables(
-            self._engine,
-            [
-                BrokerMetricTick.__table__,
-                BrokerDailySummary.__table__,
-                ClientRegistry.__table__,
-                ClientSessionEvent.__table__,
-                ClientTopicEvent.__table__,
-                ClientDailySummary.__table__,
-                ClientDailyDistinctTopic.__table__,
-                TopicPublishBucket.__table__,
-                TopicSubscribeBucket.__table__,
-            ],
-        )
+        if is_sqlite_url(database_url):
+            ensure_tables(
+                self._engine,
+                [
+                    BrokerMetricTick.__table__,
+                    BrokerDailySummary.__table__,
+                    ClientRegistry.__table__,
+                    ClientSessionEvent.__table__,
+                    ClientTopicEvent.__table__,
+                    ClientDailySummary.__table__,
+                    ClientDailyDistinctTopic.__table__,
+                    TopicPublishBucket.__table__,
+                    TopicSubscribeBucket.__table__,
+                ],
+            )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     def get_broker_daily_report(self, days: int = 30) -> dict[str, Any]:

@@ -9,10 +9,11 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from clientlogs.activity_storage import client_activity_storage
 import services.dynsec_service as dynsec_svc
 from services import broker_desired_state_service as desired_state_svc
 import services.broker_reconciler as broker_reconciler
-from config.dynsec_config import merge_dynsec_configs
+from config.dynsec_config import merge_dynsec_configs, validate_dynsec_json
 
 # Estructura minima valida de dynamic-security.json para los mocks
 SAMPLE_DYNSEC = {
@@ -219,6 +220,69 @@ def test_merge_dynsec_configs_preserves_imported_default_acl(monkeypatch):
     assert merged["defaultACLAccess"] == imported["defaultACLAccess"]
 
 
+def test_validate_dynsec_json_accepts_broker_managed_clients_without_credentials():
+    """Los clientes creados por mosquitto_ctrl pueden no exponer hash en el JSON observado."""
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+        "clients": [
+            {
+                "username": "admin",
+                "password": "hash",
+                "salt": "salt",
+                "iterations": 101,
+                "roles": [{"rolename": "admin"}],
+            },
+            {
+                "username": "sensor-observed",
+                "roles": [],
+                "groups": [],
+            },
+        ],
+        "groups": [],
+        "roles": [{"rolename": "admin", "acls": []}],
+    }
+
+    validated = validate_dynsec_json(payload)
+    assert validated["clients"][1]["username"] == "sensor-observed"
+
+
+def test_validate_dynsec_json_rejects_partial_client_credentials():
+    """Si aparecen campos de credenciales, deben venir completos para evitar documentos ambiguos."""
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+        "clients": [
+            {
+                "username": "admin",
+                "password": "hash",
+                "salt": "salt",
+                "iterations": 101,
+                "roles": [{"rolename": "admin"}],
+            },
+            {
+                "username": "sensor-broken",
+                "password": "hash-only",
+                "roles": [],
+                "groups": [],
+            },
+        ],
+        "groups": [],
+        "roles": [{"rolename": "admin", "acls": []}],
+    }
+
+    with pytest.raises(ValueError, match="password, salt and iterations together"):
+        validate_dynsec_json(payload)
+
+
 async def test_list_clients_requires_auth(raw_client, monkeypatch):
     """Sin X-API-Key el endpoint debe rechazar la peticion (401 o 403)."""
     monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
@@ -304,7 +368,7 @@ async def test_create_client_success(client, monkeypatch):
 
 
 async def test_create_client_in_daemon_mode_stages_ephemeral_secret_and_waits(client, monkeypatch):
-    """En modo daemon, create client debe stagear el secreto efímero fuera de la base."""
+    """En modo daemon, create client debe stagear el secreto efímero en el control-plane."""
     staged: list[tuple[str, int, str]] = []
     wait_calls: list[tuple[tuple, dict]] = []
 
@@ -329,12 +393,17 @@ async def test_create_client_in_daemon_mode_stages_ephemeral_secret_and_waits(cl
 
     monkeypatch.setattr(desired_state_svc, "is_daemon_reconcile_mode", lambda: True)
     monkeypatch.setattr(desired_state_svc, "set_client_desired", fake_set_client_desired)
+
+    async def fake_stage_client_creation_secret(session, username, version, password):
+        staged.append((username, version, password))
+
     monkeypatch.setattr(
         desired_state_svc,
         "stage_client_creation_secret",
-        lambda username, version, password: staged.append((username, version, password)),
+        fake_stage_client_creation_secret,
     )
     monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+    monkeypatch.setattr(client_activity_storage, "upsert_client", lambda *args, **kwargs: None)
 
     resp = await client.post(
         "/api/v1/dynsec/clients",
