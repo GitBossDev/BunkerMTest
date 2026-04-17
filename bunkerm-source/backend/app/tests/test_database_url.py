@@ -1,5 +1,6 @@
 from core.config import Settings
 from core.database_url import (
+    ensure_postgres_url,
     get_async_database_url,
     ensure_sqlite_url,
     get_host_accessible_database_url,
@@ -42,14 +43,25 @@ def test_host_accessible_database_url_rewrites_unresolved_compose_postgres_host(
 
 def test_settings_resolve_domain_database_urls():
     settings = Settings(
-        database_url="sqlite+aiosqlite:////tmp/bunkerm.db",
+        database_url="postgresql://bhm:secret@localhost:5432/bhm_shared",
         control_plane_database_url="postgresql+asyncpg://bhm:secret@localhost:5432/bhm_control",
-        history_database_url="sqlite+aiosqlite:////tmp/bunkerm-history.db",
+        history_database_url="postgresql+asyncpg://bhm:secret@localhost:5432/bhm_history",
     )
 
     assert settings.resolved_control_plane_database_url.endswith("bhm_control")
-    assert settings.resolved_history_database_url.endswith("bunkerm-history.db")
-    assert settings.resolved_reporting_database_url.endswith("bunkerm-history.db")
+    assert settings.resolved_history_database_url.endswith("bhm_history")
+    assert settings.resolved_reporting_database_url.endswith("bhm_history")
+
+
+def test_ensure_postgres_url_rejects_sqlite_for_active_runtime():
+    sqlite_url = "sqlite+aiosqlite:////tmp/bunkerm.db"
+
+    try:
+        ensure_postgres_url(sqlite_url, "DATABASE_URL")
+    except ValueError as exc:
+        assert "DATABASE_URL" in str(exc)
+    else:
+        raise AssertionError("ensure_postgres_url should reject SQLite URLs")
 
 
 def test_ensure_sqlite_url_rejects_postgres_for_sqlite_only_components():

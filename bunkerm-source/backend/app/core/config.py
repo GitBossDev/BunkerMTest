@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     broker_resource_stats_file_enabled: bool = True
     broker_observability_enabled: bool = True
     broker_observability_url: str = "http://bhm-broker-observability:9102"
-    broker_observability_timeout_seconds: float = 2.0
+    broker_observability_timeout_seconds: float = 10.0
     broker_observability_log_poll_interval_seconds: float = 2.0
     broker_observability_log_snapshot_lines: int = 5000
     api_log_file: str = "/nextjs/data/api.log"
@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     broker_reconcile_secret_ttl_seconds: float = 120.0
 
     # --- Base de datos ---
-    database_url: str = "sqlite+aiosqlite:////nextjs/data/bunkerm.db"
+    database_url: str = "postgresql://bunkerm:bunkerm@postgres:5432/bunkerm_db"
     control_plane_database_url: Optional[str] = None
     history_database_url: Optional[str] = None
     reporting_database_url: Optional[str] = None

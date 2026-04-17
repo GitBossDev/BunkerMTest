@@ -191,6 +191,11 @@ def _save_alert_config(cfg: dict) -> None:
 
 _max_connections_cache: dict = {"value": 0, "ts": 0.0}
 
+
+def invalidate_max_connections_cache() -> None:
+    _max_connections_cache["value"] = 0
+    _max_connections_cache["ts"] = 0.0
+
 def _read_max_connections() -> int:
     """Read the smallest positive max_connections from mosquitto.conf (cached 30s).
     Returns ALERT_CLIENT_MAX_DEFAULT env-var (default 10000) when no limit is configured."""

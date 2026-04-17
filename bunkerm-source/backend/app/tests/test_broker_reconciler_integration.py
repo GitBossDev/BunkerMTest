@@ -16,14 +16,14 @@ def test_broker_reconciler_applies_mosquitto_config_and_creates_backup(tmp_path,
     conf_path.write_text("listener 1900\nallow_anonymous false\n", encoding="utf-8")
     backup_dir.mkdir()
 
-    reload_calls: list[str] = []
+    restart_calls: list[str] = []
 
     runtime = LocalBrokerRuntime(
         mosquitto_conf_path=str(conf_path),
         mosquitto_conf_backup_dir=str(backup_dir),
         mosquitto_certs_dir=str(tmp_path / "certs"),
     )
-    monkeypatch.setattr(runtime, "signal_mosquitto_reload", lambda: reload_calls.append("reload"))
+    monkeypatch.setattr(runtime, "signal_mosquitto_restart", lambda: restart_calls.append("restart"))
 
     reconciler = broker_reconciler.BrokerReconciler(runtime=runtime)
     result = reconciler.apply_mosquitto_config("listener 1900\nallow_anonymous true\n")
@@ -31,7 +31,7 @@ def test_broker_reconciler_applies_mosquitto_config_and_creates_backup(tmp_path,
     assert result["errors"] == []
     assert result["rollbackNote"] is None
     assert conf_path.read_text(encoding="utf-8") == "listener 1900\nallow_anonymous true\n"
-    assert reload_calls == ["reload"]
+    assert restart_calls == ["restart"]
     assert len(list(backup_dir.iterdir())) == 1
 
 
@@ -199,7 +199,14 @@ def test_broker_reconciler_applies_dynsec_config_and_signals_dynsec_restart(tmp_
                 "subscribe": False,
                 "unsubscribe": True,
             },
-            "clients": [{"username": "sensor-02", "roles": [], "groups": []}],
+            "clients": [{
+                "username": "sensor-02",
+                "password": "U2VjdXJlUGFzc3dvcmRIYXNo",
+                "salt": "U2FsdFZhbHVl",
+                "iterations": 101,
+                "roles": [],
+                "groups": [],
+            }],
             "roles": [],
             "groups": [],
         }
@@ -211,3 +218,51 @@ def test_broker_reconciler_applies_dynsec_config_and_signals_dynsec_restart(tmp_
     assert stored["defaultACLAccess"]["publishClientSend"] is False
     assert stored["clients"][0]["username"] == "sensor-02"
     assert restart_calls == ["dynsec-restart"]
+
+
+def test_broker_reconciler_rejects_invalid_dynsec_config_without_restart(tmp_path, monkeypatch):
+    """El reconciliador no debe escribir ni reiniciar el broker con un DynSec inválido."""
+    original_document = {
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+        "clients": [],
+        "roles": [],
+        "groups": [],
+    }
+    dynsec_path = tmp_path / "dynamic-security.json"
+    dynsec_path.write_text(json.dumps(original_document), encoding="utf-8")
+
+    restart_calls: list[str] = []
+    monkeypatch.setattr(dynsec_svc.settings, "dynsec_path", str(dynsec_path))
+
+    runtime = LocalBrokerRuntime(
+        mosquitto_conf_path=str(tmp_path / "mosquitto.conf"),
+        mosquitto_conf_backup_dir=str(tmp_path / "backups"),
+        mosquitto_certs_dir=str(tmp_path / "certs"),
+    )
+    monkeypatch.setattr(runtime, "signal_dynsec_reload", lambda: restart_calls.append("dynsec-restart"))
+
+    reconciler = broker_reconciler.BrokerReconciler(runtime=runtime)
+    result = reconciler.apply_dynsec_config(
+        {
+            "defaultACLAccess": {
+                "publishClientSend": False,
+                "publishClientReceive": True,
+                "subscribe": False,
+                "unsubscribe": True,
+            },
+            "clients": [{"username": "sensor-03", "roles": [], "groups": []}],
+            "roles": [],
+            "groups": [],
+        }
+    )
+
+    stored = json.loads(dynsec_path.read_text(encoding="utf-8"))
+    assert result["errors"]
+    assert "invalid dynsec config" in result["errors"][0]
+    assert stored == original_document
+    assert restart_calls == []

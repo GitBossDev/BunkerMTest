@@ -128,6 +128,133 @@ DEFAULT_CONFIG = {
     }]
 }
 
+VALID_ROLE_ACL_TYPES = {
+    "publishClientSend",
+    "publishClientReceive",
+    "subscribeLiteral",
+    "subscribePattern",
+    "unsubscribeLiteral",
+    "unsubscribePattern",
+}
+
+
+def _require_non_empty_string(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string")
+    if value != value.strip():
+        raise ValueError(f"{field_name} must not have leading/trailing whitespace")
+    return value
+
+
+def _require_non_negative_int(value: Any, field_name: str) -> int:
+    if not isinstance(value, int) or value < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer")
+    return value
+
+
+def _require_positive_int(value: Any, field_name: str) -> int:
+    if not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{field_name} must be a positive integer")
+    return value
+
+
+def _validate_client_refs(entries: Any, field_name: str, known_names: set[str], ref_key: str) -> None:
+    if not isinstance(entries, list):
+        raise ValueError(f"{field_name} must be a list")
+    seen_names: set[str] = set()
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{field_name}[{index}] must be an object")
+        ref_name = _require_non_empty_string(entry.get(ref_key), f"{field_name}[{index}].{ref_key}")
+        if ref_name not in known_names:
+            raise ValueError(f"{field_name}[{index}].{ref_key} references an undefined entity: {ref_name}")
+        if ref_name in seen_names:
+            raise ValueError(f"{field_name} contains duplicate reference: {ref_name}")
+        seen_names.add(ref_name)
+
+        priority = entry.get("priority", 0 if ref_key == "username" else 1)
+        _require_non_negative_int(priority, f"{field_name}[{index}].priority")
+
+
+def _validate_role_acls(role_name: str, acls: Any) -> None:
+    if not isinstance(acls, list):
+        raise ValueError(f"roles[{role_name}].acls must be a list")
+    seen_acl_keys: set[tuple[str, str]] = set()
+    for index, acl in enumerate(acls):
+        if not isinstance(acl, dict):
+            raise ValueError(f"roles[{role_name}].acls[{index}] must be an object")
+        acl_type = _require_non_empty_string(acl.get("acltype"), f"roles[{role_name}].acls[{index}].acltype")
+        if acl_type not in VALID_ROLE_ACL_TYPES:
+            raise ValueError(
+                f"roles[{role_name}].acls[{index}].acltype must be one of: {', '.join(sorted(VALID_ROLE_ACL_TYPES))}"
+            )
+        topic = _require_non_empty_string(acl.get("topic"), f"roles[{role_name}].acls[{index}].topic")
+        if "\x00" in topic:
+            raise ValueError(f"roles[{role_name}].acls[{index}].topic must not contain NUL characters")
+        if not isinstance(acl.get("allow"), bool):
+            raise ValueError(f"roles[{role_name}].acls[{index}].allow must be boolean")
+        priority = acl.get("priority", 0)
+        _require_non_negative_int(priority, f"roles[{role_name}].acls[{index}].priority")
+        acl_key = (acl_type, topic)
+        if acl_key in seen_acl_keys:
+            raise ValueError(f"roles[{role_name}].acls contains duplicate acl entry: {acl_type} {topic}")
+        seen_acl_keys.add(acl_key)
+
+
+def _validate_clients_groups_roles(data: Dict[str, Any]) -> None:
+    role_names: list[str] = []
+    for index, role in enumerate(data["roles"]):
+        if not isinstance(role, dict):
+            raise ValueError(f"roles[{index}] must be an object")
+        role_name = _require_non_empty_string(role.get("rolename"), f"roles[{index}].rolename")
+        if role_name in role_names:
+            raise ValueError(f"roles contains duplicate rolename: {role_name}")
+        role_names.append(role_name)
+        _validate_role_acls(role_name, role.get("acls", []))
+
+    group_names: list[str] = []
+    for index, group in enumerate(data["groups"]):
+        if not isinstance(group, dict):
+            raise ValueError(f"groups[{index}] must be an object")
+        group_name = _require_non_empty_string(group.get("groupname"), f"groups[{index}].groupname")
+        if group_name in group_names:
+            raise ValueError(f"groups contains duplicate groupname: {group_name}")
+        group_names.append(group_name)
+
+    client_names: list[str] = []
+    for index, client in enumerate(data["clients"]):
+        if not isinstance(client, dict):
+            raise ValueError(f"clients[{index}] must be an object")
+        username = _require_non_empty_string(client.get("username"), f"clients[{index}].username")
+        if username in client_names:
+            raise ValueError(f"clients contains duplicate username: {username}")
+        client_names.append(username)
+
+        if username != MOSQUITTO_ADMIN_USERNAME:
+            has_password = "password" in client
+            has_salt = "salt" in client
+            has_iterations = "iterations" in client
+            if has_password or has_salt or has_iterations:
+                if not (has_password and has_salt and has_iterations):
+                    raise ValueError(
+                        f"clients[{index}] must define password, salt and iterations together when using credential fields"
+                    )
+                _require_non_empty_string(client.get("password"), f"clients[{index}].password")
+                _require_non_empty_string(client.get("salt"), f"clients[{index}].salt")
+                _require_positive_int(client.get("iterations"), f"clients[{index}].iterations")
+
+    known_role_names = set(role_names) | {"admin"}
+    known_group_names = set(group_names)
+    known_client_names = set(client_names)
+
+    for index, client in enumerate(data["clients"]):
+        _validate_client_refs(client.get("roles", []), f"clients[{index}].roles", known_role_names, "rolename")
+        _validate_client_refs(client.get("groups", []), f"clients[{index}].groups", known_group_names, "groupname")
+
+    for index, group in enumerate(data["groups"]):
+        _validate_client_refs(group.get("roles", []), f"groups[{index}].roles", known_role_names, "rolename")
+        _validate_client_refs(group.get("clients", []), f"groups[{index}].clients", known_client_names, "username")
+
 
 async def get_api_key(api_key_header: str = Security(api_key_header)):
     if api_key_header != _get_current_api_key():
@@ -193,6 +320,8 @@ def validate_dynsec_json(data: Dict[str, Any]) -> Dict[str, Any]:
     for field in required_acl_fields:
         if field not in data["defaultACLAccess"]:
             raise ValueError(f"Missing required field in defaultACLAccess: {field}")
+        if not isinstance(data["defaultACLAccess"][field], bool):
+            raise ValueError(f"defaultACLAccess.{field} must be boolean")
     
     # Validate that "clients", "groups", and "roles" are lists
     if not isinstance(data["clients"], list):
@@ -202,6 +331,8 @@ def validate_dynsec_json(data: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(data["roles"], list):
         raise ValueError("'roles' must be a list")
     
+    _validate_clients_groups_roles(data)
+
     # For files exported by our system, we don't require admin user and role to be present
     # They will be added back during the merge process
     
@@ -225,7 +356,9 @@ def merge_dynsec_configs(imported_config: Dict[str, Any]) -> Dict[str, Any]:
     # --- Admin user: prefer the live file so password hash is always current ---
     live_admin_user = None
     try:
-        live_data = read_dynsec_json()
+        from services import broker_observability_client
+
+        live_data = broker_observability_client.fetch_broker_dynsec_sync().get("config") or read_dynsec_json()
         for c in live_data.get("clients", []):
             if c.get("username") == MOSQUITTO_ADMIN_USERNAME:
                 live_admin_user = c
@@ -268,9 +401,18 @@ def create_backup() -> str:
             shutil.copy2(DYNSEC_JSON_PATH, backup_path)
             logger.info(f"Created backup of dynamic security JSON at {backup_path}")
             return backup_path
-        else:
-            logger.warning(f"Dynamic security JSON file not found at {DYNSEC_JSON_PATH}")
-            return ""
+
+        from services import broker_observability_client
+
+        observed_config = broker_observability_client.fetch_broker_dynsec_sync().get("config")
+        if observed_config:
+            with open(backup_path, "w", encoding="utf-8") as handle:
+                json.dump(observed_config, handle, indent=4)
+            logger.info(f"Created backup of observed dynamic security JSON at {backup_path}")
+            return backup_path
+
+        logger.warning(f"Dynamic security JSON file not found at {DYNSEC_JSON_PATH}")
+        return ""
     except Exception as e:
         logger.error(f"Error creating backup: {str(e)}")
         return ""

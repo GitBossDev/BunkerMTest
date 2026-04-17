@@ -148,6 +148,16 @@ def _signal_mosquitto_reload() -> None:
         logger.warning(f"Could not write mosquitto reload signal: {e}")
 
 
+def _signal_mosquitto_restart() -> None:
+    """Write the restart trigger file so the mosquitto entrypoint fully restarts the broker."""
+    try:
+        with open("/var/lib/mosquitto/.restart", "w") as _f:
+            _f.write("")
+        logger.info("Restart signal written for mosquitto standalone container")
+    except Exception as e:
+        logger.warning(f"Could not write mosquitto restart signal: {e}")
+
+
 def parse_mosquitto_conf() -> Dict[str, Any]:
     """
     Parse the mosquitto.conf file into a dictionary.

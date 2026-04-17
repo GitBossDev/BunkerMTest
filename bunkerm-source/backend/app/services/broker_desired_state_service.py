@@ -9,10 +9,12 @@ import hashlib
 import copy
 import re
 import time
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List
 
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config.mosquitto_config import (
@@ -24,7 +26,7 @@ from config.mosquitto_config import (
 from config.dynsec_config import DEFAULT_CONFIG as DEFAULT_DYNSEC_CONFIG, validate_dynsec_json
 from core.config import settings
 from core.database import AsyncSessionLocal
-from models.orm import BrokerDesiredState, BrokerDesiredStateAudit
+from models.orm import BrokerDesiredState, BrokerDesiredStateAudit, BrokerReconcileSecret
 from services import broker_observability_client
 from services import broker_reconciler as broker_reconciler_svc
 from services import dynsec_service
@@ -49,11 +51,17 @@ _MOSQUITTO_CONF_PATH: str = settings.mosquitto_conf_path
 _BACKUP_DIR: str = settings.mosquitto_conf_backup_dir
 _MOSQUITTO_PASSWD_PATH: str = settings.mosquitto_passwd_path
 _CERTS_DIR: str = settings.mosquitto_certs_dir
-_BROKER_RECONCILE_SECRET_DIR: str = settings.broker_reconcile_secret_dir
 _ALLOWED_CERT_EXTENSIONS = {".pem", ".crt", ".cer", ".key"}
 _MOSQUITTO_PASSWD_LINE_PATTERN = re.compile(r"^[^:]+:\$\d+\$[^:]+$")
 _broker_reconciler = broker_reconciler_svc.BrokerReconciler()
 _DESIRED_AUDIT_EVENT_KIND = "desired_change"
+_OBSERVED_DYNSEC_CACHE_LOCK = threading.Lock()
+_OBSERVED_DYNSEC_CACHE: Dict[str, Any] = {
+    "expires_at": 0.0,
+    "payload": None,
+    "index": None,
+    "capability_map": None,
+}
 
 
 def _utcnow() -> datetime:
@@ -104,6 +112,199 @@ def normalize_dynsec_config_payload(payload: Dict[str, Any] | None) -> Dict[str,
         raise ValueError("DynSec desired state requires a config object")
     validated = validate_dynsec_json(copy.deepcopy(payload))
     return json.loads(json.dumps(validated, sort_keys=True))
+
+
+def normalize_observed_dynsec_snapshot(payload: Dict[str, Any] | None) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return copy.deepcopy(DEFAULT_DYNSEC_CONFIG)
+
+    clients = payload.get("clients")
+    groups = payload.get("groups")
+    roles = payload.get("roles")
+
+    return {
+        "defaultACLAccess": normalize_default_acl(payload.get("defaultACLAccess", {})),
+        "clients": clients if isinstance(clients, list) else [],
+        "groups": groups if isinstance(groups, list) else [],
+        "roles": roles if isinstance(roles, list) else [],
+    }
+
+
+def _normalize_role_name_list(raw_roles: List[Any]) -> List[str]:
+    role_names: List[str] = []
+    for role in raw_roles or []:
+        if isinstance(role, dict):
+            role_name = role.get("rolename") or role.get("name")
+        else:
+            role_name = role
+        if isinstance(role_name, str) and role_name:
+            role_names.append(role_name)
+    role_names.sort()
+    return role_names
+
+
+def _normalize_group_name_list(raw_groups: List[Any]) -> List[str]:
+    group_names: List[str] = []
+    for group in raw_groups or []:
+        if isinstance(group, dict):
+            group_name = group.get("groupname") or group.get("name")
+        else:
+            group_name = group
+        if isinstance(group_name, str) and group_name:
+            group_names.append(group_name)
+    group_names.sort()
+    return group_names
+
+
+def _entry_name_set(items: List[Any], key: str) -> set[str]:
+    names: set[str] = set()
+    for item in items or []:
+        if isinstance(item, dict):
+            name = item.get(key)
+        else:
+            name = item
+        if isinstance(name, str) and name:
+            names.add(name)
+    return names
+
+
+def _build_capability_map_from_snapshot(data: Dict[str, Any]) -> Dict[str, Dict[str, bool]]:
+    default_acl = data.get("defaultACLAccess", {})
+    default_publish = bool(default_acl.get("publishClientSend", True))
+    default_subscribe = bool(default_acl.get("subscribe", True))
+
+    role_caps: Dict[str, Dict[str, bool]] = {}
+    for role in data.get("roles", []):
+        if not isinstance(role, dict):
+            continue
+        role_name = role.get("rolename")
+        if not isinstance(role_name, str) or not role_name:
+            continue
+        caps = {"publish": False, "subscribe": False}
+        for acl in role.get("acls", []):
+            if not isinstance(acl, dict):
+                continue
+            acl_type = acl.get("acltype") or acl.get("aclType")
+            allow = acl.get("allow")
+            if allow is None:
+                allow = str(acl.get("permission", "")).lower() == "allow"
+            if not allow:
+                continue
+            if acl_type == "publishClientSend":
+                caps["publish"] = True
+            if acl_type in ("subscribe", "subscribeLiteral", "subscribePattern"):
+                caps["subscribe"] = True
+        role_caps[role_name] = caps
+
+    group_roles: Dict[str, set[str]] = {}
+    group_clients: Dict[str, set[str]] = {}
+    for group in data.get("groups", []):
+        if not isinstance(group, dict):
+            continue
+        group_name = group.get("groupname")
+        if not isinstance(group_name, str) or not group_name:
+            continue
+        group_roles[group_name] = _entry_name_set(group.get("roles", []), "rolename")
+        group_clients[group_name] = _entry_name_set(group.get("clients", []), "username")
+
+    capability_map: Dict[str, Dict[str, bool]] = {}
+    for client in data.get("clients", []):
+        if not isinstance(client, dict):
+            continue
+        username = client.get("username")
+        if not isinstance(username, str) or not username:
+            continue
+
+        direct_roles = _entry_name_set(client.get("roles", []), "rolename")
+        client_groups = _entry_name_set(client.get("groups", []), "groupname")
+        for group_name, members in group_clients.items():
+            if username in members:
+                client_groups.add(group_name)
+
+        effective_roles = set(direct_roles)
+        for group_name in client_groups:
+            effective_roles.update(group_roles.get(group_name, set()))
+
+        can_publish = default_publish
+        can_subscribe = default_subscribe
+        for role_name in effective_roles:
+            caps = role_caps.get(role_name)
+            if not caps:
+                continue
+            can_publish = can_publish or caps["publish"]
+            can_subscribe = can_subscribe or caps["subscribe"]
+
+        capability_map[username] = {
+            "publish": can_publish,
+            "subscribe": can_subscribe,
+        }
+
+    return capability_map
+
+
+def _build_observed_dynsec_index(data: Dict[str, Any]) -> Dict[str, Any]:
+    usernames: List[str] = []
+    disabled_map: Dict[str, bool] = {}
+    client_summaries: List[Dict[str, Any]] = []
+    client_lookup: Dict[str, Dict[str, Any]] = {}
+    role_lookup: Dict[str, Dict[str, Any]] = {}
+    group_lookup: Dict[str, Dict[str, Any]] = {}
+    role_summaries: List[Dict[str, Any]] = []
+    group_summaries: List[Dict[str, Any]] = []
+
+    for role in data.get("roles", []):
+        normalized_role = normalize_role_payload(role)
+        if normalized_role is None:
+            continue
+        role_lookup[normalized_role["rolename"]] = normalized_role
+        role_summaries.append(
+            {
+                "rolename": normalized_role["rolename"],
+                "aclCount": len(normalized_role.get("acls", [])),
+            }
+        )
+
+    for group in data.get("groups", []):
+        normalized_group = normalize_group_payload(group)
+        if normalized_group is None:
+            continue
+        group_lookup[normalized_group["groupname"]] = normalized_group
+        group_summaries.append(
+            {
+                "groupname": normalized_group["groupname"],
+                "roleCount": len(normalized_group.get("roles", [])),
+                "clientCount": len(normalized_group.get("clients", [])),
+            }
+        )
+
+    for client in data.get("clients", []):
+        normalized_client = normalize_client_payload(client)
+        if normalized_client is None:
+            continue
+        username = normalized_client["username"]
+        usernames.append(username)
+        disabled_map[username] = normalized_client["disabled"]
+        client_lookup[username] = normalized_client
+        client_summaries.append(
+            {
+                "username": username,
+                "disabled": normalized_client["disabled"],
+                "roles": _normalize_role_name_list(normalized_client.get("roles", [])),
+                "groups": _normalize_group_name_list(normalized_client.get("groups", [])),
+            }
+        )
+
+    return {
+        "default_acl": normalize_default_acl(data.get("defaultACLAccess", {})),
+        "usernames": usernames,
+        "disabled_map": disabled_map,
+        "client_summaries": client_summaries,
+        "client_lookup": client_lookup,
+        "role_lookup": role_lookup,
+        "group_lookup": group_lookup,
+        "role_summaries": role_summaries,
+        "group_summaries": group_summaries,
+    }
 
 
 def normalize_bridge_bundle_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -208,6 +409,7 @@ async def reconcile_or_wait(
         return await reconcile_action(session, *args, **kwargs)
 
     settled_state = await wait_for_scope_settlement(state.scope, state.version)
+    _prime_observed_dynsec_cache_from_state(settled_state)
     return settled_state or state
 
 
@@ -216,32 +418,15 @@ def _reconcile_secret_cipher() -> Fernet:
     return Fernet(base64.urlsafe_b64encode(hashlib.sha256(key_material).digest()))
 
 
-def _client_creation_secret_path(username: str, version: int) -> str:
-    secret_key = hashlib.sha256(f"{_client_scope(username)}:{version}".encode("utf-8")).hexdigest()
-    return os.path.join(_BROKER_RECONCILE_SECRET_DIR, f"{secret_key}.token")
+def _client_creation_secret_key(username: str, version: int) -> str:
+    return hashlib.sha256(f"{_client_scope(username)}:{version}".encode("utf-8")).hexdigest()
 
 
-def _safe_remove_file(path: str) -> None:
+def _decode_staged_client_creation_secret_payload(encrypted_payload: str) -> Dict[str, Any] | None:
     try:
-        os.remove(path)
-    except FileNotFoundError:
-        return
-
-
-def _load_staged_client_creation_secret_payload(secret_path: str) -> Dict[str, Any] | None:
-    try:
-        with open(secret_path, "rb") as handle:
-            encrypted_payload = handle.read()
-    except FileNotFoundError:
-        return None
-    except OSError:
-        return None
-
-    try:
-        decrypted_payload = _reconcile_secret_cipher().decrypt(encrypted_payload)
+        decrypted_payload = _reconcile_secret_cipher().decrypt(encrypted_payload.encode("utf-8"))
         payload = json.loads(decrypted_payload.decode("utf-8"))
     except (InvalidToken, json.JSONDecodeError, UnicodeDecodeError):
-        _safe_remove_file(secret_path)
         return None
 
     expires_at_raw = payload.get("expiresAt")
@@ -251,78 +436,90 @@ def _load_staged_client_creation_secret_payload(secret_path: str) -> Dict[str, A
         expires_at = None
 
     if expires_at is None:
-        _safe_remove_file(secret_path)
         return None
 
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
 
     if expires_at <= datetime.now(timezone.utc):
-        _safe_remove_file(secret_path)
         return None
 
     return payload
 
 
-def cleanup_staged_client_creation_secrets() -> None:
-    if not os.path.isdir(_BROKER_RECONCILE_SECRET_DIR):
-        return
-
-    for entry_name in os.listdir(_BROKER_RECONCILE_SECRET_DIR):
-        if not entry_name.endswith(".token"):
-            continue
-        _load_staged_client_creation_secret_payload(os.path.join(_BROKER_RECONCILE_SECRET_DIR, entry_name))
+async def cleanup_staged_client_creation_secrets(session: AsyncSession) -> None:
+    await session.execute(
+        delete(BrokerReconcileSecret).where(BrokerReconcileSecret.expires_at <= _utcnow())
+    )
 
 
-def stage_client_creation_secret(username: str, version: int, creation_password: str) -> None:
+async def stage_client_creation_secret(
+    session: AsyncSession,
+    username: str,
+    version: int,
+    creation_password: str,
+) -> None:
     if not creation_password:
         raise ValueError("Client creation password is required")
 
-    os.makedirs(_BROKER_RECONCILE_SECRET_DIR, exist_ok=True)
-    cleanup_staged_client_creation_secrets()
+    await cleanup_staged_client_creation_secrets(session)
 
-    expires_at = datetime.now(timezone.utc) + timedelta(
+    expires_at_utc = datetime.now(timezone.utc) + timedelta(
         seconds=max(settings.broker_reconcile_secret_ttl_seconds, 5.0)
     )
     payload = {
         "username": username,
         "version": version,
         "password": creation_password,
-        "expiresAt": expires_at.isoformat(),
+        "expiresAt": expires_at_utc.isoformat(),
     }
-    encrypted_payload = _reconcile_secret_cipher().encrypt(_dump_json(payload).encode("utf-8"))
-    secret_path = _client_creation_secret_path(username, version)
-    temp_path = f"{secret_path}.tmp"
+    encrypted_payload = _reconcile_secret_cipher().encrypt(_dump_json(payload).encode("utf-8")).decode("utf-8")
+    secret_key = _client_creation_secret_key(username, version)
+    secret = await session.get(BrokerReconcileSecret, secret_key)
+    expires_at = expires_at_utc.astimezone(timezone.utc).replace(tzinfo=None)
+    if secret is None:
+        secret = BrokerReconcileSecret(
+            secret_key=secret_key,
+            scope=_client_scope(username),
+            version=version,
+            encrypted_payload=encrypted_payload,
+            expires_at=expires_at,
+            created_at=_utcnow(),
+        )
+        session.add(secret)
+    else:
+        secret.scope = _client_scope(username)
+        secret.version = version
+        secret.encrypted_payload = encrypted_payload
+        secret.expires_at = expires_at
+        secret.created_at = _utcnow()
 
-    with open(temp_path, "wb") as handle:
-        handle.write(encrypted_payload)
-
-    try:
-        os.chmod(temp_path, 0o600)
-    except OSError:
-        pass
-
-    os.replace(temp_path, secret_path)
-
-    try:
-        os.chmod(secret_path, 0o600)
-    except OSError:
-        pass
+    await session.commit()
 
 
-def get_staged_client_creation_secret(username: str, version: int) -> str | None:
-    cleanup_staged_client_creation_secrets()
-    payload = _load_staged_client_creation_secret_payload(_client_creation_secret_path(username, version))
+async def get_staged_client_creation_secret(session: AsyncSession, username: str, version: int) -> str | None:
+    await cleanup_staged_client_creation_secrets(session)
+    secret = await session.get(BrokerReconcileSecret, _client_creation_secret_key(username, version))
+    if secret is None:
+        return None
+
+    payload = _decode_staged_client_creation_secret_payload(secret.encrypted_payload)
     if payload is None:
+        await session.delete(secret)
         return None
     if payload.get("username") != username or int(payload.get("version", -1)) != version:
+        await session.delete(secret)
         return None
     password = payload.get("password")
     return password if isinstance(password, str) and password else None
 
 
-def clear_staged_client_creation_secret(username: str, version: int) -> None:
-    _safe_remove_file(_client_creation_secret_path(username, version))
+async def clear_staged_client_creation_secret(session: AsyncSession, username: str, version: int) -> None:
+    await session.execute(
+        delete(BrokerReconcileSecret).where(
+            BrokerReconcileSecret.secret_key == _client_creation_secret_key(username, version)
+        )
+    )
 
 
 def _client_scope(username: str) -> str:
@@ -473,6 +670,21 @@ def _normalize_mosquitto_observed_payload(parsed: Dict[str, Any], content: str) 
 
 
 def get_observed_mosquitto_config() -> Dict[str, Any]:
+    if is_daemon_reconcile_mode():
+        try:
+            payload = broker_observability_client.fetch_broker_mosquitto_config_sync()
+            return normalize_mosquitto_config_payload(
+                {
+                    "config": payload.get("config", {}),
+                    "listeners": payload.get("listeners", []),
+                    "max_inflight_messages": payload.get("max_inflight_messages"),
+                    "max_queued_messages": payload.get("max_queued_messages"),
+                    "tls": payload.get("tls"),
+                }
+            )
+        except Exception:
+            pass
+
     if os.path.isfile(_MOSQUITTO_CONF_PATH):
         content = _read_mosquitto_content()
         parsed = parse_mosquitto_conf() if content else {"config": {}, "listeners": []}
@@ -544,7 +756,7 @@ async def reconcile_broker_reload_signal(session: AsyncSession) -> BrokerDesired
         raise ValueError("No desired state found for broker reload signal")
 
     desired = normalize_broker_reload_payload(_load_json(state.desired_payload_json))
-    errors = get_broker_reconciler().signal_mosquitto_reload()
+    errors = get_broker_reconciler().signal_mosquitto_restart()
     now = _utcnow()
     observed = None if errors else {**desired, "signaled": True}
 
@@ -1007,15 +1219,163 @@ async def get_mosquitto_passwd_status(session: AsyncSession) -> Dict[str, Any]:
 
 def get_observed_dynsec_config() -> Dict[str, Any]:
     if os.path.isfile(settings.dynsec_path):
-        return normalize_dynsec_config_payload(dynsec_service.read_dynsec())
+        return normalize_observed_dynsec_snapshot(dynsec_service.read_dynsec())
 
     try:
-        return normalize_dynsec_config_payload(dynsec_service.read_dynsec())
+        return normalize_observed_dynsec_snapshot(dynsec_service.read_dynsec())
     except Exception:
         pass
 
     payload = broker_observability_client.fetch_broker_dynsec_sync()
-    return normalize_dynsec_config_payload(payload.get("config") or DEFAULT_DYNSEC_CONFIG)
+    return normalize_observed_dynsec_snapshot(payload.get("config") or DEFAULT_DYNSEC_CONFIG)
+
+
+def invalidate_observed_dynsec_cache() -> None:
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        _OBSERVED_DYNSEC_CACHE["expires_at"] = 0.0
+        _OBSERVED_DYNSEC_CACHE["payload"] = None
+        _OBSERVED_DYNSEC_CACHE["index"] = None
+        _OBSERVED_DYNSEC_CACHE["capability_map"] = None
+
+
+def _store_observed_dynsec_cache(payload: Dict[str, Any], ttl_seconds: float = 300.0) -> None:
+    normalized_payload = normalize_observed_dynsec_snapshot(payload)
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        _OBSERVED_DYNSEC_CACHE["payload"] = normalized_payload
+        _OBSERVED_DYNSEC_CACHE["index"] = _build_observed_dynsec_index(normalized_payload)
+        _OBSERVED_DYNSEC_CACHE["capability_map"] = None
+        _OBSERVED_DYNSEC_CACHE["expires_at"] = time.monotonic() + max(ttl_seconds, 0.0)
+
+
+def _upsert_named_entry(entries: List[Dict[str, Any]], key: str, entry: Dict[str, Any], deleted: bool = False) -> List[Dict[str, Any]]:
+    entry_name = entry.get(key)
+    if not isinstance(entry_name, str) or not entry_name:
+        return entries
+
+    filtered = [item for item in entries if item.get(key) != entry_name]
+    if not deleted:
+        filtered.append(entry)
+    return filtered
+
+
+def _prime_observed_dynsec_cache_from_state(state: BrokerDesiredState | None) -> None:
+    if state is None or state.reconcile_status == "error" or not state.desired_payload_json:
+        invalidate_observed_dynsec_cache()
+        return
+
+    desired_json = state.desired_payload_json
+    desired_payload = _load_json(desired_json)
+
+    if state.scope == DYNSEC_CONFIG_SCOPE and isinstance(desired_payload, dict):
+        _store_observed_dynsec_cache(desired_payload)
+        return
+
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        cached_payload = _OBSERVED_DYNSEC_CACHE.get("payload")
+
+    if not isinstance(cached_payload, dict):
+        invalidate_observed_dynsec_cache()
+        return
+
+    updated_payload = copy.deepcopy(cached_payload)
+
+    if state.scope == DEFAULT_ACL_SCOPE:
+        updated_payload["defaultACLAccess"] = normalize_default_acl(_load_payload(desired_json))
+    elif state.scope.startswith(CLIENT_SCOPE_PREFIX) and isinstance(desired_payload, dict):
+        client_payload = normalize_client_payload(desired_payload)
+        if client_payload is None:
+            invalidate_observed_dynsec_cache()
+            return
+        updated_payload["clients"] = _upsert_named_entry(
+            updated_payload.get("clients", []),
+            "username",
+            client_payload,
+            deleted=bool(client_payload.get("deleted", False)),
+        )
+    elif state.scope.startswith(ROLE_SCOPE_PREFIX) and isinstance(desired_payload, dict):
+        role_payload = normalize_role_payload(desired_payload)
+        if role_payload is None:
+            invalidate_observed_dynsec_cache()
+            return
+        updated_payload["roles"] = _upsert_named_entry(
+            updated_payload.get("roles", []),
+            "rolename",
+            role_payload,
+            deleted=bool(role_payload.get("deleted", False)),
+        )
+    elif state.scope.startswith(GROUP_SCOPE_PREFIX) and isinstance(desired_payload, dict):
+        group_payload = normalize_group_payload(desired_payload)
+        if group_payload is None:
+            invalidate_observed_dynsec_cache()
+            return
+        updated_payload["groups"] = _upsert_named_entry(
+            updated_payload.get("groups", []),
+            "groupname",
+            group_payload,
+            deleted=bool(group_payload.get("deleted", False)),
+        )
+    else:
+        invalidate_observed_dynsec_cache()
+        return
+
+    _store_observed_dynsec_cache(updated_payload)
+
+
+def get_cached_observed_dynsec_config(ttl_seconds: float = 300.0) -> Dict[str, Any]:
+    if os.path.isfile(settings.dynsec_path):
+        return get_observed_dynsec_config()
+
+    now = time.monotonic()
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        payload = _OBSERVED_DYNSEC_CACHE.get("payload")
+        expires_at = float(_OBSERVED_DYNSEC_CACHE.get("expires_at") or 0.0)
+        if payload is not None and now < expires_at:
+            return payload
+
+    payload = get_observed_dynsec_config()
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        _OBSERVED_DYNSEC_CACHE["payload"] = payload
+        _OBSERVED_DYNSEC_CACHE["index"] = _build_observed_dynsec_index(payload)
+        _OBSERVED_DYNSEC_CACHE["capability_map"] = None
+        _OBSERVED_DYNSEC_CACHE["expires_at"] = now + max(ttl_seconds, 0.0)
+    return payload
+
+
+def get_cached_observed_dynsec_index(ttl_seconds: float = 300.0) -> Dict[str, Any]:
+    if os.path.isfile(settings.dynsec_path):
+        return _build_observed_dynsec_index(get_observed_dynsec_config())
+
+    now = time.monotonic()
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        payload = _OBSERVED_DYNSEC_CACHE.get("payload")
+        index = _OBSERVED_DYNSEC_CACHE.get("index")
+        expires_at = float(_OBSERVED_DYNSEC_CACHE.get("expires_at") or 0.0)
+        if payload is not None and index is not None and now < expires_at:
+            return index
+
+    payload = get_cached_observed_dynsec_config(ttl_seconds=ttl_seconds)
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        cached_index = _OBSERVED_DYNSEC_CACHE.get("index")
+        if cached_index is not None:
+            return cached_index
+
+    return _build_observed_dynsec_index(payload)
+
+
+def get_cached_observed_dynsec_capability_map(ttl_seconds: float = 300.0) -> Dict[str, Dict[str, bool]]:
+    if os.path.isfile(settings.dynsec_path):
+        return _build_capability_map_from_snapshot(get_observed_dynsec_config())
+
+    payload = get_cached_observed_dynsec_config(ttl_seconds=ttl_seconds)
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        capability_map = _OBSERVED_DYNSEC_CACHE.get("capability_map")
+        if capability_map is not None:
+            return capability_map
+
+    capability_map = _build_capability_map_from_snapshot(payload)
+    with _OBSERVED_DYNSEC_CACHE_LOCK:
+        _OBSERVED_DYNSEC_CACHE["capability_map"] = capability_map
+    return capability_map
 
 
 async def get_dynsec_config_state(session: AsyncSession) -> BrokerDesiredState | None:
@@ -1081,7 +1441,9 @@ async def reconcile_dynsec_config(session: AsyncSession) -> BrokerDesiredState:
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
-    return await _commit_desired_state_change(session, state)
+    committed_state = await _commit_desired_state_change(session, state)
+    _prime_observed_dynsec_cache_from_state(committed_state)
+    return committed_state
 
 
 async def get_dynsec_config_status(session: AsyncSession) -> Dict[str, Any]:
@@ -1143,7 +1505,7 @@ def _normalize_acl_entries(raw_acls: List[Any]) -> List[Dict[str, Any]]:
         allow = acl.get("allow")
         if allow is None:
             allow = str(acl.get("permission", "")).lower() == "allow"
-        priority = acl.get("priority", -1)
+        priority = acl.get("priority", 0)
         entries.append(
             {
                 "acltype": acl_type,
@@ -1249,26 +1611,19 @@ def normalize_group_payload(payload: Dict[str, Any] | None) -> Dict[str, Any] | 
 
 
 def get_observed_client(username: str) -> Dict[str, Any] | None:
-    data = dynsec_service.read_dynsec()
-    client = dynsec_service.find_client(data, username)
-    return normalize_client_payload(client) if client else None
+    return get_cached_observed_dynsec_index().get("client_lookup", {}).get(username)
 
 
 def get_observed_role(role_name: str) -> Dict[str, Any] | None:
-    data = dynsec_service.read_dynsec()
-    role = dynsec_service.find_role(data, role_name)
-    return normalize_role_payload(role) if role else None
+    return get_cached_observed_dynsec_index().get("role_lookup", {}).get(role_name)
 
 
 def get_observed_group(group_name: str) -> Dict[str, Any] | None:
-    data = dynsec_service.read_dynsec()
-    group = dynsec_service.find_group(data, group_name)
-    return normalize_group_payload(group) if group else None
+    return get_cached_observed_dynsec_index().get("group_lookup", {}).get(group_name)
 
 
 def get_observed_default_acl() -> Dict[str, bool]:
-    data = dynsec_service.read_dynsec()
-    return normalize_default_acl(data.get("defaultACLAccess", {}))
+    return get_cached_observed_dynsec_index().get("default_acl", normalize_default_acl({}))
 
 
 async def get_default_acl_state(session: AsyncSession) -> BrokerDesiredState | None:
@@ -1331,6 +1686,7 @@ async def reconcile_default_acl(session: AsyncSession) -> BrokerDesiredState:
 
     await session.commit()
     await session.refresh(state)
+    _prime_observed_dynsec_cache_from_state(state)
     return state
 
 
@@ -1429,7 +1785,7 @@ async def reconcile_client(
 
     staged_creation_password = creation_password
     if staged_creation_password is None and not desired.get("deleted", False):
-        staged_creation_password = get_staged_client_creation_secret(username, state.version)
+        staged_creation_password = await get_staged_client_creation_secret(session, username, state.version)
 
     errors = get_broker_reconciler().apply_client_projection(
         username,
@@ -1454,10 +1810,11 @@ async def reconcile_client(
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
         if creation_password is None and staged_creation_password is not None:
-            clear_staged_client_creation_secret(username, state.version)
+            await clear_staged_client_creation_secret(session, username, state.version)
 
     await session.commit()
     await session.refresh(state)
+    _prime_observed_dynsec_cache_from_state(state)
     return state
 
 
@@ -1571,6 +1928,7 @@ async def reconcile_role(session: AsyncSession, role_name: str) -> BrokerDesired
 
     await session.commit()
     await session.refresh(state)
+    _prime_observed_dynsec_cache_from_state(state)
     return state
 
 
@@ -1687,6 +2045,7 @@ async def reconcile_group(
 
     await session.commit()
     await session.refresh(state)
+    _prime_observed_dynsec_cache_from_state(state)
     return state
 
 

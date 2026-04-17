@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { RolesTable } from '@/components/mqtt/roles/RolesTable'
 import { dynsecApi } from '@/lib/api'
-import type { Role, ACL } from '@/types'
+import type { Role } from '@/types'
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([])
@@ -16,23 +16,8 @@ export default function RolesPage() {
   const fetchData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setRefreshing(true)
     try {
-      const res = await dynsecApi.getRoles()
-      const rolesList = res as Role[]
-
-      // Fetch each role's details in parallel to get ACL counts
-      const detailResults = await Promise.allSettled(
-        rolesList.map((r) => dynsecApi.getRole(r.rolename))
-      )
-      const rolesWithAcls = rolesList.map((role, i) => {
-        const result = detailResults[i]
-        if (result.status === 'fulfilled') {
-          const d = result.value as { role?: string; acls?: ACL[] }
-          return { ...role, acls: d.acls ?? [] }
-        }
-        return role
-      })
-
-      setRoles(rolesWithAcls)
+      const res = await dynsecApi.getRoleSummaries()
+      setRoles(res.map((role) => ({ rolename: role.rolename, aclCount: role.aclCount })) as Role[])
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load roles')
     } finally {

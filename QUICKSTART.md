@@ -34,19 +34,14 @@ Unblock-File deploy.ps1
 
 ```powershell
 # Iniciar plataforma BHM en baseline Compose-first
-# Sigue funcionando sobre Podman/Docker sin Kubernetes.
-# Si no activas URLs PostgreSQL en .env.dev, PostgreSQL no es obligatorio.
+# Sigue funcionando sobre Podman/Docker sin Kubernetes y PostgreSQL
+# ya forma parte del baseline operativo del stack.
 .\deploy.ps1 -Action start
-
-# Opcional: forzar también pgAdmin además de PostgreSQL
-.\deploy.ps1 -Action start -WithTools
 ```
 
-Si `.env.dev` define `DATABASE_URL`, `CONTROL_PLANE_DATABASE_URL`, `HISTORY_DATABASE_URL` o
-`REPORTING_DATABASE_URL` con un esquema `postgresql://...`, `deploy.ps1 -Action start` activa
-automáticamente el perfil `tools` para levantar `postgres` antes del runtime. En ese modo, el
-smoke test también verifica conectividad real a PostgreSQL desde `bunkerm-platform` y
-`bhm-reconciler`.
+`deploy.ps1 -Action start` levanta ahora el baseline Compose-first completo, incluyendo
+`postgres`, y el smoke test verifica conectividad real a PostgreSQL desde `bunkerm-platform`
+y `bhm-reconciler`.
 
 ### Paso 4: Verificar estado
 
@@ -58,7 +53,13 @@ smoke test también verifica conectividad real a PostgreSQL desde `bunkerm-platf
 
 - **Web UI**: http://localhost:2000
 - **MQTT broker**: `localhost:1900`
-- **pgAdmin** (cuando se active el perfil `tools`): http://localhost:5050
+- **PostgreSQL**: `localhost:5432`
+
+Si necesitas `pgAdmin`, levántalo manualmente fuera del flujo normal de deploy:
+
+```powershell
+docker compose --env-file .env.dev -f docker-compose.dev.yml --profile tools up -d pgadmin
+```
 
 #### Credenciales de la UI web
 

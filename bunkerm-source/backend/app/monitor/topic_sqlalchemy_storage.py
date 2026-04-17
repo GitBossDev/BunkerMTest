@@ -7,6 +7,7 @@ from typing import Any, Dict
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from core.database_url import is_sqlite_url
 from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_utc, normalize_datetime, session_scope, utc_now
 from models.orm import TopicMessageEvent, TopicPublishBucket, TopicRegistry, TopicSubscribeBucket
 from monitor.data_storage import PERIODS
@@ -28,15 +29,11 @@ class SQLAlchemyTopicHistoryStorage:
         self._retention_days = retention_days
         self._lock = threading.Lock()
         self._engine = create_sync_engine_for_url(database_url)
-        ensure_tables(
-            self._engine,
-            [
-                TopicRegistry.__table__,
-                TopicPublishBucket.__table__,
-                TopicSubscribeBucket.__table__,
-                TopicMessageEvent.__table__,
-            ],
-        )
+        if is_sqlite_url(database_url):
+            ensure_tables(
+                self._engine,
+                [TopicRegistry.__table__, TopicPublishBucket.__table__, TopicSubscribeBucket.__table__,TopicMessageEvent.__table__],
+            )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
     def record_publish(

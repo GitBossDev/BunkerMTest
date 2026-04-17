@@ -3,6 +3,8 @@ import type {
   MqttClient,
   Role,
   Group,
+  RoleSummary,
+  GroupSummary,
   MqttTopic,
   ClientActivitySummary,
   ClientCreate,
@@ -54,6 +56,35 @@ function parseRoles(res: unknown): Role[] {
 function parseGroups(res: unknown): Group[] {
   const raw = (res as Record<string, unknown>)?.groups ?? res
   return parseNameList(raw).map((groupname) => ({ groupname }))
+}
+
+function parseRoleSummaries(res: unknown): RoleSummary[] {
+  const summaries = (res as Record<string, unknown>)?.summaries
+  if (!Array.isArray(summaries)) {
+    return parseRoles(res).map((role) => ({ rolename: role.rolename, aclCount: 0 }))
+  }
+  return summaries
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      rolename: String(item.rolename ?? ''),
+      aclCount: Number(item.aclCount ?? 0),
+    }))
+    .filter((item) => item.rolename)
+}
+
+function parseGroupSummaries(res: unknown): GroupSummary[] {
+  const summaries = (res as Record<string, unknown>)?.summaries
+  if (!Array.isArray(summaries)) {
+    return parseGroups(res).map((group) => ({ groupname: group.groupname, roleCount: 0, clientCount: 0 }))
+  }
+  return summaries
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      groupname: String(item.groupname ?? ''),
+      roleCount: Number(item.roleCount ?? 0),
+      clientCount: Number(item.clientCount ?? 0),
+    }))
+    .filter((item) => item.groupname)
 }
 
 // All API calls go through the Next.js server-side proxy at /api/proxy/<service>.
@@ -141,6 +172,12 @@ export const dynsecApi = {
     request<{ map: Record<string, boolean>; usernames: string[] }>(
       buildUrl(DYNSEC_API_URL, '/clients/disabled-map')
     ),
+  getAllClientUsernames: async () => {
+    const res = await request<{ map: Record<string, boolean>; usernames: string[] }>(
+      buildUrl(DYNSEC_API_URL, '/clients/disabled-map')
+    )
+    return res.usernames ?? []
+  },
   createClient: (data: ClientCreate) =>
     request(buildUrl(DYNSEC_API_URL, '/clients'), {
       method: 'POST',
@@ -178,6 +215,7 @@ export const dynsecApi = {
 
   // Roles
   getRoles: () => request(buildUrl(DYNSEC_API_URL, '/roles')).then(parseRoles),
+  getRoleSummaries: () => request(buildUrl(DYNSEC_API_URL, '/roles')).then(parseRoleSummaries),
   getRole: (rolename: string) => request(buildUrl(DYNSEC_API_URL, `/roles/${rolename}`)),
   createRole: (data: { name: string }) =>
     request(buildUrl(DYNSEC_API_URL, '/roles'), {
@@ -214,6 +252,7 @@ export const dynsecApi = {
 
   // Groups
   getGroups: () => request(buildUrl(DYNSEC_API_URL, '/groups')).then(parseGroups),
+  getGroupSummaries: () => request(buildUrl(DYNSEC_API_URL, '/groups')).then(parseGroupSummaries),
   getGroup: (groupname: string) => request(buildUrl(DYNSEC_API_URL, `/groups/${groupname}`)),
   createGroup: (data: { name: string }) =>
     request(buildUrl(DYNSEC_API_URL, '/groups'), {

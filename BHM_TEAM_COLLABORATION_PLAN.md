@@ -198,7 +198,7 @@ Regla:
 
 - [x] La persistencia definitiva de las features históricas priorizadas en PostgreSQL ya no bloquea a B en el baseline actual.
 - [ ] Solución final de whitelist si requiere tocar configuración efectiva del broker.
-- [ ] Contrato final de delivery para alertas por correo, redes o webhooks si implica workers, credenciales o servicios auxiliares.
+- [x] Contrato final de delivery para alertas por correo, redes o webhooks si implica workers, credenciales o servicios auxiliares. Queda fijado en `docs/BHM_ALERT_DELIVERY_CONTRACT.md`, con payload canónico y separación `bhm-api` -> `bhm-alert-delivery`.
 - [ ] Definición final de la fuente de observabilidad para el histórico de logs de broker y clientes dentro de Fase 5.
 
 ---

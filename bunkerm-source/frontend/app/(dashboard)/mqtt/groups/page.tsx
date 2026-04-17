@@ -6,45 +6,24 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { GroupsTable } from '@/components/mqtt/groups/GroupsTable'
 import { dynsecApi } from '@/lib/api'
-import type { Group, MqttClient, Role } from '@/types'
+import type { Group } from '@/types'
 
 export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([])
-  const [clients, setClients] = useState<MqttClient[]>([])
-  const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   const fetchData = useCallback(async (showRefreshIndicator = false) => {
     if (showRefreshIndicator) setRefreshing(true)
     try {
-      const [groupsRes, clientsRes, rolesRes] = await Promise.all([
-        dynsecApi.getGroups(),
-        dynsecApi.getClients(),
-        dynsecApi.getRoles(),
-      ])
-      const groupsList = groupsRes as Group[]
-
-      // Fetch each group's details in parallel to get member and role counts
-      const detailResults = await Promise.allSettled(
-        groupsList.map((g) => dynsecApi.getGroup(g.groupname))
+      const groupsRes = await dynsecApi.getGroupSummaries()
+      setGroups(
+        groupsRes.map((group) => ({
+          groupname: group.groupname,
+          roleCount: group.roleCount,
+          clientCount: group.clientCount,
+        })) as Group[]
       )
-      const groupsWithCounts = groupsList.map((group, i) => {
-        const result = detailResults[i]
-        if (result.status === 'fulfilled') {
-          const d = result.value as { group?: { roles?: { name: string }[]; clients?: string[] } }
-          return {
-            ...group,
-            roles: (d.group?.roles ?? []).map((r) => ({ rolename: r.name })),
-            clients: (d.group?.clients ?? []).map((c) => ({ username: c })),
-          }
-        }
-        return group
-      })
-
-      setGroups(groupsWithCounts)
-      setClients(clientsRes as MqttClient[])
-      setRoles(rolesRes as Role[])
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
@@ -92,8 +71,6 @@ export default function GroupsPage() {
 
       <GroupsTable
         groups={groups}
-        allClients={clients}
-        allRoles={roles}
         onRefresh={handleRefresh}
       />
     </div>

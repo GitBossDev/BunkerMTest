@@ -304,11 +304,11 @@ async def restart_mosquitto(
             desired_state_svc.reconcile_broker_reload_signal,
             db,
         )
-        _ensure_reconcile_success(state, "Mosquitto reload signal failed")
-        logger.info("Reload signal delegated to broker-facing control-plane")
+        _ensure_reconcile_success(state, "Mosquitto restart signal failed")
+        logger.info("Restart signal delegated to broker-facing control-plane")
         return {
             "success": True,
-            "message": "Mosquitto broker reloading configuration",
+            "message": "Mosquitto broker restarting to apply configuration",
             "controlPlane": {
                 "scope": state.scope,
                 "version": state.version,

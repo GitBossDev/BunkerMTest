@@ -2,6 +2,7 @@ import clientlogs.activity_storage as activity_storage_module
 import monitor.history_storage as history_storage_module
 import monitor.topic_history_storage as topic_history_storage_module
 import reporting.storage as reporting_storage_module
+import pytest
 from core.config import Settings
 from clientlogs.activity_storage import create_client_activity_storage
 from monitor.history_storage import create_monitor_history_storage
@@ -9,9 +10,9 @@ from monitor.topic_history_storage import create_topic_history_storage
 from reporting.storage import create_reporting_storage
 
 
-def test_storage_factories_accept_sqlite_urls(monkeypatch):
+def test_storage_factories_reject_sqlite_urls(monkeypatch):
     settings = Settings(
-        database_url="sqlite+aiosqlite:////tmp/bunkerm.db",
+        database_url="postgresql://bhm:secret@localhost:5432/bhm_shared",
         history_database_url="sqlite+aiosqlite:////tmp/bunkerm-history.db",
         reporting_database_url="sqlite+aiosqlite:////tmp/bunkerm-reporting.db",
     )
@@ -21,15 +22,19 @@ def test_storage_factories_accept_sqlite_urls(monkeypatch):
     monkeypatch.setattr("monitor.topic_history_storage.settings", settings)
     monkeypatch.setattr("reporting.storage.settings", settings)
 
-    assert create_client_activity_storage() is not None
-    assert create_monitor_history_storage() is not None
-    assert create_topic_history_storage() is not None
-    assert create_reporting_storage() is not None
+    with pytest.raises(ValueError):
+        create_client_activity_storage()
+    with pytest.raises(ValueError):
+        create_monitor_history_storage()
+    with pytest.raises(ValueError):
+        create_topic_history_storage()
+    with pytest.raises(ValueError):
+        create_reporting_storage()
 
 
 def test_storage_factories_select_sqlalchemy_backends_for_postgres_urls(monkeypatch):
     settings = Settings(
-        database_url="sqlite+aiosqlite:////tmp/bunkerm.db",
+        database_url="postgresql://bhm:secret@localhost:5432/bhm_shared",
         history_database_url="postgresql+asyncpg://bhm:secret@localhost:5432/bhm_history",
         reporting_database_url="postgresql+asyncpg://bhm:secret@localhost:5432/bhm_reporting",
     )

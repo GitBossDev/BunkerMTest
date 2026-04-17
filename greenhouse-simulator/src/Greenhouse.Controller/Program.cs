@@ -22,14 +22,24 @@ Console.WriteLine("==============================================");
 Console.WriteLine("  GREENHOUSE MQTT - SUBSCRIBER (Fase 1)");
 Console.WriteLine("==============================================\n");
 
+var brokerHost = Environment.GetEnvironmentVariable("MQTT_HOST") ?? "localhost";
+var brokerUser = Environment.GetEnvironmentVariable("MQTT_USER") ?? "bunker";
+var brokerPass = Environment.GetEnvironmentVariable("MQTT_PASS") ?? "bunker";
+var brokerPort = 21900;
+var brokerPortRaw = Environment.GetEnvironmentVariable("MQTT_PORT");
+if (!string.IsNullOrWhiteSpace(brokerPortRaw) && int.TryParse(brokerPortRaw, out var parsedBrokerPort) && parsedBrokerPort > 0)
+{
+    brokerPort = parsedBrokerPort;
+}
+
 // Configurar parámetros de conexión MQTT
 var settings = new MqttSettings
 {
-    BrokerHost = "localhost",
-    BrokerPort = 1900,
+    BrokerHost = brokerHost,
+    BrokerPort = brokerPort,
     ClientId = "greenhouse-subscriber-01",  // Diferente al publisher
-    Username = "bunker",
-    Password = "bunker"
+    Username = brokerUser,
+    Password = brokerPass
 };
 
 Console.WriteLine($"Configuración:");
@@ -43,7 +53,7 @@ var mqttHelper = new MqttClientHelper(settings);
 try
 {
     Console.WriteLine("Conectando al broker MQTT...");
-    var client = await mqttHelper.ConnectAsync();
+    var client = await mqttHelper.ConnectAsync(1);
 
     if (!mqttHelper.IsConnected)
     {

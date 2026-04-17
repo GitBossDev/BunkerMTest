@@ -9,10 +9,11 @@ import json
 from types import SimpleNamespace
 
 import pytest
+from clientlogs.activity_storage import client_activity_storage
 import services.dynsec_service as dynsec_svc
 from services import broker_desired_state_service as desired_state_svc
 import services.broker_reconciler as broker_reconciler
-from config.dynsec_config import merge_dynsec_configs
+from config.dynsec_config import merge_dynsec_configs, validate_dynsec_json
 
 # Estructura minima valida de dynamic-security.json para los mocks
 SAMPLE_DYNSEC = {
@@ -23,9 +24,18 @@ SAMPLE_DYNSEC = {
         "unsubscribe": True,
     },
     "clients": [
+        {
+            "username": "admin",
+            "textname": "Dynsec admin user",
+            "roles": [{"rolename": "admin"}],
+            "password": "admin-hash",
+            "salt": "admin-salt",
+            "iterations": 101,
+        },
         {"username": "sensor-01", "textname": "Sensor de prueba", "groups": [], "roles": [{"rolename": "sensors"}]}
     ],
     "roles": [
+        {"rolename": "admin", "acls": []},
         {"rolename": "sensors", "acls": []}
     ],
     "groups": [
@@ -43,13 +53,14 @@ CMD_OK = {"success": True, "output": "Command executed successfully", "error_out
 
 async def test_list_clients_returns_200(client, monkeypatch):
     """Lista de clientes: retorna 200 y un array 'clients'."""
-    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
+    monkeypatch.setattr(desired_state_svc, "get_observed_dynsec_config", lambda: SAMPLE_DYNSEC)
+    monkeypatch.setattr(client_activity_storage, "reconcile_dynsec_clients", lambda *_args, **_kwargs: None)
     resp = await client.get("/api/v1/dynsec/clients")
     assert resp.status_code == 200
     body = resp.json()
     assert "clients" in body
     assert any(c["username"] == "sensor-01" for c in body["clients"])
-    assert body["total"] == 1
+    assert body["total"] == 2
 
 
 async def test_list_clients_returns_paginated_normalized_shape(client, monkeypatch):
@@ -57,6 +68,12 @@ async def test_list_clients_returns_paginated_normalized_shape(client, monkeypat
     dynsec = {
         **SAMPLE_DYNSEC,
         "clients": [
+            {
+                "username": "admin",
+                "disabled": False,
+                "roles": [{"rolename": "admin"}],
+                "groups": [],
+            },
             {
                 "username": "sensor-01",
                 "disabled": False,
@@ -70,8 +87,18 @@ async def test_list_clients_returns_paginated_normalized_shape(client, monkeypat
                 "groups": ["line-a"],
             },
         ],
+        "roles": [
+            {"rolename": "admin", "acls": []},
+            {"rolename": "sensors", "acls": []},
+            {"rolename": "operators", "acls": []},
+        ],
+        "groups": [
+            {"groupname": "plantas", "roles": [], "clients": []},
+            {"groupname": "line-a", "roles": [], "clients": []},
+        ],
     }
-    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec)
+    monkeypatch.setattr(desired_state_svc, "get_observed_dynsec_config", lambda: dynsec)
+    monkeypatch.setattr(client_activity_storage, "reconcile_dynsec_clients", lambda *_args, **_kwargs: None)
     resp = await client.get("/api/v1/dynsec/clients?page=1&limit=1&search=sensor")
     assert resp.status_code == 200
     body = resp.json()
@@ -88,16 +115,18 @@ async def test_get_clients_disabled_map_returns_all_clients(client, monkeypatch)
     dynsec = {
         **SAMPLE_DYNSEC,
         "clients": [
+            {"username": "admin", "disabled": False},
             {"username": "sensor-01", "disabled": False},
             {"username": "sensor-02", "disabled": True},
         ],
     }
-    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: dynsec)
+    monkeypatch.setattr(desired_state_svc, "get_observed_dynsec_config", lambda: dynsec)
+    monkeypatch.setattr(client_activity_storage, "reconcile_dynsec_clients", lambda *_args, **_kwargs: None)
     resp = await client.get("/api/v1/dynsec/clients/disabled-map")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["map"] == {"sensor-01": False, "sensor-02": True}
-    assert body["usernames"] == ["sensor-01", "sensor-02"]
+    assert body["map"] == {"admin": False, "sensor-01": False, "sensor-02": True}
+    assert body["usernames"] == ["admin", "sensor-01", "sensor-02"]
 
 
 async def test_get_default_acl_reads_json_directly(client, monkeypatch):
@@ -219,6 +248,121 @@ def test_merge_dynsec_configs_preserves_imported_default_acl(monkeypatch):
     assert merged["defaultACLAccess"] == imported["defaultACLAccess"]
 
 
+def test_merge_dynsec_configs_prefers_observed_admin_user(monkeypatch):
+    """En Kubernetes, la importacion debe preservar el admin observado aunque el pod web no monte el JSON local."""
+    observed_admin = {
+        "username": "admin",
+        "textname": "Dynsec admin user",
+        "roles": [{"rolename": "admin"}],
+        "password": "observed-hash",
+        "salt": "observed-salt",
+        "iterations": 101,
+    }
+    imported = {
+        "defaultACLAccess": SAMPLE_DYNSEC["defaultACLAccess"],
+        "clients": [{"username": "sensor-01", "roles": [], "groups": []}],
+        "groups": [],
+        "roles": [],
+    }
+
+    monkeypatch.setattr(
+        "services.broker_observability_client.fetch_broker_dynsec_sync",
+        lambda: {"config": {"clients": [observed_admin], "roles": [], "groups": [], "defaultACLAccess": SAMPLE_DYNSEC["defaultACLAccess"]}},
+    )
+    monkeypatch.setattr("config.dynsec_config.read_dynsec_json", lambda: (_ for _ in ()).throw(FileNotFoundError()))
+
+    merged = merge_dynsec_configs(imported)
+
+    assert merged["clients"][0]["password"] == "observed-hash"
+    assert merged["clients"][0]["salt"] == "observed-salt"
+
+
+def test_get_observed_helpers_fall_back_to_observability_when_local_dynsec_is_unavailable(monkeypatch):
+    """Las mutaciones DynSec no deben depender del fichero local dentro del pod web."""
+    monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: (_ for _ in ()).throw(FileNotFoundError()))
+    monkeypatch.setattr(
+        desired_state_svc,
+        "get_observed_dynsec_config",
+        lambda: SAMPLE_DYNSEC,
+    )
+
+    observed_client = desired_state_svc.get_observed_client("sensor-01")
+    observed_role = desired_state_svc.get_observed_role("sensors")
+    observed_group = desired_state_svc.get_observed_group("plantas")
+    observed_default_acl = desired_state_svc.get_observed_default_acl()
+
+    assert observed_client is not None
+    assert observed_client["username"] == "sensor-01"
+    assert observed_role is not None
+    assert observed_role["rolename"] == "sensors"
+    assert observed_group is not None
+    assert observed_group["groupname"] == "plantas"
+    assert observed_default_acl == SAMPLE_DYNSEC["defaultACLAccess"]
+
+
+def test_validate_dynsec_json_accepts_broker_managed_clients_without_credentials():
+    """Los clientes creados por mosquitto_ctrl pueden no exponer hash en el JSON observado."""
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+        "clients": [
+            {
+                "username": "admin",
+                "password": "hash",
+                "salt": "salt",
+                "iterations": 101,
+                "roles": [{"rolename": "admin"}],
+            },
+            {
+                "username": "sensor-observed",
+                "roles": [],
+                "groups": [],
+            },
+        ],
+        "groups": [],
+        "roles": [{"rolename": "admin", "acls": []}],
+    }
+
+    validated = validate_dynsec_json(payload)
+    assert validated["clients"][1]["username"] == "sensor-observed"
+
+
+def test_validate_dynsec_json_rejects_partial_client_credentials():
+    """Si aparecen campos de credenciales, deben venir completos para evitar documentos ambiguos."""
+    payload = {
+        "defaultACLAccess": {
+            "publishClientSend": True,
+            "publishClientReceive": True,
+            "subscribe": True,
+            "unsubscribe": True,
+        },
+        "clients": [
+            {
+                "username": "admin",
+                "password": "hash",
+                "salt": "salt",
+                "iterations": 101,
+                "roles": [{"rolename": "admin"}],
+            },
+            {
+                "username": "sensor-broken",
+                "password": "hash-only",
+                "roles": [],
+                "groups": [],
+            },
+        ],
+        "groups": [],
+        "roles": [{"rolename": "admin", "acls": []}],
+    }
+
+    with pytest.raises(ValueError, match="password, salt and iterations together"):
+        validate_dynsec_json(payload)
+
+
 async def test_list_clients_requires_auth(raw_client, monkeypatch):
     """Sin X-API-Key el endpoint debe rechazar la peticion (401 o 403)."""
     monkeypatch.setattr(dynsec_svc, "read_dynsec", lambda: SAMPLE_DYNSEC)
@@ -304,7 +448,7 @@ async def test_create_client_success(client, monkeypatch):
 
 
 async def test_create_client_in_daemon_mode_stages_ephemeral_secret_and_waits(client, monkeypatch):
-    """En modo daemon, create client debe stagear el secreto efímero fuera de la base."""
+    """En modo daemon, create client debe stagear el secreto efímero en el control-plane."""
     staged: list[tuple[str, int, str]] = []
     wait_calls: list[tuple[tuple, dict]] = []
 
@@ -329,12 +473,17 @@ async def test_create_client_in_daemon_mode_stages_ephemeral_secret_and_waits(cl
 
     monkeypatch.setattr(desired_state_svc, "is_daemon_reconcile_mode", lambda: True)
     monkeypatch.setattr(desired_state_svc, "set_client_desired", fake_set_client_desired)
+
+    async def fake_stage_client_creation_secret(session, username, version, password):
+        staged.append((username, version, password))
+
     monkeypatch.setattr(
         desired_state_svc,
         "stage_client_creation_secret",
-        lambda username, version, password: staged.append((username, version, password)),
+        fake_stage_client_creation_secret,
     )
     monkeypatch.setattr(desired_state_svc, "reconcile_or_wait", fake_reconcile_or_wait)
+    monkeypatch.setattr(client_activity_storage, "upsert_client", lambda *args, **kwargs: None)
 
     resp = await client.post(
         "/api/v1/dynsec/clients",
@@ -424,7 +573,7 @@ async def test_sync_passwd_to_dynsec_uses_control_plane_and_updates_dynsec_json(
     monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
     monkeypatch.setattr(broker_reconciler, "_signal_dynsec_reload", lambda: None)
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
 
     resp = await client.post("/api/v1/dynsec/sync-passwd-to-dynsec")
     assert resp.status_code == 200
@@ -451,7 +600,7 @@ async def test_import_password_file_uses_passwd_control_plane_and_exposes_status
     monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_PASSWD_PATH", str(passwd_path))
     monkeypatch.setattr(broker_reconciler, "_signal_dynsec_reload", lambda: None)
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
 
     resp = await client.post(
         "/api/v1/dynsec/import-password-file",

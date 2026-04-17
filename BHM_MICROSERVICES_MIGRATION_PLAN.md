@@ -2,7 +2,7 @@
 
 > **Proyecto**: BHM (Broker Health Manager)
 > **Objetivo**: Migrar la solución actual a una arquitectura de microservicios, operativa primero sobre Docker/Podman Compose y preparada para una evolución posterior a Kubernetes.
-> **Última actualización**: 2026-04-16
+> **Última actualización**: 2026-04-17
 
 ---
 
@@ -299,6 +299,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `deploy.ps1 -Action start` levantó `bunkerm-mosquitto`, `bunkerm-platform`, `bunkerm-reconciler` y `bunkerm-broker-observability`; el smoke automático volvió a cerrar en `5/5 OK`.
 - [x] La inspección de mounts confirmó que `bunkerm-platform` quedó sin acceso directo a `/var/log/mosquitto`, `/var/lib/mosquitto` ni `/etc/mosquitto`, y que `bhm-broker-observability` asumió esos mounts en solo lectura.
 - [x] La validación por HTTP interno confirmó disponibilidad runtime de los nuevos endpoints `source-status` para DynSec, configuración Mosquitto, passwd y certs.
+
+- [x] El import de `dynamic-security.json` quedó endurecido con doble barrera broker-owned: el router rechaza documentos estructuralmente inválidos antes de persistir desired state y `bhm-reconciler` vuelve a validarlos antes de escribir/reiniciar, evitando que la UI pueda dejar muerto al broker con artefactos incompatibles y manteniendo el contrato portable hacia Kubernetes.
 
 ### Criterio de salida
 
@@ -647,6 +649,8 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `core.database.init_db()` y el daemon `bhm-reconciler` ya usan Alembic automáticamente cuando el control-plane apunta a un backend no SQLite; `create_all` queda restringido al baseline SQLite transicional.
 - [x] Históricos y reporting ya no solo pasan por seams: las factorías de dominio seleccionan ahora backends SQLAlchemy reales para `client activity`, `broker history`, `topic history` y `reporting` cuando el dominio apunte a PostgreSQL.
 - [x] Se añadieron implementaciones SQLAlchemy reutilizando los modelos ORM existentes del backend unificado, de modo que el cambio de backend no exige reescribir routers ni servicios en los cortes 2 y 3.
+- [x] El bounded context compartido de history/reporting ya tiene también árbol Alembic propio (`backend/app/history_reporting_alembic`) y tabla de versión separada (`alembic_version_history_reporting`), evitando mezclar su versionado con el del control-plane incluso cuando varias URLs apunten al mismo datastore durante la transición.
+- [x] Se añadió `scripts/upgrade-history-reporting-schema.py` como utilidad operativa para ejecutar upgrades formales del esquema de history/reporting sin depender de bootstraps implícitos desde los storages SQLAlchemy.
 - [x] La validación enfocada del estado actual de Fase 4 quedó ejecutada con `36 passed, 1 warning` sobre utilidades de URL, factorías, auditoría del control-plane, storages SQLAlchemy nuevos y regresiones existentes de config, monitor, clientlogs y reporting.
 - [x] La activación enfocada del corte 1 ya quedó validada también sobre PostgreSQL real en Compose (`1 passed`) y el `dry-run` del migrador quedó verificado con selección segura de fuente SQLite (`0` filas cuando no hay estado legacy presente).
 - [x] La activación enfocada del corte 2 ya quedó validada también sobre PostgreSQL real en Compose (`1 passed`) para `broker history`, `topic history` y `client activity`, verificando persistencia real de los storages SQLAlchemy contra el contenedor PostgreSQL.
@@ -673,7 +677,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] Migrar primero el estado durable del control-plane: `broker_desired_state`, auditoría de cambios solicitados, estado aplicado/observado y metadatos necesarios para `bhm-reconciler` y `bhm-api`. El wiring Compose-first, la validación real contra PostgreSQL, el `dry-run` seguro y el rollout runtime sobre la imagen reconstruida ya quedaron cubiertos; la ejecución sobre un baseline SQLite legacy real queda como tarea operativa cuando exista dataset fuente.
 - [x] Migrar después los históricos ya existentes en SQLite que más condicionan a producto: broker history, topic history, client activity y reporting técnico asociado. Los backends, factorías, migradores y validaciones reales ya cubren este corte; la ejecución sobre un dataset legacy real queda pendiente solo si aparece una base fuente para importar.
 - [x] Migrar por último los read models o tablas auxiliares que sigan quedando en SQLite y que no bloqueen el primer corte operativo sobre PostgreSQL. Reporting técnico, retención y purge ya operan sobre PostgreSQL en el baseline validado; la separación total de datastore respecto de history queda como hardening posterior, no como bloqueo del corte.
-- [~] Añadir migraciones de esquema y versionado de base de datos con Alembic para PostgreSQL. El control-plane ya tiene revisión inicial y utilidad operativa de upgrade; falta extender el versionado formal al resto de dominios que todavía se auto-bootstrappean por seam.
+- [x] Añadir migraciones de esquema y versionado de base de datos con Alembic para PostgreSQL. El control-plane mantiene su árbol/versionado propio y history/reporting ya quedaron cubiertos por un árbol Alembic adicional con tabla de versión separada; los storages PostgreSQL dejaron de depender de `create_all` como vía principal de bootstrap en esos dominios.
 - [x] Hacer explícita la dependencia funcional de `bhm-api` y `bhm-reconciler` respecto a PostgreSQL en Compose cuando el primer corte operativo esté listo. `deploy.ps1` ya detecta URLs PostgreSQL activas, arranca `postgres` sin arrastrar `pgadmin` opcional, y el smoke validado sobre Podman/Compose cerró en `7/7 OK` con conectividad real desde ambos contenedores.
 - [x] Ajustar configuración de entorno, backup, restore y utilidades de migración para PostgreSQL. Ya existen utilidades operativas para upgrade Alembic del control-plane, migración/dry-run de históricos+reporting y backup/restore formal del baseline PostgreSQL actual; el flujo dedicado para reporting separado quedará como hardening posterior si ese datastore deja de compartir baseline con history.
 
@@ -699,13 +703,14 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 ### Verificaciones
 
 - [x] `bhm-api` y `bhm-reconciler` pueden operar con PostgreSQL como datastore principal en los dominios ya migrados. El arranque ya aplica Alembic del control-plane sobre PostgreSQL, `deploy.ps1` levanta automáticamente `postgres` cuando la configuración activa lo requiere y la corrida runtime completa del stack quedó validada en Podman/Compose con smoke `7/7 OK`.
-- [x] No existen accesos directos de dominio al SQLite antiguo en los flujos ya migrados; la auditoría de runtime confirma que las referencias SQLite residuales quedaron acotadas a factorías/fallbacks transicionales, utilidades de importación y dominios fuera del alcance de Fase 4, no a routers ni servicios activos de los dominios ya migrados.
+- [x] No existen accesos directos de dominio al SQLite antiguo en los flujos ya migrados; la baseline activa ya exige PostgreSQL para control-plane, history, topic history, client activity y reporting, y las referencias SQLite residuales quedan acotadas a utilidades legacy de importación, tests y adapters heredados fuera del carril operativo actual.
 - [x] Los datos históricos y operativos esenciales se conservan y siguen siendo auditables tras cada corte. El control-plane mantiene auditoría append-only en PostgreSQL y los históricos/reporting quedaron validados sobre persistencia real, además de una restauración completa desde dump sobre base temporal de verificación.
 - [x] Los contratos HTTP consumidos por frontend y reporting técnico mantienen compatibilidad razonable durante la transición o documentan claramente su cambio. La regresión ampliada de `/api/v1/monitor`, `/api/v1/clientlogs` y `/api/v1/reports` pasó con `40 passed` sin cambios de contrato pendientes para este corte.
 
 ### Tests
 
 - [x] Test unitario de repositorios, servicios de persistencia y adapters de transición SQLite/PostgreSQL. La cobertura actual incluye utilidades de URL, migraciones Alembic del control-plane, arranque runtime con Alembic y storages SQLAlchemy de control-plane/history/topic/client activity/reporting.
+- [x] Test específico del nuevo versionado Alembic de history/reporting y de su integración con runtime/storages (`9 passed`), incluyendo aceptación de esquemas parcialmente bootstrappeados antes de registrar la tabla de versión.
 - [x] Test de integración contra PostgreSQL real en contenedor para `bhm-api` y `bhm-reconciler`. Ya existe validación real del control-plane y del segundo corte de storages contra PostgreSQL, y la validación runtime extremo a extremo del stack Compose-first quedó cerrada con smoke `7/7 OK` apuntando a PostgreSQL como datastore principal.
 - [x] Test de migración de datos desde SQLite por dominio o capability, empezando por el control-plane y siguiendo por históricos. La validación actual cubre `dry-run` seguro del control-plane y la migración de históricos/reporting entre datastores SQLite como prueba estructural de los migradores; la ejecución sobre una base legacy real queda pendiente solo por ausencia de dataset fuente en el workspace.
 - [x] Test de compatibilidad de API en endpoints afectados por cada corte de persistencia. La suite ampliada ejecutada en esta iteración validó contratos HTTP de monitor, clientlogs y reporting sin regresiones (`40 passed`).
@@ -713,13 +718,22 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Criterio de salida
 
-- [x] PostgreSQL queda establecido como base persistente principal de BHM para el control-plane y para los dominios históricos priorizados de Fase 4 en el baseline de desarrollo actual; SQLite deja de ser backend operativo de esos dominios y queda acotado a fallback transicional o a fuente de importación puntual cuando aparezca una base legacy real.
+- [x] PostgreSQL queda establecido como base persistente operativa de BHM para el control-plane y para los dominios históricos priorizados de Fase 4 en el baseline de desarrollo actual; SQLite deja de ser backend operativo de esos dominios y queda acotado a utilidades legacy de importación puntual, tests y compatibilidad heredada fuera del runtime activo.
 
 ---
 
 ## Fase 5 - Observabilidad y reporting técnico desacoplado
 
 **Objetivo**: Eliminar la dependencia de log tailing directo y construir observabilidad compatible con microservicios.
+
+### Punto de partida al iniciar Fase 5
+
+- [x] BHM entra a Fase 5 con `bhm-broker-observability` como fachada broker-owned ya validada en runtime y con reporting técnico operando sobre PostgreSQL.
+- [x] La deuda ya no está en la persistencia principal ni en mounts de escritura, sino en sustituir la fuente observacional transicional basada en snapshots/logs por un carril más estructurado sin romper los contratos HTTP actuales.
+- [x] La configuración de alertas del monitor ya dejó de persistirse en JSON local y pasa al control-plane PostgreSQL mediante Alembic, lo que elimina otro remanente activo de filesystem antes de profundizar el contrato de delivery externo.
+- [x] El contrato técnico de delivery externo quedó fijado en `docs/BHM_ALERT_DELIVERY_CONTRACT.md`, separando detección en `bhm-api` de entrega en un worker dedicado `bhm-alert-delivery` y dejando estable el payload canónico para frontend.
+- [x] El primer slice técnico del outbox de alertas ya quedó materializado en el esquema del control-plane con `alert_delivery_channel`, `alert_delivery_event` y `alert_delivery_attempt`, versionados por Alembic para que el worker pueda nacer sobre PostgreSQL sin bootstraps ad hoc.
+- [x] Para el compañero B, el carril funcional ya abierto es el refinamiento de UX, filtros, tablas, estados y reporting técnico sobre los endpoints existentes; lo que sigue bloqueado estructuralmente en esta fase es la definición final de la fuente de logs históricos y del contrato técnico de alertas externas.
 
 ### Actividades
 
@@ -729,12 +743,19 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Ajustar el pipeline de incidentes, timeline y reporting operativo para la nueva fuente de datos.
 - [ ] Definir métricas, logs y eventos mínimos por servicio.
 - [ ] Revisar retención, purga y exportaciones del reporting técnico.
+- [x] Definir el contrato técnico de alertas por correo, redes o webhooks: payload canónico, ownership del intento de entrega, reintentos, idempotencia, auditoría y manejo de credenciales.
+- [x] Decidir si la entrega de alertas externas vivirá en `bhm-api`, en un worker dedicado o en un servicio auxiliar, sin reintroducir acoplamientos al broker ni al filesystem. La decisión actual es `bhm-alert-delivery` como worker dedicado con outbox persistido en PostgreSQL.
+- [x] Materializar la persistencia mínima del outbox en PostgreSQL con tablas de canales, eventos e intentos, alineadas con el contrato técnico acordado para Fase 5.
+- [ ] Mantener compatibilidad razonable de `/api/v1/clientlogs`, `/api/v1/monitor` y `/api/v1/reports` mientras cambia la fuente observacional, para que B pueda seguir refinando producto sin rehacer contratos en cada corte.
+- [ ] Hacer explícito el carril seguro de B durante Fase 5: UX, filtros, payloads esperados, exportaciones, copy funcional y tests de interfaz pueden avanzar sobre contratos acordados aunque el pipeline interno de observabilidad siga evolucionando.
 
 ### Verificaciones
 
 - [ ] Monitoring y reporting técnico siguen funcionando sin mounts cruzados obligatorios de logs.
 - [ ] Las incidencias técnicas continúan disponibles para auditoría y diagnóstico.
 - [ ] El producto externo no depende de leer internamente la observabilidad de BHM.
+- [ ] Los contratos HTTP que usa frontend para históricos, timeline, incidentes y reporting técnico se mantienen estables o documentan claramente cualquier ajuste derivado del nuevo pipeline observacional.
+- [x] El contrato de alertas externas queda definido con suficiente detalle para que B pueda cerrar UX y flujos funcionales sin duplicar la implementación de delivery.
 
 ### Tests
 
@@ -742,6 +763,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Test de reporting técnico sobre la nueva fuente de datos.
 - [ ] Test de purga y retención.
 - [ ] Test de exportación CSV/JSON si sigue aplicando.
+- [ ] Test del contrato de alertas externas, incluyendo éxito, fallo, reintento y deduplicación cuando aplique.
 
 ### Criterio de salida
 
@@ -760,18 +782,22 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Diseñar puntos de extensión para OAuth2/OpenID Connect en una fase posterior.
 - [ ] Revisar secretos, rotación y manejo seguro de credenciales en Compose.
 - [ ] Diseñar cómo evolucionará ese manejo de secretos cuando se pase a Kubernetes.
+- [ ] Definir la política final de whitelist por IP y su ownership técnico: si vive como capability del control-plane broker-facing, como regla de aplicación o como combinación de ambas.
+- [ ] Alinear esa decisión con autorización técnica, DynSec/ACL y trazabilidad auditable para que B pueda cerrar la funcionalidad sin contradecir el modelo de reconciliación.
 
 ### Verificaciones
 
 - [ ] Los flujos actuales de acceso siguen funcionando.
 - [ ] Los secretos y credenciales tienen ownership y almacenamiento claros.
 - [ ] La arquitectura no queda bloqueada por esperar OAuth/OIDC.
+- [ ] La whitelist por IP queda definida con un contrato técnico estable, compatible con el control-plane y consumible por frontend sin ambigüedad de ownership.
 
 ### Tests
 
 - [ ] Test de autenticación en endpoints críticos.
 - [ ] Test de autorización en endpoints administrativos.
 - [ ] Test de acceso denegado y auditoría básica.
+- [ ] Test de whitelist por IP para el modelo finalmente elegido, incluyendo observación/auditoría del estado aplicado.
 
 ### Criterio de salida
 
@@ -782,6 +808,15 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 ## Fase 7 - Hardening, rendimiento y resiliencia
 
 **Objetivo**: Consolidar el comportamiento stateless del backend de gestión y establecer baseline de carga y estabilidad.
+
+### Avance reciente
+
+- [x] El estado observado de DynSec ahora se reutiliza mediante un indice en memoria con TTL e invalidacion explicita, reduciendo el coste de listar clientes, roles, grupos y ACLs por defecto sobre datasets grandes.
+- [x] `clientlogs` ya reutiliza el mapa de capabilities observado y limita la reconciliacion del registro de clientes, evitando trabajo repetido en cada consulta.
+- [x] La pagina de clientes del frontend ya no refetcha en exceso roles y grupos junto con cada pagina de resultados, recortando latencia visible en listados y filtros.
+- [x] La aplicacion de `mosquitto.conf` paso de recarga ligera a semantica de reinicio controlado del broker, con invalidacion de cache de `max_connections` y regresiones especificas para evitar falsos `applied`.
+- [x] El modo daemon/Kubernetes ya toma `mosquitto.conf` observado desde `bhm-broker-observability` en vez de preferir el filesystem local del pod web, cerrando un caso real de drift falso en runtime distribuido.
+- [~] El baseline de resiliencia ya incluye recuperacion automatica de la maquina Podman y del socket remoto antes de bootstrapear `kind`, pero el laboratorio sigue mostrando una inestabilidad residual en la Web UI aunque el backend y los workloads queden arriba.
 
 ### Actividades
 
@@ -824,6 +859,40 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [ ] Preparar lineamientos de empaquetado e imágenes para la plataforma final.
 - [ ] Documentar dependencias de red, almacenamiento y secretos que deberán resolverse en Kubernetes.
 - [ ] Verificar compatibilidad futura con la imagen del producto de transformación de datos.
+
+### Carril opcional de laboratorio Kubernetes
+
+Este carril puede ejecutarse antes del cierre formal de Fase 8, pero solo como validación temprana de portabilidad. No sustituye el baseline Compose-first ni debe mezclarse con la resolución de incidencias aún abiertas del runtime principal.
+
+- [ ] Mantener como prerequisito un baseline verde en Compose-first antes de introducir el laboratorio Kubernetes: smoke completo, import/export DynSec estable y reconciliación sin caída del broker.
+- [ ] Tratar el incidente DynSec actual como bloqueo previo: reproducir con el JSON exportado real, capturar `desired/applied/observed`, logs de `bunkerm-mosquitto`, `bunkerm-reconciler` y `bunkerm-platform`, y aislar si la caída ocurre en validación, escritura, reload DynSec o arranque posterior del broker.
+- [ ] No simular "nodo maestro" y "nodos worker" con contenedores ad hoc en Podman Compose; usar un clúster Kubernetes real pero efímero, preferentemente `kind`, sobre Podman si el entorno Windows lo soporta de forma estable.
+- [ ] Empezar con un laboratorio mínimo: `1` control-plane y `1-2` workers solo para validar scheduling, networking interno, secrets/config y lifecycle de los servicios BHM.
+- [ ] Mantener el laboratorio desacoplado del flujo diario: scripts y manifests separados del `docker-compose.dev.yml`, sin convertirlo en nuevo baseline de desarrollo mientras Fases 4-7 sigan abiertas.
+- [ ] Desplegar primero los componentes más portables: `bunkerm-platform`, `bhm-reconciler`, `bhm-broker-observability` y PostgreSQL; posponer endurecimiento de Mosquitto como `StatefulSet` hasta cerrar storage, probes, restart semantics y estrategia de rollback del plugin DynSec.
+- [ ] Traducir explícitamente el control-plane actual a primitivas Kubernetes: `mosquitto.conf` como ConfigMap, TLS y `mosquitto_passwd` como Secret, `dynamic-security.json` como artefacto privado reconciliado por un componente broker-owned, y `broker_desired_state` sobre PostgreSQL persistente.
+- [ ] Validar en el laboratorio solo hipótesis de portabilidad: arranque, configuración, resolución DNS interna, health/readiness, persistencia y separación de ownership. No usar todavía ese carril para diagnosticar bugs funcionales del broker que siguen reproduciéndose en Compose.
+
+Estado actual del carril opcional:
+
+- [x] El baseline Compose-first quedó verde antes de abrir el laboratorio: DynSec export/import estable de punta a punta y smoke `7/7 OK`.
+- [x] Se abrió un scaffold inicial desacoplado en `k8s/` con `kind/cluster.yaml`, `k8s/base/` y `k8s/scripts/bootstrap-kind.ps1`.
+- [x] El laboratorio actual ya quedó validado en runtime sobre `kind` + Podman con `1` control-plane y `1` worker, `bunkerm-platform 1/1`, `mosquitto 3/3` y `postgres 1/1`, además de `HTTP 200` en `http://localhost:22000/api/monitor/health` y conectividad TCP en `localhost:21900` y `localhost:29001`.
+- [x] `Mosquitto` ya dejó de ser placeholder y quedó modelado como `StatefulSet` broker-owned con PVCs propios, sidecars `bhm-reconciler` y `bhm-broker-observability`, y exposición controlada por `NodePort` en el laboratorio.
+- [x] El handoff efímero de `create_client` ya se movió al control-plane PostgreSQL, lo que permitió separar el pod HTTP del broker en el laboratorio Kubernetes sin depender de un volumen compartido `/nextjs/data/reconcile-secrets`.
+- [x] TLS y `mosquitto_passwd` ya tienen una traducción inicial a `Secret` dedicados de Kubernetes mediante bootstrap por `initContainer`, aunque la rotación y reconciliación nativa sobre objetos `Secret` siga pendiente como siguiente corte.
+- [x] `deploy.ps1` y `k8s/scripts/bootstrap-kind.ps1` ya recuperan automaticamente una maquina Podman rota o sin socket util antes de invocar `kind`, evitando que el flujo limpio falle en `kind create cluster` por estado remoto corrupto del proveedor.
+- [x] El bootstrap de `kind` ya carga las imagenes locales del laboratorio mediante `image-archive` cuando el proveedor es Podman, evitando la inconsistencia de `kind load docker-image` con tags canonicos `localhost/...`.
+- [~] El flujo limpio `setup -> build -> start` ya supera el fallo original de creacion de cluster, crea el laboratorio, carga imagenes y aplica manifests sobre `kind`; queda pendiente dejar otra vez verde el smoke completo de la Web UI para considerar estable este carril opcional.
+
+### Plan de acción recomendado
+
+1. Cerrar primero el incidente DynSec en el baseline Compose-first. Si el mismo JSON exportado derriba el broker, todavía hay un problema funcional en el artifact o en la secuencia de reload, y mover el caso a un laboratorio Kubernetes solo añadiría otra variable.
+2. Convertir ese incidente en una regresión reproducible automática. El siguiente corte debe dejar un test o smoke dirigido que importe un export real, verifique que `dynamic-security.json` queda íntegro y que Mosquitto vuelve a `healthy`.
+3. Una vez estabilizado ese flujo, abrir un carril paralelo de laboratorio con `kind` sobre Podman. Ese carril debe validar traducción de arquitectura, no reemplazar Compose ni bloquear Fase 4-7.
+4. En ese laboratorio, desplegar primero la plataforma sin exponer todavía toda la complejidad broker-facing. La prioridad es comprobar el mapping de servicios, secretos, storage y healthchecks.
+5. Solo después incorporar Mosquitto y su reconciliación como caso controlado. El criterio no es "que arranque", sino poder demostrar rollback, persistencia y límites claros de ownership compatibles con un futuro operador/control loop.
+6. Si el laboratorio confirma la portabilidad, registrar sus hallazgos como entregables de Fase 8. Si no la confirma, el resultado útil sigue siendo el inventario de gaps reales para Kubernetes sin contaminar el baseline Compose-first.
 
 ### Verificaciones
 

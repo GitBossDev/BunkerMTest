@@ -17,13 +17,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _escape_config_parser_value(value: str) -> str:
+    return value.replace("%", "%%")
+
+
 async def _run_migrations() -> None:
     """Run Alembic migrations programmatically."""
     from alembic import command
     from alembic.config import Config
 
     cfg = Config("alembic.ini")
-    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    cfg.set_main_option("sqlalchemy.url", _escape_config_parser_value(settings.DATABASE_URL))
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, command.upgrade, cfg, "head")
 

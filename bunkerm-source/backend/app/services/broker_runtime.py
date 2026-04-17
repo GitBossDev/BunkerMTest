@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Dict, Iterator, List, Protocol
 
-from config.mosquitto_config import _signal_mosquitto_reload
+from config.mosquitto_config import _signal_mosquitto_reload, _signal_mosquitto_restart
 from core.config import settings
 from services import dynsec_service
 
@@ -39,6 +39,9 @@ class BrokerRuntimePort(Protocol):
     def signal_mosquitto_reload(self) -> None:
         ...
 
+    def signal_mosquitto_restart(self) -> None:
+        ...
+
     def signal_dynsec_reload(self) -> None:
         ...
 
@@ -68,6 +71,9 @@ class LocalBrokerRuntime:
 
     def signal_mosquitto_reload(self) -> None:
         _signal_mosquitto_reload()
+
+    def signal_mosquitto_restart(self) -> None:
+        _signal_mosquitto_restart()
 
     def signal_dynsec_reload(self) -> None:
         _signal_dynsec_reload()

@@ -14,7 +14,30 @@ from core.sync_database import create_sync_engine_for_url
 CONTROL_PLANE_TABLE_NAMES = {
     "broker_desired_state",
     "broker_desired_state_audit",
+    "broker_reconcile_secret",
+    "alert_config",
+    "alert_delivery_channel",
+    "alert_delivery_event",
+    "alert_delivery_attempt",
 }
+
+LEGACY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES = {
+    "broker_desired_state",
+    "broker_desired_state_audit",
+}
+
+ALERT_CONFIG_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES = (
+    LEGACY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES | {"alert_config"}
+)
+
+ALERT_DELIVERY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES = (
+    ALERT_CONFIG_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES
+    | {"alert_delivery_channel", "alert_delivery_event", "alert_delivery_attempt"}
+)
+
+RECONCILE_SECRET_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES = (
+    ALERT_DELIVERY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES | {"broker_reconcile_secret"}
+)
 
 
 def _app_root() -> Path:
@@ -25,11 +48,15 @@ def control_plane_alembic_ini_path() -> Path:
     return _app_root() / "alembic.ini"
 
 
+def _escape_config_parser_value(value: str) -> str:
+    return value.replace("%", "%%")
+
+
 def create_control_plane_alembic_config(database_url: str) -> Config:
     alembic_ini = control_plane_alembic_ini_path()
     cfg = Config(str(alembic_ini))
     cfg.set_main_option("script_location", str(_app_root() / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", get_async_database_url(database_url))
+    cfg.set_main_option("sqlalchemy.url", _escape_config_parser_value(get_async_database_url(database_url)))
     return cfg
 
 
@@ -42,12 +69,38 @@ def upgrade_control_plane_database_sync(database_url: str, revision: str = "head
     has_version_table = "alembic_version" in table_names
     existing_control_plane_tables = CONTROL_PLANE_TABLE_NAMES & table_names
     if not has_version_table and existing_control_plane_tables:
-        if existing_control_plane_tables != CONTROL_PLANE_TABLE_NAMES:
+        if existing_control_plane_tables == LEGACY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES:
+            command.stamp(cfg, "001_control_plane_initial")
+            if revision != "001_control_plane_initial":
+                command.upgrade(cfg, revision)
+            return
+
+        if existing_control_plane_tables == ALERT_CONFIG_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES:
+            command.stamp(cfg, "002_control_plane_alert_config")
+            if revision != "002_control_plane_alert_config":
+                command.upgrade(cfg, revision)
+            return
+
+        if existing_control_plane_tables == ALERT_DELIVERY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES:
+            command.stamp(cfg, "003_alert_delivery_outbox")
+            if revision != "003_alert_delivery_outbox":
+                command.upgrade(cfg, revision)
+            return
+
+        if existing_control_plane_tables == RECONCILE_SECRET_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES:
+            command.stamp(cfg, "004_broker_reconcile_secret")
+            if revision != "004_broker_reconcile_secret":
+                command.upgrade(cfg, revision)
+            return
+
+        if not existing_control_plane_tables.issubset(RECONCILE_SECRET_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES):
             raise RuntimeError(
                 "Control-plane schema is partially present without alembic_version; manual reconciliation is required."
             )
-        command.stamp(cfg, revision)
-        return
+
+        raise RuntimeError(
+            "Control-plane schema is partially present without alembic_version; manual reconciliation is required."
+        )
 
     command.upgrade(cfg, revision)
 

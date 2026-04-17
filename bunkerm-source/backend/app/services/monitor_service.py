@@ -15,9 +15,13 @@ import time
 import uuid as _uuid
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from paho.mqtt import client as mqtt_client
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import sessionmaker
 
 # Importamos desde la ubicación original — no movemos ni copiamos el archivo
 from monitor.data_storage import PERIODS
@@ -25,6 +29,8 @@ from monitor.history_storage import BrokerTickSnapshot, create_monitor_history_s
 from monitor.topic_history_storage import topic_history_storage
 
 from core.config import settings
+from core.sync_database import create_sync_engine_for_url, session_scope
+from models.orm import AlertConfigEntry
 from services import broker_observability_client
 from services.alert_notifications import notify_alert_raised
 
@@ -75,12 +81,17 @@ _STRING_TOPICS = {
 }
 
 # ---------------------------------------------------------------------------
-# Configuración de alertas (JSON persistido en disco, cached 30 s)
+# Configuración de alertas persistida en base de datos, cached 30 s
 # ---------------------------------------------------------------------------
 
-_ALERT_CONFIG_PATH = os.getenv("ALERT_CONFIG_PATH", "/nextjs/data/alert_config.json")
 _alert_config_cache: dict = {}
 _alert_config_ts: float = 0.0
+
+
+@lru_cache(maxsize=1)
+def _get_alert_config_session_factory() -> sessionmaker:
+    engine = create_sync_engine_for_url(settings.resolved_control_plane_database_url)
+    return sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def _default_alert_config() -> dict:
@@ -96,33 +107,51 @@ def _default_alert_config() -> dict:
 
 
 def read_alert_config() -> dict:
-    """Lee la configuración de alertas del JSON, con caché de 30 s."""
+    """Lee la configuración de alertas desde base de datos, con caché de 30 s."""
     global _alert_config_cache, _alert_config_ts
     now = time.time()
     if _alert_config_cache and now - _alert_config_ts < 30.0:
         return _alert_config_cache
+    cfg = _default_alert_config()
     try:
-        with open(_ALERT_CONFIG_PATH) as fh:
-            data = json.load(fh)
-        cfg = {**_default_alert_config(), **data}
-    except (FileNotFoundError, json.JSONDecodeError):
-        cfg = _default_alert_config()
+        with _get_alert_config_session_factory()() as session:
+            rows = session.scalars(select(AlertConfigEntry)).all()
+    except SQLAlchemyError as exc:
+        logger.warning("Alert config database unavailable, using defaults: %s", exc)
+        _alert_config_cache = cfg
+        _alert_config_ts = now
+        return cfg
+    for row in rows:
+        try:
+            cfg[row.key] = json.loads(row.value_json)
+        except Exception:
+            continue
     _alert_config_cache = cfg
     _alert_config_ts = now
     return cfg
 
 
 def save_alert_config(cfg: dict) -> None:
-    """Persiste la configuración de alertas e invalida la caché."""
+    """Persiste la configuración de alertas en base de datos e invalida la caché."""
     global _alert_config_cache, _alert_config_ts
-    os.makedirs(os.path.dirname(_ALERT_CONFIG_PATH), exist_ok=True)
-    with open(_ALERT_CONFIG_PATH, "w") as fh:
-        json.dump(cfg, fh, indent=2)
+    with session_scope(_get_alert_config_session_factory()) as session:
+        for key, value in cfg.items():
+            entry = session.get(AlertConfigEntry, key)
+            if entry is None:
+                entry = AlertConfigEntry(key=key, value_json=json.dumps(value))
+                session.add(entry)
+                continue
+            entry.value_json = json.dumps(value)
     _alert_config_cache = cfg
     _alert_config_ts = time.time()
 
 
 _max_connections_cache: dict = {"value": 0, "ts": 0.0}
+
+
+def invalidate_max_connections_cache() -> None:
+    _max_connections_cache["value"] = 0
+    _max_connections_cache["ts"] = 0.0
 
 
 def read_max_connections() -> int:
@@ -458,6 +487,40 @@ class NonceManager:
 _HIST_DATA_PATH = os.getenv("HISTORICAL_DATA_PATH", "/nextjs/data/historical_data.json")
 
 
+class _NullMonitorHistoryStorage:
+    filename = _HIST_DATA_PATH
+
+    def get_last_tick_time(self):
+        return None
+
+    def get_runtime_state(self) -> Dict[str, int]:
+        return {}
+
+    def add_tick_snapshot(self, snapshot: BrokerTickSnapshot) -> None:
+        return None
+
+    def get_total_message_count(self, days: int = 7) -> int:
+        return 0
+
+    def get_hourly_data(self) -> Dict[str, list]:
+        return {"timestamps": [], "bytes_received": [], "bytes_sent": []}
+
+    def get_daily_message_stats(self, days: int = 7, pending_today: int = 0) -> Dict[str, list]:
+        return {"dates": [], "counts": []}
+
+    def get_bytes_for_period(self, period: str) -> Dict[str, list]:
+        return {"timestamps": [], "bytes_received": [], "bytes_sent": []}
+
+    def get_messages_for_period(self, period: str) -> Dict[str, list]:
+        return {"timestamps": [], "messages_received": [], "messages_sent": []}
+
+    def get_daily_summary(self, days: int = 7) -> Dict[str, list]:
+        return {"days": []}
+
+    def load_data(self) -> Dict[str, object]:
+        return {}
+
+
 class MQTTStats:
     def __init__(self):
         self._lock = threading.Lock()
@@ -489,8 +552,8 @@ class MQTTStats:
         self.last_broker_sample_at = ""
         self._ping_sent_at: float = 0.0
         self._is_connected: bool = False
-        self.data_storage = create_monitor_history_storage(legacy_json_path=_HIST_DATA_PATH)
-        self.last_storage_update = self._load_last_tick_time()
+        self._data_storage = None
+        self.last_storage_update = datetime.now()
         self.messages_history: deque = deque(maxlen=15)
         self.published_history: deque = deque(maxlen=15)
         self.last_messages_sent = 0
@@ -499,9 +562,22 @@ class MQTTStats:
             self.messages_history.append(0)
             self.published_history.append(0)
 
-    def _load_last_tick_time(self) -> datetime:
+    @property
+    def data_storage(self):
+        if self._data_storage is None:
+            try:
+                storage = create_monitor_history_storage(legacy_json_path=_HIST_DATA_PATH)
+                storage.get_runtime_state()
+                self._data_storage = storage
+            except Exception as exc:
+                logger.warning("Monitor history storage unavailable, using in-memory fallback: %s", exc)
+                self._data_storage = _NullMonitorHistoryStorage()
+            self.last_storage_update = self._load_last_tick_time(self._data_storage)
+        return self._data_storage
+
+    def _load_last_tick_time(self, data_storage) -> datetime:
         try:
-            last_tick = self.data_storage.get_last_tick_time()
+            last_tick = data_storage.get_last_tick_time()
             if last_tick is not None:
                 age = (datetime.now(timezone.utc) - last_tick).total_seconds()
                 if 0 < age < 3600:
@@ -754,32 +830,23 @@ def connect_mqtt():
             logger.warning("Desconexión inesperada del broker MQTT (rc=%s), reconectando…", rc)
 
     try:
-        try:
-            client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-        except AttributeError:
-            client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
-
-        client.username_pw_set(username, password)
-        client.on_connect    = on_connect
-        client.on_disconnect = on_disconnect
-        client.on_message    = on_message
-
-        if not broker_host:
-            raise ValueError("MOSQUITTO_IP no está configurado")
-
-        client.connect(broker_host, broker_port, 60)
-        return client
-
-    except (ConnectionRefusedError, socket.error) as exc:
-        logger.error("Fallo de conexión al broker: %s", exc)
-    except Exception as exc:
-        logger.error("Error inesperado al conectar al broker: %s", exc)
-
-    # Devolvemos un cliente dummy que no produce excepciones al llamar loop_start/stop
-    try:
-        dummy = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
     except AttributeError:
-        dummy = mqtt_client.Client(client_id="dummy-client", protocol=mqtt_client.MQTTv5)
-    dummy.loop_start = lambda: None
-    dummy.loop_stop  = lambda: None
-    return dummy
+        client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
+
+    client.username_pw_set(username, password)
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    client.reconnect_delay_set(min_delay=1, max_delay=10)
+
+    if not broker_host:
+        raise ValueError("MOSQUITTO_IP no está configurado")
+
+    try:
+        client.connect_async(broker_host, broker_port, 60)
+    except Exception as exc:
+        logger.error("Error inesperado preparando la conexión al broker: %s", exc)
+        mqtt_stats._is_connected = False
+
+    return client

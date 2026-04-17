@@ -30,6 +30,7 @@ class Programa
     static string host = "";
     static string user = "";
     static string pass = "";
+    static int brokerPort = 1900;
     static int clients = 0;
     static int clients_t = 0;
     static int timeunit = 0;
@@ -48,6 +49,11 @@ class Programa
         host = string.IsNullOrEmpty(host) ? Environment.GetEnvironmentVariable("MQTT_HOST") : host;
         user = string.IsNullOrEmpty(user) ? Environment.GetEnvironmentVariable("MQTT_USER") : user;
         pass = string.IsNullOrEmpty(pass) ? Environment.GetEnvironmentVariable("MQTT_PASS") : pass;
+        var envPort = Environment.GetEnvironmentVariable("MQTT_PORT");
+        if (!string.IsNullOrWhiteSpace(envPort) && int.TryParse(envPort, out var parsedPort) && parsedPort > 0)
+        {
+            brokerPort = parsedPort;
+        }
         clients = clients == 0 ? int.Parse(Environment.GetEnvironmentVariable("CLIENTS")) : clients;
         timeunit = timeunit == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIMEUNIT")) : timeunit;
         time = time == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIME")) : time;
@@ -57,7 +63,7 @@ class Programa
 
         clients_t = clients;
 
-        Console.WriteLine($"Conectando a {host} con {user}");
+        Console.WriteLine($"Conectando a {host}:{brokerPort} con {user}");
 
         Console.WriteLine("==============================================");
         Console.WriteLine("  GREENHOUSE MQTT STRESSER - FASE 1");
@@ -255,7 +261,7 @@ class Programa
         MqttSettings settings = new MqttSettings
         {
             BrokerHost = host,
-            BrokerPort = 1900,
+            BrokerPort = brokerPort,
             ClientId = $"greenhouse-publisher-{id_cliente}",
             Username = id_cliente.ToString(),
             Password = "123456",
