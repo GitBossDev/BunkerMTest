@@ -356,7 +356,9 @@ def merge_dynsec_configs(imported_config: Dict[str, Any]) -> Dict[str, Any]:
     # --- Admin user: prefer the live file so password hash is always current ---
     live_admin_user = None
     try:
-        live_data = read_dynsec_json()
+        from services import broker_observability_client
+
+        live_data = broker_observability_client.fetch_broker_dynsec_sync().get("config") or read_dynsec_json()
         for c in live_data.get("clients", []):
             if c.get("username") == MOSQUITTO_ADMIN_USERNAME:
                 live_admin_user = c
@@ -399,9 +401,18 @@ def create_backup() -> str:
             shutil.copy2(DYNSEC_JSON_PATH, backup_path)
             logger.info(f"Created backup of dynamic security JSON at {backup_path}")
             return backup_path
-        else:
-            logger.warning(f"Dynamic security JSON file not found at {DYNSEC_JSON_PATH}")
-            return ""
+
+        from services import broker_observability_client
+
+        observed_config = broker_observability_client.fetch_broker_dynsec_sync().get("config")
+        if observed_config:
+            with open(backup_path, "w", encoding="utf-8") as handle:
+                json.dump(observed_config, handle, indent=4)
+            logger.info(f"Created backup of observed dynamic security JSON at {backup_path}")
+            return backup_path
+
+        logger.warning(f"Dynamic security JSON file not found at {DYNSEC_JSON_PATH}")
+        return ""
     except Exception as e:
         logger.error(f"Error creating backup: {str(e)}")
         return ""

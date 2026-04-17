@@ -16,14 +16,14 @@ def test_broker_reconciler_applies_mosquitto_config_and_creates_backup(tmp_path,
     conf_path.write_text("listener 1900\nallow_anonymous false\n", encoding="utf-8")
     backup_dir.mkdir()
 
-    reload_calls: list[str] = []
+    restart_calls: list[str] = []
 
     runtime = LocalBrokerRuntime(
         mosquitto_conf_path=str(conf_path),
         mosquitto_conf_backup_dir=str(backup_dir),
         mosquitto_certs_dir=str(tmp_path / "certs"),
     )
-    monkeypatch.setattr(runtime, "signal_mosquitto_reload", lambda: reload_calls.append("reload"))
+    monkeypatch.setattr(runtime, "signal_mosquitto_restart", lambda: restart_calls.append("restart"))
 
     reconciler = broker_reconciler.BrokerReconciler(runtime=runtime)
     result = reconciler.apply_mosquitto_config("listener 1900\nallow_anonymous true\n")
@@ -31,7 +31,7 @@ def test_broker_reconciler_applies_mosquitto_config_and_creates_backup(tmp_path,
     assert result["errors"] == []
     assert result["rollbackNote"] is None
     assert conf_path.read_text(encoding="utf-8") == "listener 1900\nallow_anonymous true\n"
-    assert reload_calls == ["reload"]
+    assert restart_calls == ["restart"]
     assert len(list(backup_dir.iterdir())) == 1
 
 

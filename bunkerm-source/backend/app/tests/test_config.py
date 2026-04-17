@@ -107,6 +107,40 @@ async def test_get_mosquitto_config_status_returns_unmanaged_without_desired_sta
     assert body["scope"] == "broker.mosquitto_config"
 
 
+def test_get_observed_mosquitto_config_prefers_observability_in_daemon_mode(monkeypatch, tmp_path):
+    """En modo daemon/k8s, la observacion debe venir del broker y no del archivo local del pod web."""
+    conf_path = tmp_path / "mosquitto.conf"
+    conf_path.write_text("log_dest syslog\n", encoding="utf-8")
+
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(desired_state_svc.settings, "broker_reconcile_mode", "daemon")
+    monkeypatch.setattr(
+        desired_state_svc.broker_observability_client,
+        "fetch_broker_mosquitto_config_sync",
+        lambda: {
+            "config": {"allow_anonymous": "false"},
+            "listeners": [
+                {
+                    "port": 1900,
+                    "bind_address": "",
+                    "per_listener_settings": False,
+                    "max_connections": 500,
+                    "protocol": None,
+                }
+            ],
+            "max_inflight_messages": None,
+            "max_queued_messages": None,
+            "tls": None,
+        },
+    )
+
+    observed = desired_state_svc.get_observed_mosquitto_config()
+
+    assert observed["listeners"][0]["port"] == 1900
+    assert observed["listeners"][0]["max_connections"] == 500
+    assert observed["config"]["allow_anonymous"] == "false"
+
+
 async def test_save_mosquitto_config_uses_desired_state_and_returns_control_plane_metadata(client, monkeypatch, tmp_path):
     """Guardar config pasa por desired state y deja estado aplicado auditable."""
     conf_path = tmp_path / "mosquitto.conf"
@@ -119,7 +153,7 @@ async def test_save_mosquitto_config_uses_desired_state_and_returns_control_plan
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
     payload = {
         "config": {
             "allow_anonymous": "false",
@@ -169,7 +203,7 @@ async def test_remove_listener_updates_control_plane_state(client, monkeypatch, 
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
 
     resp = await client.post("/api/v1/config/remove-mosquitto-listener", json={"port": 9001})
     assert resp.status_code == 200
@@ -226,7 +260,7 @@ async def test_mosquitto_config_status_detects_drift_after_external_change(clien
     monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
     monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
     monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", lambda: None)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
     payload = {
         "config": {
             "allow_anonymous": "false",
@@ -269,7 +303,7 @@ async def test_save_mosquitto_config_returns_500_and_rolls_back_when_reload_fail
         if signal_calls["count"] == 1:
             raise RuntimeError("reload failed")
 
-    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_reload", fail_then_succeed)
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", fail_then_succeed)
 
     payload = {
         "config": {

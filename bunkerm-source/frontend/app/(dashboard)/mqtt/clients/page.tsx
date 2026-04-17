@@ -23,6 +23,15 @@ export default function ClientsPage() {
   const [totalPages, setTotalPages] = useState(1)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const fetchReferenceData = useCallback(async () => {
+    const [rolesRes, groupsRes] = await Promise.all([
+      dynsecApi.getRoles(),
+      dynsecApi.getGroups(),
+    ])
+    setRoles(rolesRes as Role[])
+    setGroups(groupsRes as Group[])
+  }, [])
+
   // Core fetch — reads page+search from dynamic-security.json in one backend call (no N+1)
   const fetchClients = useCallback(async (
     p: number,
@@ -31,11 +40,7 @@ export default function ClientsPage() {
   ) => {
     if (showRefresh) setRefreshing(true)
     try {
-      const [res, rolesRes, groupsRes] = await Promise.all([
-        dynsecApi.getClientsPaginated({ page: p, limit: PAGE_SIZE, search: s || undefined }),
-        dynsecApi.getRoles(),
-        dynsecApi.getGroups(),
-      ])
+      const res = await dynsecApi.getClientsPaginated({ page: p, limit: PAGE_SIZE, search: s || undefined })
       // Map flat role/group string arrays to the { rolename, groupname } shape
       const clientsList: MqttClient[] = res.clients.map((client: ClientSummary) => ({
         username: client.username,
@@ -48,8 +53,6 @@ export default function ClientsPage() {
       setTotalPages(res.pages)
       // If a delete left us on a now-empty page, clamp back
       if (p > res.pages) setPage(Math.max(1, res.pages))
-      setRoles(rolesRes as Role[])
-      setGroups(groupsRes as Group[])
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
@@ -60,8 +63,11 @@ export default function ClientsPage() {
 
   // Initial load
   useEffect(() => {
+    fetchReferenceData().catch((err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to load reference data')
+    })
     fetchClients(1, '')
-  }, [fetchClients])
+  }, [fetchClients, fetchReferenceData])
 
   // Debounced search — resets to page 1 after 300 ms idle
   const handleSearchChange = useCallback((value: string) => {
@@ -79,8 +85,12 @@ export default function ClientsPage() {
   }, [search, fetchClients])
 
   const handleRefresh = useCallback(() => {
-    fetchClients(page, search, true)
-  }, [page, search, fetchClients])
+    setRefreshing(true)
+    Promise.all([fetchReferenceData(), fetchClients(page, search, true)]).catch((err) => {
+      toast.error(err instanceof Error ? err.message : 'Failed to refresh data')
+      setRefreshing(false)
+    })
+  }, [page, search, fetchClients, fetchReferenceData])
 
   if (loading) {
     return (

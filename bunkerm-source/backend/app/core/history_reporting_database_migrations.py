@@ -36,11 +36,15 @@ def history_reporting_alembic_ini_path() -> Path:
     return _app_root() / "history_reporting_alembic.ini"
 
 
+def _escape_config_parser_value(value: str) -> str:
+    return value.replace("%", "%%")
+
+
 def create_history_reporting_alembic_config(database_url: str) -> Config:
     alembic_ini = history_reporting_alembic_ini_path()
     cfg = Config(str(alembic_ini))
     cfg.set_main_option("script_location", str(_app_root() / "history_reporting_alembic"))
-    cfg.set_main_option("sqlalchemy.url", get_async_database_url(database_url))
+    cfg.set_main_option("sqlalchemy.url", _escape_config_parser_value(get_async_database_url(database_url)))
     cfg.set_main_option("version_table", HISTORY_REPORTING_VERSION_TABLE)
     return cfg
 

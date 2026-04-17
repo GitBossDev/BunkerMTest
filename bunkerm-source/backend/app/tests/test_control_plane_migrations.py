@@ -3,7 +3,10 @@ from __future__ import annotations
 from sqlalchemy import select, text
 from sqlalchemy import inspect
 
-from core.database_migrations import upgrade_control_plane_database_sync
+from core.database_migrations import (
+    create_control_plane_alembic_config,
+    upgrade_control_plane_database_sync,
+)
 from core.sync_database import create_sync_engine_for_url
 from models.orm import (
     AlertConfigEntry,
@@ -56,6 +59,17 @@ def test_control_plane_alembic_upgrade_creates_expected_tables(tmp_path):
     assert "ix_broker_reconcile_secret_scope" in secret_indexes
     assert "ix_broker_reconcile_secret_version" in secret_indexes
     assert "ix_broker_reconcile_secret_expires_at" in secret_indexes
+
+
+def test_control_plane_alembic_config_accepts_percent_encoded_password():
+    cfg = create_control_plane_alembic_config(
+        "postgresql://bunkerm:jHD%3DimxUb%3DqJw8wJyAh.~Tv5@postgres:5432/bunkerm_db"
+    )
+
+    assert (
+        cfg.get_main_option("sqlalchemy.url")
+        == "postgresql+asyncpg://bunkerm:jHD%3DimxUb%3DqJw8wJyAh.~Tv5@postgres:5432/bunkerm_db"
+    )
 
 
 def test_control_plane_alembic_upgrade_stamps_existing_bootstrapped_schema(tmp_path):

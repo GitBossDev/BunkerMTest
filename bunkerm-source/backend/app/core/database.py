@@ -1,11 +1,18 @@
 """
 Motor SQLAlchemy async compartido por todos los módulos del backend unificado.
 """
+import asyncio
+import logging
+import time
+
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from core.config import settings
 from core.database_url import ensure_postgres_url, get_async_database_url, get_async_engine_connect_args
+
+logger = logging.getLogger(__name__)
 
 _async_database_url = get_async_database_url(settings.resolved_control_plane_database_url)
 
@@ -51,11 +58,30 @@ async def init_db() -> None:
     ensure_postgres_url(history_database_url, "HISTORY_DATABASE_URL")
     ensure_postgres_url(reporting_database_url, "REPORTING_DATABASE_URL")
 
-    await upgrade_control_plane_database(settings.resolved_control_plane_database_url)
+    startup_timeout_seconds = 60.0
+    retry_delay_seconds = 2.0
+    deadline = time.monotonic() + startup_timeout_seconds
+    last_error: Exception | None = None
 
-    await upgrade_history_reporting_databases(
-        [
-            history_database_url,
-            reporting_database_url,
-        ]
-    )
+    while True:
+        try:
+            await upgrade_control_plane_database(settings.resolved_control_plane_database_url)
+
+            await upgrade_history_reporting_databases(
+                [
+                    history_database_url,
+                    reporting_database_url,
+                ]
+            )
+            return
+        except OperationalError as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                raise
+            logger.warning(
+                "PostgreSQL aun no esta listo para migraciones (%s). Reintentando en %.1f s...",
+                exc,
+                retry_delay_seconds,
+            )
+            await asyncio.sleep(retry_delay_seconds)
+

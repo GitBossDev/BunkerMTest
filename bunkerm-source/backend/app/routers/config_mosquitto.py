@@ -200,22 +200,22 @@ async def restart_mosquitto(
     api_key: str = Security(get_api_key),
     db: AsyncSession = Depends(get_db),
 ):
-    """Señaliza al contenedor Mosquitto para recargar configuración vía SIGHUP."""
+    """Señaliza al contenedor Mosquitto para reiniciar el broker de forma limpia."""
     try:
         state = await desired_state_svc.set_broker_reload_desired(
             db,
-            {"reason": "manual-config-reload", "requestedBy": "config-router"},
+            {"reason": "manual-config-restart", "requestedBy": "config-router"},
         )
         state = await desired_state_svc.reconcile_or_wait(
             state,
             desired_state_svc.reconcile_broker_reload_signal,
             db,
         )
-        _ensure_reconcile_success(state, "Mosquitto reload signal failed")
-        logger.info("Reload signal delegado al control-plane broker-facing")
+        _ensure_reconcile_success(state, "Mosquitto restart signal failed")
+        logger.info("Restart signal delegado al control-plane broker-facing")
         return {
             "success": True,
-            "message": "Broker reloading config. Connections are not dropped.",
+            "message": "Broker restarting cleanly to apply configuration changes.",
             "controlPlane": {
                 "scope": state.scope,
                 "version": state.version,
@@ -224,8 +224,8 @@ async def restart_mosquitto(
             },
         }
     except Exception as exc:
-        logger.error("Failed to signal Mosquitto reload: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Failed to signal Mosquitto reload: {exc}")
+        logger.error("Failed to signal Mosquitto restart: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to signal Mosquitto restart: {exc}")
 
 
 @router.post("/remove-mosquitto-listener")

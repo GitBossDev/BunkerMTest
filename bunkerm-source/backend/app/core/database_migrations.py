@@ -48,11 +48,15 @@ def control_plane_alembic_ini_path() -> Path:
     return _app_root() / "alembic.ini"
 
 
+def _escape_config_parser_value(value: str) -> str:
+    return value.replace("%", "%%")
+
+
 def create_control_plane_alembic_config(database_url: str) -> Config:
     alembic_ini = control_plane_alembic_ini_path()
     cfg = Config(str(alembic_ini))
     cfg.set_main_option("script_location", str(_app_root() / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", get_async_database_url(database_url))
+    cfg.set_main_option("sqlalchemy.url", _escape_config_parser_value(get_async_database_url(database_url)))
     return cfg
 
 

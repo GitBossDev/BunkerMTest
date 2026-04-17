@@ -22,7 +22,9 @@ configMapGenerator:
       - MQTT_PORT=1900
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
-      - FRONTEND_URL=http://localhost:2000
+      - FRONTEND_URL=http://localhost:22000
+      - NEXTAUTH_URL=http://localhost:22000
+      - NEXT_PUBLIC_API_URL=http://localhost:22000
       - ALLOWED_ORIGINS=*
       - ALLOWED_HOSTS=*
       - RATE_LIMIT_PER_MINUTE=100

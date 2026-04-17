@@ -9,8 +9,9 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from config.dynsec_config import validate_dynsec_json
-from config.mosquitto_config import _signal_mosquitto_reload
+from config.mosquitto_config import _signal_mosquitto_reload, _signal_mosquitto_restart
 from core.config import settings
+from services import monitor_service
 from services.broker_runtime import BrokerRuntimePort, _signal_dynsec_reload, get_local_broker_runtime
 
 _MOSQUITTO_CONF_PATH: str = settings.mosquitto_conf_path
@@ -53,6 +54,9 @@ class _ModuleConfiguredBrokerRuntime:
 
     def signal_mosquitto_reload(self) -> None:
         _signal_mosquitto_reload()
+
+    def signal_mosquitto_restart(self) -> None:
+        _signal_mosquitto_restart()
 
     def signal_dynsec_reload(self) -> None:
         _signal_dynsec_reload()
@@ -125,6 +129,14 @@ class BrokerReconciler:
             return []
         except Exception as exc:
             return [f"signalMosquittoReload: {exc}"]
+
+    def signal_mosquitto_restart(self) -> List[str]:
+        try:
+            self.runtime.signal_mosquitto_restart()
+            monitor_service.invalidate_max_connections_cache()
+            return []
+        except Exception as exc:
+            return [f"signalMosquittoRestart: {exc}"]
 
     def apply_client_projection(
         self,
@@ -416,7 +428,8 @@ class BrokerReconciler:
             with open(self.runtime.mosquitto_conf_path, "w", encoding="utf-8") as handle:
                 handle.write(rendered_content)
             os.chmod(self.runtime.mosquitto_conf_path, 0o644)
-            self.runtime.signal_mosquitto_reload()
+            self.runtime.signal_mosquitto_restart()
+            monitor_service.invalidate_max_connections_cache()
         except Exception as exc:
             errors.append(str(exc))
             if previous_content:
@@ -424,7 +437,8 @@ class BrokerReconciler:
                     with open(self.runtime.mosquitto_conf_path, "w", encoding="utf-8") as handle:
                         handle.write(previous_content)
                     os.chmod(self.runtime.mosquitto_conf_path, 0o644)
-                    self.runtime.signal_mosquitto_reload()
+                    self.runtime.signal_mosquitto_restart()
+                    monitor_service.invalidate_max_connections_cache()
                     rollback_note = "rollback applied"
                 except Exception as rollback_exc:
                     rollback_note = f"rollback failed: {rollback_exc}"

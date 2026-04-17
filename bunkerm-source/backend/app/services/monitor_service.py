@@ -149,6 +149,11 @@ def save_alert_config(cfg: dict) -> None:
 _max_connections_cache: dict = {"value": 0, "ts": 0.0}
 
 
+def invalidate_max_connections_cache() -> None:
+    _max_connections_cache["value"] = 0
+    _max_connections_cache["ts"] = 0.0
+
+
 def read_max_connections() -> int:
     """Lee max_connections del mosquitto.conf (caché 30 s)."""
     now = time.time()
@@ -818,32 +823,23 @@ def connect_mqtt():
             logger.warning("Desconexión inesperada del broker MQTT (rc=%s), reconectando…", rc)
 
     try:
-        try:
-            client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-        except AttributeError:
-            client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
-
-        client.username_pw_set(username, password)
-        client.on_connect    = on_connect
-        client.on_disconnect = on_disconnect
-        client.on_message    = on_message
-
-        if not broker_host:
-            raise ValueError("MOSQUITTO_IP no está configurado")
-
-        client.connect(broker_host, broker_port, 60)
-        return client
-
-    except (ConnectionRefusedError, socket.error) as exc:
-        logger.error("Fallo de conexión al broker: %s", exc)
-    except Exception as exc:
-        logger.error("Error inesperado al conectar al broker: %s", exc)
-
-    # Devolvemos un cliente dummy que no produce excepciones al llamar loop_start/stop
-    try:
-        dummy = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
     except AttributeError:
-        dummy = mqtt_client.Client(client_id="dummy-client", protocol=mqtt_client.MQTTv5)
-    dummy.loop_start = lambda: None
-    dummy.loop_stop  = lambda: None
-    return dummy
+        client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
+
+    client.username_pw_set(username, password)
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
+    client.on_message = on_message
+    client.reconnect_delay_set(min_delay=1, max_delay=10)
+
+    if not broker_host:
+        raise ValueError("MOSQUITTO_IP no está configurado")
+
+    try:
+        client.connect_async(broker_host, broker_port, 60)
+    except Exception as exc:
+        logger.error("Error inesperado preparando la conexión al broker: %s", exc)
+        mqtt_stats._is_connected = False
+
+    return client

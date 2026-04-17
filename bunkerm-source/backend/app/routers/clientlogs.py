@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, Set
+from typing import Dict, Set
 
 from fastapi import APIRouter, Security, status
 
@@ -83,85 +83,11 @@ def build_activity_summary(window_seconds: int = 600) -> Dict[str, int]:
     }
 
 
-def _entry_names(items: Iterable[Any], key: str) -> Set[str]:
-    names: Set[str] = set()
-    for item in items or []:
-        if isinstance(item, dict):
-            name = item.get(key)
-        else:
-            name = item
-        if isinstance(name, str) and name:
-            names.add(name)
-    return names
-
-
 def _build_client_capability_map() -> Dict[str, Dict[str, bool]]:
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
+        return desired_state_svc.get_cached_observed_dynsec_capability_map()
     except Exception:
         return {}
-    default_acl = data.get("defaultACLAccess", {})
-    default_publish = bool(default_acl.get("publishClientSend", True))
-    default_subscribe = bool(default_acl.get("subscribe", True))
-
-    role_caps: Dict[str, Dict[str, bool]] = {}
-    for role in data.get("roles", []):
-        role_name = role.get("rolename")
-        if not isinstance(role_name, str) or not role_name:
-            continue
-        caps = {"publish": False, "subscribe": False}
-        for acl in role.get("acls", []):
-            acl_type = acl.get("acltype") or acl.get("aclType")
-            allow = acl.get("allow")
-            if allow is None:
-                allow = str(acl.get("permission", "")).lower() == "allow"
-            if not allow:
-                continue
-            if acl_type == "publishClientSend":
-                caps["publish"] = True
-            if acl_type in ("subscribe", "subscribeLiteral", "subscribePattern"):
-                caps["subscribe"] = True
-        role_caps[role_name] = caps
-
-    group_roles: Dict[str, Set[str]] = {}
-    group_clients: Dict[str, Set[str]] = {}
-    for group in data.get("groups", []):
-        group_name = group.get("groupname")
-        if not isinstance(group_name, str) or not group_name:
-            continue
-        group_roles[group_name] = _entry_names(group.get("roles", []), "rolename")
-        group_clients[group_name] = _entry_names(group.get("clients", []), "username")
-
-    capability_map: Dict[str, Dict[str, bool]] = {}
-    for client in data.get("clients", []):
-        username = client.get("username")
-        if not isinstance(username, str) or not username:
-            continue
-        direct_roles = _entry_names(client.get("roles", []), "rolename")
-        client_groups = _entry_names(client.get("groups", []), "groupname")
-        for group_name, members in group_clients.items():
-            if username in members:
-                client_groups.add(group_name)
-
-        effective_roles = set(direct_roles)
-        for group_name in client_groups:
-            effective_roles.update(group_roles.get(group_name, set()))
-
-        can_publish = default_publish
-        can_subscribe = default_subscribe
-        for role_name in effective_roles:
-            caps = role_caps.get(role_name)
-            if not caps:
-                continue
-            can_publish = can_publish or caps["publish"]
-            can_subscribe = can_subscribe or caps["subscribe"]
-
-        capability_map[username] = {
-            "publish": can_publish,
-            "subscribe": can_subscribe,
-        }
-
-    return capability_map
 
 
 @router.get("/events")
@@ -224,8 +150,8 @@ async def get_client_activity(username: str, days: int = 30, limit: int = 200,
                               api_key: str = Security(get_api_key)):
     """Devuelve auditoría persistida reciente de un cliente MQTT."""
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
+        index = desired_state_svc.get_cached_observed_dynsec_index()
+        client_activity_storage.reconcile_dynsec_clients_throttled(index.get("client_lookup", {}).values())
     except Exception:
         pass
     return client_activity_storage.get_client_activity(username=username, days=days, limit=limit)

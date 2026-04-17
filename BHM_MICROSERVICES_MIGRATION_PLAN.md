@@ -2,7 +2,7 @@
 
 > **Proyecto**: BHM (Broker Health Manager)
 > **Objetivo**: Migrar la solución actual a una arquitectura de microservicios, operativa primero sobre Docker/Podman Compose y preparada para una evolución posterior a Kubernetes.
-> **Última actualización**: 2026-04-16
+> **Última actualización**: 2026-04-17
 
 ---
 
@@ -809,6 +809,15 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 **Objetivo**: Consolidar el comportamiento stateless del backend de gestión y establecer baseline de carga y estabilidad.
 
+### Avance reciente
+
+- [x] El estado observado de DynSec ahora se reutiliza mediante un indice en memoria con TTL e invalidacion explicita, reduciendo el coste de listar clientes, roles, grupos y ACLs por defecto sobre datasets grandes.
+- [x] `clientlogs` ya reutiliza el mapa de capabilities observado y limita la reconciliacion del registro de clientes, evitando trabajo repetido en cada consulta.
+- [x] La pagina de clientes del frontend ya no refetcha en exceso roles y grupos junto con cada pagina de resultados, recortando latencia visible en listados y filtros.
+- [x] La aplicacion de `mosquitto.conf` paso de recarga ligera a semantica de reinicio controlado del broker, con invalidacion de cache de `max_connections` y regresiones especificas para evitar falsos `applied`.
+- [x] El modo daemon/Kubernetes ya toma `mosquitto.conf` observado desde `bhm-broker-observability` en vez de preferir el filesystem local del pod web, cerrando un caso real de drift falso en runtime distribuido.
+- [~] El baseline de resiliencia ya incluye recuperacion automatica de la maquina Podman y del socket remoto antes de bootstrapear `kind`, pero el laboratorio sigue mostrando una inestabilidad residual en la Web UI aunque el backend y los workloads queden arriba.
+
 ### Actividades
 
 - [ ] Definir baseline del sistema actual antes de cambios mayores.
@@ -872,6 +881,9 @@ Estado actual del carril opcional:
 - [x] `Mosquitto` ya dejó de ser placeholder y quedó modelado como `StatefulSet` broker-owned con PVCs propios, sidecars `bhm-reconciler` y `bhm-broker-observability`, y exposición controlada por `NodePort` en el laboratorio.
 - [x] El handoff efímero de `create_client` ya se movió al control-plane PostgreSQL, lo que permitió separar el pod HTTP del broker en el laboratorio Kubernetes sin depender de un volumen compartido `/nextjs/data/reconcile-secrets`.
 - [x] TLS y `mosquitto_passwd` ya tienen una traducción inicial a `Secret` dedicados de Kubernetes mediante bootstrap por `initContainer`, aunque la rotación y reconciliación nativa sobre objetos `Secret` siga pendiente como siguiente corte.
+- [x] `deploy.ps1` y `k8s/scripts/bootstrap-kind.ps1` ya recuperan automaticamente una maquina Podman rota o sin socket util antes de invocar `kind`, evitando que el flujo limpio falle en `kind create cluster` por estado remoto corrupto del proveedor.
+- [x] El bootstrap de `kind` ya carga las imagenes locales del laboratorio mediante `image-archive` cuando el proveedor es Podman, evitando la inconsistencia de `kind load docker-image` con tags canonicos `localhost/...`.
+- [~] El flujo limpio `setup -> build -> start` ya supera el fallo original de creacion de cluster, crea el laboratorio, carga imagenes y aplica manifests sobre `kind`; queda pendiente dejar otra vez verde el smoke completo de la Web UI para considerar estable este carril opcional.
 
 ### Plan de acción recomendado
 

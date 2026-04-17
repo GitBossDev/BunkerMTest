@@ -31,10 +31,10 @@ spec:
           image: localhost/bunkermtest-bunkerm:latest
           imagePullPolicy: Never
           envFrom:
-            - configMapRef:
-                name: bhm-k8s-config
             - secretRef:
                 name: bhm-env
+            - configMapRef:
+                name: bhm-k8s-config
           ports:
             - name: http
               containerPort: 2000

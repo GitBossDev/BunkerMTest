@@ -7,8 +7,9 @@
 #   2. Actuar como supervisor de mosquitto (PID 1 es este script, no mosquitto).
 #      Al correr mosquitto como subproceso se puede enviar SIGKILL sin restricciones
 #      del kernel (solo PID 1 esta protegido contra SIGKILL desde dentro).
-#   3. Gestionar dos tipos de recarga via ficheros de señal:
+#   3. Gestionar tres tipos de recarga via ficheros de señal:
 #        .reload        → SIGHUP al subproceso mosquitto (recarga mosquitto.conf)
+#        .restart       → SIGTERM al subproceso + restart limpio
 #        .dynsec-reload → SIGKILL al subproceso + restart (DynSec relee el JSON)
 #   4. Reenviar SIGTERM/INT de Docker al subproceso mosquitto para shutdown limpio.
 # =============================================================================
@@ -197,6 +198,7 @@ chown mosquitto:mosquitto /var/log/mosquitto/mosquitto.log
 #
 # Tipos de señal via fichero compartido:
 #   .reload        → SIGHUP  a mosquitto: recarga mosquitto.conf sin perder conexiones
+#   .restart       → SIGTERM a mosquitto: reinicio limpio para opciones no hot-reloadables
 #   .dynsec-reload → SIGKILL a mosquitto: lo detiene sin flush del estado DynSec,
 #                    preservando el JSON recien importado; el supervisor lo reinicia.
 #
@@ -393,6 +395,14 @@ while true; do
         rm -f /var/lib/mosquitto/.dynsec-reload
         echo "[supervisor] Recarga DynSec solicitada — SIGKILL a mosquitto (PID $MOSQUITTO_PID)..."
         kill -KILL "$MOSQUITTO_PID" 2>/dev/null
+        wait "$MOSQUITTO_PID" 2>/dev/null || true
+        sleep 1
+        start_mosquitto
+
+    elif [ -f /var/lib/mosquitto/.restart ]; then
+        rm -f /var/lib/mosquitto/.restart
+        echo "[supervisor] Restart solicitado — SIGTERM a mosquitto (PID $MOSQUITTO_PID)..."
+        kill -TERM "$MOSQUITTO_PID" 2>/dev/null || true
         wait "$MOSQUITTO_PID" 2>/dev/null || true
         sleep 1
         start_mosquitto

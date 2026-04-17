@@ -40,6 +40,7 @@ export interface ClientGroup {
 export interface Role {
   rolename: string
   acls?: ACL[]
+  aclCount?: number
 }
 
 export interface ACL {
@@ -54,6 +55,19 @@ export interface Group {
   groupname: string
   roles?: ClientRole[]
   clients?: ClientWithPriority[]
+  roleCount?: number
+  clientCount?: number
+}
+
+export interface RoleSummary {
+  rolename: string
+  aclCount: number
+}
+
+export interface GroupSummary {
+  groupname: string
+  roleCount: number
+  clientCount: number
 }
 
 export interface ClientWithPriority {

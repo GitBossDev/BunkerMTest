@@ -66,7 +66,7 @@ Si quieres forzar la carga de la imagen local dentro del clúster:
 Si `kubectl` o `kind` no están en `PATH`:
 
 ```powershell
-./k8s/scripts/bootstrap-kind.ps1 -Provider podman -KubectlCommand "C:\Users\mdchuchon\AppData\Local\Programs\Freelens\resources\x64\kubectl.exe" -KindCommand "C:\ruta\a\kind.exe"
+./k8s/scripts/bootstrap-kind.ps1 -Provider podman -KubectlCommand "C:\ruta\a\kubectl.exe" -KindCommand "C:\ruta\a\kind.exe"
 ```
 
 Acceso esperado tras el bootstrap:

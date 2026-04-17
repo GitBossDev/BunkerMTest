@@ -22,13 +22,12 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { dynsecApi } from '@/lib/api'
-import type { Group, MqttClient } from '@/types'
+import type { Group } from '@/types'
 
 interface GroupMembersDialogProps {
   group: Group | null
   open: boolean
   onOpenChange: (v: boolean) => void
-  allClients: MqttClient[]
   onSuccess: () => void
 }
 
@@ -43,7 +42,6 @@ export function GroupMembersDialog({
   group,
   open,
   onOpenChange,
-  allClients,
   onSuccess,
 }: GroupMembersDialogProps) {
   const [selectedClient, setSelectedClient] = useState<string>('')
@@ -52,6 +50,20 @@ export function GroupMembersDialog({
   const [addingMember, setAddingMember] = useState(false)
   const [loading, setLoading] = useState(false)
   const [currentMembers, setCurrentMembers] = useState<string[]>([])
+  const [allUsernames, setAllUsernames] = useState<string[]>([])
+  const [loadingUsernames, setLoadingUsernames] = useState(false)
+
+  const fetchAllUsernames = async () => {
+    setLoadingUsernames(true)
+    try {
+      const usernames = await dynsecApi.getAllClientUsernames()
+      setAllUsernames(usernames)
+    } catch {
+      setAllUsernames([])
+    } finally {
+      setLoadingUsernames(false)
+    }
+  }
 
   const fetchGroupDetail = async (groupname: string) => {
     setLoading(true)
@@ -69,11 +81,12 @@ export function GroupMembersDialog({
     if (open && group) {
       setCurrentMembers([])
       fetchGroupDetail(group.groupname)
+      fetchAllUsernames()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, group?.groupname])
 
-  const assignableClients = allClients.filter((c) => !currentMembers.includes(c.username))
+  const assignableClients = allUsernames.filter((username) => !currentMembers.includes(username))
 
   const handleRemoveMember = async (username: string) => {
     if (!group) return
@@ -168,7 +181,9 @@ export function GroupMembersDialog({
           {/* Add member */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Add Member</Label>
-            {assignableClients.length === 0 ? (
+            {loadingUsernames ? (
+              <p className="text-sm text-muted-foreground">Loading clients...</p>
+            ) : assignableClients.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 All clients are already members of this group.
               </p>
@@ -179,9 +194,9 @@ export function GroupMembersDialog({
                     <SelectValue placeholder="Select a client..." />
                   </SelectTrigger>
                   <SelectContent>
-                    {assignableClients.map((client) => (
-                      <SelectItem key={client.username} value={client.username}>
-                        {client.username}
+                    {assignableClients.map((username) => (
+                      <SelectItem key={username} value={username}>
+                        {username}
                       </SelectItem>
                     ))}
                   </SelectContent>

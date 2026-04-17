@@ -26,16 +26,14 @@ import { CreateGroupDialog } from './CreateGroupDialog'
 import { GroupMembersDialog } from './GroupMembersDialog'
 import { GroupRolesDialog } from './GroupRolesDialog'
 import { dynsecApi } from '@/lib/api'
-import type { Group, MqttClient, Role } from '@/types'
+import type { Group } from '@/types'
 
 interface GroupsTableProps {
   groups: Group[]
-  allClients: MqttClient[]
-  allRoles: Role[]
   onRefresh: () => void
 }
 
-export function GroupsTable({ groups, allClients, allRoles, onRefresh }: GroupsTableProps) {
+export function GroupsTable({ groups, onRefresh }: GroupsTableProps) {
   const [createOpen, setCreateOpen] = useState(false)
   const [membersGroup, setMembersGroup] = useState<Group | null>(null)
   const [rolesGroup, setRolesGroup] = useState<Group | null>(null)
@@ -98,14 +96,14 @@ export function GroupsTable({ groups, allClients, allRoles, onRefresh }: GroupsT
                     <TableCell className="font-medium">{group.groupname}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">
-                        {(group.clients ?? []).length} member
-                        {(group.clients ?? []).length !== 1 ? 's' : ''}
+                        {(group.clientCount ?? (group.clients ?? []).length)} member
+                        {(group.clientCount ?? (group.clients ?? []).length) !== 1 ? 's' : ''}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {(group.roles ?? []).length} role
-                        {(group.roles ?? []).length !== 1 ? 's' : ''}
+                        {(group.roleCount ?? (group.roles ?? []).length)} role
+                        {(group.roleCount ?? (group.roles ?? []).length) !== 1 ? 's' : ''}
                       </Badge>
                     </TableCell>
                     <TableCell>
@@ -178,7 +176,6 @@ export function GroupsTable({ groups, allClients, allRoles, onRefresh }: GroupsT
         group={membersGroup}
         open={membersGroup !== null}
         onOpenChange={(v) => { if (!v) setMembersGroup(null) }}
-        allClients={allClients}
         onSuccess={onRefresh}
       />
 
@@ -187,7 +184,6 @@ export function GroupsTable({ groups, allClients, allRoles, onRefresh }: GroupsT
         group={rolesGroup}
         open={rolesGroup !== null}
         onOpenChange={(v) => { if (!v) setRolesGroup(null) }}
-        allRoles={allRoles}
         onSuccess={onRefresh}
       />
 

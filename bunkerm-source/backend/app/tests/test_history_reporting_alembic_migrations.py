@@ -4,6 +4,7 @@ from sqlalchemy import inspect, text
 
 from core.history_reporting_database_migrations import (
     HISTORY_REPORTING_VERSION_TABLE,
+    create_history_reporting_alembic_config,
     upgrade_history_reporting_database_sync,
 )
 from core.sync_database import create_sync_engine_for_url
@@ -27,6 +28,17 @@ def test_history_reporting_alembic_upgrade_creates_expected_tables(tmp_path):
     assert "topic_registry" in table_names
     assert "client_registry" in table_names
     assert "client_session_events" in table_names
+
+
+def test_history_reporting_alembic_config_accepts_percent_encoded_password():
+    cfg = create_history_reporting_alembic_config(
+        "postgresql://bunkerm:jHD%3DimxUb%3DqJw8wJyAh.~Tv5@postgres:5432/bunkerm_db"
+    )
+
+    assert (
+        cfg.get_main_option("sqlalchemy.url")
+        == "postgresql+asyncpg://bunkerm:jHD%3DimxUb%3DqJw8wJyAh.~Tv5@postgres:5432/bunkerm_db"
+    )
 
 
 def test_history_reporting_alembic_upgrade_accepts_partially_bootstrapped_schema(tmp_path):

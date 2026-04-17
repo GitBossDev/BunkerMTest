@@ -28,7 +28,6 @@ interface GroupRolesDialogProps {
   group: Group | null
   open: boolean
   onOpenChange: (v: boolean) => void
-  allRoles: Role[]
   onSuccess: () => void
 }
 
@@ -42,7 +41,6 @@ export function GroupRolesDialog({
   group,
   open,
   onOpenChange,
-  allRoles,
   onSuccess,
 }: GroupRolesDialogProps) {
   const [selectedRole, setSelectedRole] = useState<string>('')
@@ -50,6 +48,20 @@ export function GroupRolesDialog({
   const [addingRole, setAddingRole] = useState(false)
   const [loading, setLoading] = useState(false)
   const [currentRoleNames, setCurrentRoleNames] = useState<string[]>([])
+  const [allRoles, setAllRoles] = useState<Role[]>([])
+  const [loadingRoles, setLoadingRoles] = useState(false)
+
+  const fetchAllRoles = async () => {
+    setLoadingRoles(true)
+    try {
+      const roles = await dynsecApi.getRoles()
+      setAllRoles(roles)
+    } catch {
+      setAllRoles([])
+    } finally {
+      setLoadingRoles(false)
+    }
+  }
 
   const fetchGroupDetail = async (groupname: string) => {
     setLoading(true)
@@ -67,6 +79,7 @@ export function GroupRolesDialog({
     if (open && group) {
       setCurrentRoleNames([])
       fetchGroupDetail(group.groupname)
+      fetchAllRoles()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, group?.groupname])
@@ -160,7 +173,9 @@ export function GroupRolesDialog({
           {/* Add role */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">Add Role</Label>
-            {assignableRoles.length === 0 ? (
+            {loadingRoles ? (
+              <p className="text-sm text-muted-foreground">Loading roles...</p>
+            ) : assignableRoles.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 All available roles are already assigned to this group.
               </p>

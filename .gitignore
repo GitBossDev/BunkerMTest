@@ -90,3 +90,6 @@ htmlcov/
 # Simulator env files
 greenhouse-simulator/src/Greenhouse.Sensors/mqtt-stresser.env
 greenhouse-simulator/src/Greenhouse.Sensors/mqtt-streeser.env
+
+# kind runtime artifacts
+tmp/kind-port-forward/

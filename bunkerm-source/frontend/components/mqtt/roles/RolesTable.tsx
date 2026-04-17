@@ -95,8 +95,8 @@ export function RolesTable({ roles, onRefresh }: RolesTableProps) {
                     <TableCell className="font-medium">{role.rolename}</TableCell>
                     <TableCell>
                       <Badge variant="secondary">
-                        {aclCounts[role.rolename] ?? (role.acls ?? []).length} ACL
-                        {(aclCounts[role.rolename] ?? (role.acls ?? []).length) !== 1 ? 's' : ''}
+                        {aclCounts[role.rolename] ?? role.aclCount ?? (role.acls ?? []).length} ACL
+                        {(aclCounts[role.rolename] ?? role.aclCount ?? (role.acls ?? []).length) !== 1 ? 's' : ''}
                       </Badge>
                     </TableCell>
                     <TableCell>

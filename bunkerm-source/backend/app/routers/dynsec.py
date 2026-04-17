@@ -55,6 +55,14 @@ class DefaultACLConfig(BaseModel):
 _DEFAULT_ACL_TYPES = ["publishClientSend", "publishClientReceive", "subscribe", "unsubscribe"]
 
 
+def _get_observed_dynsec_for_read() -> Dict[str, Any]:
+    return desired_state_svc.get_cached_observed_dynsec_config()
+
+
+def _get_observed_dynsec_index_for_read() -> Dict[str, Any]:
+    return desired_state_svc.get_cached_observed_dynsec_index()
+
+
 def _normalize_role_names(raw_roles: List[Any]) -> List[str]:
     """Normaliza roles a lista de nombres simple para la UI."""
     result: List[str] = []
@@ -144,9 +152,8 @@ async def list_clients(
 ):
     """Lista clientes desde dynamic-security.json con paginación y búsqueda."""
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
-        raw_clients = data.get("clients", [])
+        index = _get_observed_dynsec_index_for_read()
+        raw_clients = index.get("client_summaries", [])
 
         if search:
             q = search.lower()
@@ -163,8 +170,8 @@ async def list_clients(
             {
                 "username": c.get("username", ""),
                 "disabled": c.get("disabled", False),
-                "roles": _normalize_role_names(c.get("roles", [])),
-                "groups": _normalize_group_names(c.get("groups", [])),
+                "roles": list(c.get("roles", [])),
+                "groups": list(c.get("groups", [])),
             }
             for c in page_clients
         ]
@@ -187,15 +194,8 @@ async def list_clients(
 async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
     """Devuelve el mapa disabled y la lista de usernames para Connected Clients."""
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
-        clients = data.get("clients", [])
-        disabled_map = {
-            c["username"]: c.get("disabled", False)
-            for c in clients
-            if isinstance(c, dict) and c.get("username")
-        }
-        return {"map": disabled_map, "usernames": list(disabled_map.keys())}
+        index = _get_observed_dynsec_index_for_read()
+        return {"map": index.get("disabled_map", {}), "usernames": index.get("usernames", [])}
     except FileNotFoundError:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Dynamic security config not found")
@@ -208,9 +208,8 @@ async def get_clients_disabled_map(api_key: str = Security(get_api_key)):
 async def get_client(username: str, api_key: str = Security(get_api_key)):
     """Devuelve los detalles de un cliente específico."""
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        client_activity_storage.reconcile_dynsec_clients(data.get("clients", []))
-        client = dynsec_svc.find_client(data, username)
+        _get_observed_dynsec_index_for_read()
+        client = desired_state_svc.get_observed_client(username)
         if client is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Client {username} not found")
@@ -537,9 +536,12 @@ async def remove_client_role(username: str, role_name: str,
 @router.get("/roles")
 async def list_roles(api_key: str = Security(get_api_key)):
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        role_names = [r["rolename"] for r in data.get("roles", []) if "rolename" in r]
-        return {"roles": "\n".join(role_names)}
+        index = desired_state_svc.get_cached_observed_dynsec_index()
+        role_names = sorted(index.get("role_lookup", {}).keys())
+        return {
+            "roles": role_names,
+            "summaries": index.get("role_summaries", []),
+        }
     except FileNotFoundError:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Dynamic security config not found")
@@ -550,8 +552,7 @@ async def list_roles(api_key: str = Security(get_api_key)):
 @router.get("/roles/{role_name}")
 async def get_role(role_name: str, api_key: str = Security(get_api_key)):
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        role_data = dynsec_svc.find_role(data, role_name)
+        role_data = desired_state_svc.get_observed_role(role_name)
         if role_data is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Role {role_name} not found")
@@ -560,7 +561,7 @@ async def get_role(role_name: str, api_key: str = Security(get_api_key)):
                 "topic": a.get("topic", ""),
                 "aclType": a.get("acltype", ""),
                 "permission": "allow" if a.get("allow", False) else "deny",
-                "priority": a.get("priority", -1),
+                "priority": a.get("priority", 0),
             }
             for a in role_data.get("acls", [])
         ]
@@ -684,7 +685,7 @@ async def add_role_acl(role_name: str, acl: ACLRequest,
                     "acltype": acl.aclType,
                     "topic": acl.topic,
                     "allow": acl.permission == "allow",
-                    "priority": -1,
+                    "priority": 0,
                 }
             )
         state = await desired_state_svc.set_role_desired(db, payload)
@@ -763,9 +764,12 @@ async def remove_role_acl(role_name: str, acl_type: ACLType, topic: str,
 @router.get("/groups")
 async def list_groups(api_key: str = Security(get_api_key)):
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        group_names = [g["groupname"] for g in data.get("groups", []) if "groupname" in g]
-        return {"groups": "\n".join(group_names)}
+        index = desired_state_svc.get_cached_observed_dynsec_index()
+        group_names = sorted(index.get("group_lookup", {}).keys())
+        return {
+            "groups": group_names,
+            "summaries": index.get("group_summaries", []),
+        }
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
@@ -773,8 +777,7 @@ async def list_groups(api_key: str = Security(get_api_key)):
 @router.get("/groups/{group_name}")
 async def get_group(group_name: str, api_key: str = Security(get_api_key)):
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        group_data = dynsec_svc.find_group(data, group_name)
+        group_data = desired_state_svc.get_observed_group(group_name)
         if group_data is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                 detail=f"Group {group_name} not found")
@@ -1062,8 +1065,7 @@ async def remove_client_from_group(group_name: str, username: str,
 @router.get("/default-acl")
 async def get_default_acl(api_key: str = Security(get_api_key)):
     try:
-        data = desired_state_svc.get_observed_dynsec_config()
-        raw = data.get("defaultACLAccess", {})
+        raw = desired_state_svc.get_observed_default_acl()
         return {
             "publishClientSend": bool(raw.get("publishClientSend", True)),
             "publishClientReceive": bool(raw.get("publishClientReceive", True)),

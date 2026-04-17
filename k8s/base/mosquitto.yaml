@@ -126,14 +126,14 @@ spec:
           image: localhost/bunkermtest-bunkerm:latest
           imagePullPolicy: Never
           envFrom:
-            - configMapRef:
-                name: bhm-k8s-config
             - secretRef:
                 name: bhm-env
+            - configMapRef:
+                name: bhm-k8s-config
           command:
             - /bin/sh
             - -c
-            - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.broker_reconcile_daemon --interval 5
+            - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.broker_reconcile_daemon --interval 1
           volumeMounts:
             - name: mosquitto-data
               mountPath: /var/lib/mosquitto
