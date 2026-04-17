@@ -1,18 +1,15 @@
 """
 Entrega de notificaciones externas para alertas del monitor.
-
-Soporta dos canales opcionales:
-1) Email via SMTP
-
-
-Todo se controla por variables de entorno para no acoplar secretos al código.
+Email via SMTP.
 """
 from __future__ import annotations
 
 import logging
 import os
 import smtplib
+import socket
 import threading
+import time
 from email.message import EmailMessage
 from typing import Dict, List, Optional
 
@@ -50,6 +47,13 @@ def _build_message(alert: Dict[str, object]) -> str:
 	)
 
 
+def _smtp_host_candidates(primary_host: str) -> List[str]:
+	candidates = [primary_host]
+	if primary_host == "smtp.gmail.com":
+		candidates.append("smtp.googlemail.com")
+	return candidates
+
+
 def _send_email(alert: Dict[str, object]) -> None:
 	recipients = _csv(os.getenv("ALERT_NOTIFY_EMAIL_TO"))
 	if not recipients:
@@ -75,21 +79,65 @@ def _send_email(alert: Dict[str, object]) -> None:
 	msg["To"] = ", ".join(recipients)
 	msg.set_content(_build_message(alert))
 
-	if smtp_ssl:
-		with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15) as smtp:
-			if smtp_user and smtp_pass:
-				smtp.login(smtp_user, smtp_pass)
-			smtp.send_message(msg)
-		logger.info("Alert email sent to %s recipient(s)", len(recipients))
-		return
+	max_retries = 3
+	smtp_hosts = _smtp_host_candidates(smtp_host)
+	for host_index, current_host in enumerate(smtp_hosts, start=1):
+		for attempt in range(1, max_retries + 1):
+			try:
+				if smtp_ssl:
+					with smtplib.SMTP_SSL(current_host, smtp_port, timeout=15) as smtp:
+						if smtp_user and smtp_pass:
+							smtp.login(smtp_user, smtp_pass)
+						smtp.send_message(msg)
+				else:
+					with smtplib.SMTP(current_host, smtp_port, timeout=15) as smtp:
+						if smtp_starttls:
+							smtp.starttls()
+						if smtp_user and smtp_pass:
+							smtp.login(smtp_user, smtp_pass)
+						smtp.send_message(msg)
 
-	with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as smtp:
-		if smtp_starttls:
-			smtp.starttls()
-		if smtp_user and smtp_pass:
-			smtp.login(smtp_user, smtp_pass)
-		smtp.send_message(msg)
-	logger.info("Alert email sent to %s recipient(s)", len(recipients))
+				logger.info(
+					"Alert email sent successfully to %d recipient(s) via %s (attempt %d)",
+					len(recipients), current_host, attempt
+				)
+				return
+
+			except (socket.gaierror, socket.timeout, smtplib.SMTPServerDisconnected) as e:
+				# Transient network/DNS errors: retry same host, then fallback to the next candidate.
+				if attempt < max_retries:
+					wait_secs = 2 ** (attempt - 1)  # 1s, 2s, 4s backoff
+					logger.warning(
+						"Alert email send failed via %s (attempt %d/%d, transient error): %s. "
+						"Retrying in %ds...",
+						current_host, attempt, max_retries, type(e).__name__, wait_secs
+					)
+					time.sleep(wait_secs)
+				elif host_index < len(smtp_hosts):
+					logger.warning(
+						"Alert email host %s failed after %d attempts due to %s. Trying fallback host...",
+						current_host, max_retries, type(e).__name__
+					)
+					break
+				else:
+					logger.error(
+						"Alert email failed after %d attempts (DNS/network issue): %s host=%s port=%s",
+						max_retries, e, current_host, smtp_port
+					)
+					raise
+
+			except smtplib.SMTPAuthenticationError as e:
+				# Auth failure: don't retry.
+				logger.error(
+					"Alert email authentication failed (invalid credentials?): %s user=%s",
+					e, smtp_user
+				)
+				raise
+
+			except Exception as e:
+				# Other errors: don't retry.
+				logger.error("Alert email failed (permanent error): %s", e)
+				raise
 
 def _send_all(alert: Dict[str, object]) -> None:
 	email_enabled = _as_bool(os.getenv("ALERT_NOTIFY_EMAIL_ENABLED"), default=True)
@@ -97,8 +145,20 @@ def _send_all(alert: Dict[str, object]) -> None:
 	if email_enabled:
 		try:
 			_send_email(alert)
+		except socket.gaierror as dns_err:
+			# DNS failure: log prominently
+			logger.critical(
+				"ALERT EMAIL FAILED: DNS resolution error. Container network/DNS may be broken. "
+				"Alert will NOT reach email. Error: %s", dns_err
+			)
+		except smtplib.SMTPAuthenticationError as auth_err:
+			# Auth failure: configuration issue
+			logger.critical(
+				"ALERT EMAIL FAILED: SMTP authentication error. Check SMTP credentials. "
+				"Alert will NOT reach email. Error: %s", auth_err
+			)
 		except Exception as exc:
-			logger.error("Failed to send alert email notification: %s", exc)
+			logger.error("Alert email notification failed: %s", exc)
 	else:
 		logger.debug("Alert email notification disabled by config")
 

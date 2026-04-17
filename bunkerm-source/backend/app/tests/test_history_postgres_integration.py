@@ -20,6 +20,7 @@ from models.orm import (
     ClientSubscriptionState,
     ClientTopicEvent,
     TopicPublishBucket,
+    TopicMessageEvent,
     TopicRegistry,
     TopicSubscribeBucket,
 )
@@ -77,9 +78,9 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
             )
         )
 
-        topic_storage.record_publish(topic_a, payload_bytes=10, event_ts=tick_ts)
-        topic_storage.record_publish(topic_a, payload_bytes=15, event_ts=tick_ts + timedelta(seconds=40))
-        topic_storage.record_publish(topic_b, payload_bytes=20, event_ts=tick_ts + timedelta(minutes=3))
+        topic_storage.record_publish(topic_a, payload_bytes=10, payload_value='{"temp": 22.3}', qos=1, retained=False, event_ts=tick_ts)
+        topic_storage.record_publish(topic_a, payload_bytes=15, payload_value='{"temp": 22.8}', qos=1, retained=False, event_ts=tick_ts + timedelta(seconds=40))
+        topic_storage.record_publish(topic_b, payload_bytes=20, payload_value='{"status": "ok"}', qos=0, retained=True, event_ts=tick_ts + timedelta(minutes=3))
         topic_storage.record_subscribe(topic_a, event_ts=tick_ts)
         topic_storage.record_subscribe(topic_b, event_ts=tick_ts + timedelta(minutes=3))
 
@@ -158,6 +159,14 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
         assert len(activity["subscriptions"]) == 1
         assert len(activity["daily_summary"]) == 1
 
+        topic_a_history = topic_storage.get_topic_messages(topic_a, limit=10)
+        assert topic_a_history["topic"] == topic_a
+        assert topic_a_history["total"] >= 2
+        assert len(topic_a_history["history"]) >= 2
+        assert topic_a_history["history"][0]["kind"] == "message"
+        assert topic_a_history["history"][0]["qos"] == 1
+        assert '"temp"' in topic_a_history["history"][0]["value"]
+
         normalized_tick_ts = normalize_datetime(tick_ts)
         with session_factory() as session:
             tick_row = session.scalar(select(BrokerMetricTick).where(BrokerMetricTick.ts == normalized_tick_ts))
@@ -185,9 +194,13 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
             subscribe_a = session.scalar(
                 select(TopicSubscribeBucket).where(TopicSubscribeBucket.topic_id == topic_rows_by_name[topic_a].id)
             )
+            topic_messages_count = session.scalar(
+                select(TopicMessageEvent.id).where(TopicMessageEvent.topic_id == topic_rows_by_name[topic_a].id)
+            )
             assert publish_a is not None
             assert publish_b is not None
             assert subscribe_a is not None
+            assert topic_messages_count is not None
             assert publish_a.publish_count == 2
             assert publish_a.bytes_sum == 25
             assert publish_b.publish_count == 1
@@ -239,6 +252,7 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
 
             topic_ids = session.scalars(select(TopicRegistry.id).where(TopicRegistry.topic.in_([topic_a, topic_b]))).all()
             if topic_ids:
+                session.execute(delete(TopicMessageEvent).where(TopicMessageEvent.topic_id.in_(topic_ids)))
                 session.execute(delete(TopicPublishBucket).where(TopicPublishBucket.topic_id.in_(topic_ids)))
                 session.execute(delete(TopicSubscribeBucket).where(TopicSubscribeBucket.topic_id.in_(topic_ids)))
             session.execute(delete(TopicRegistry).where(TopicRegistry.topic.in_([topic_a, topic_b])))

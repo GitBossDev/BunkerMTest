@@ -194,6 +194,43 @@ async def test_stats_resources_falls_back_when_observability_service_is_unavaila
     assert body["source"]["mode"] in {"fallback-process", "unavailable"}
 
 
+async def test_topic_history_returns_persisted_messages(client, monkeypatch):
+    """El endpoint de historial por tópico debe delegar en el storage persistido."""
+
+    def fake_get_topic_messages(topic: str, limit: int = 120):
+        assert topic == "lab/device/100000007/Estatus_conexion"
+        assert limit == 50
+        return {
+            "topic": topic,
+            "history": [
+                {
+                    "id": 1,
+                    "topic": topic,
+                    "value": "Desconectado",
+                    "timestamp": "2026-04-17T10:00:00Z",
+                    "payload_bytes": 12,
+                    "qos": 1,
+                    "retained": False,
+                    "kind": "message",
+                }
+            ],
+            "total": 1,
+        }
+
+    monkeypatch.setattr(monitor_router.topic_history_storage, "get_topic_messages", fake_get_topic_messages)
+
+    resp = await client.get(
+        "/api/v1/monitor/topics/lab/device/100000007/Estatus_conexion/history",
+        params={"limit": 50},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topic"] == "lab/device/100000007/Estatus_conexion"
+    assert body["total"] == 1
+    assert len(body["history"]) == 1
+    assert body["history"][0]["value"] == "Desconectado"
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/health  (endpoint global del servidor unificado)
 # ---------------------------------------------------------------------------

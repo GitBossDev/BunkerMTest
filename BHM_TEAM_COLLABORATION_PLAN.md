@@ -312,7 +312,7 @@ Estado actual ya disponible para coordinación con B:
 - [ ] Refinar el histórico de actividades de clientes.
 - [ ] Refinar o ampliar historial para dashboard.
 - [ ] Refinar o ampliar historia de topics.
-- [ ] Implementar alertas por correo.
+- [x] Implementar alertas por correo.
 - [ ] Implementar alertas por redes o webhooks.
 - [ ] Refinar histórico de logs de broker.
 - [ ] Refinar histórico de logs de clientes.

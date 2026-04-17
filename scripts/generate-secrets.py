@@ -138,10 +138,27 @@ BACKUP_SCHEDULE_CRON=0 2 * * *
 # ------------------------------------------
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-specific-password
-SMTP_FROM_EMAIL=noreply@bhm.local
+SMTP_USERNAME=ramon.revilla.lomas@gmail.com
+SMTP_PASSWORD=puqlsrklypyjkioi
+SMTP_FROM_EMAIL=ramon.revilla.lomas@gmail.com
 SMTP_USE_TLS=true
+
+
+# Alert notifications wiring (monitor -> email)
+ALERT_NOTIFY_ENABLED=true
+ALERT_NOTIFY_EMAIL_ENABLED=true
+ALERT_NOTIFY_EMAIL_TO=ramon.revilla.lomas@gmail.com
+
+# Optional explicit overrides. Leave empty to reuse SMTP_* above.
+ALERT_NOTIFY_EMAIL_FROM=
+ALERT_NOTIFY_SMTP_HOST=
+ALERT_NOTIFY_SMTP_PORT=
+ALERT_NOTIFY_SMTP_USERNAME=
+ALERT_NOTIFY_SMTP_PASSWORD=
+ALERT_NOTIFY_SMTP_STARTTLS=
+ALERT_NOTIFY_SMTP_SSL=false
+
+SMTP_HEALTH_CHECK_ON_STARTUP=true
 
 # ------------------------------------------
 # SMS Notifications (Twilio) - UPDATE THESE

@@ -61,7 +61,7 @@ class BrokerBaseline(Base):
 
 
 class BrokerMetricTick(Base):
-    """Persisted broker snapshot bucket used by dashboard history and reports."""
+    """Persiste cada tick de métricas del broker para reportes históricos y análisis de tendencias."""
     __tablename__ = "broker_metric_ticks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -150,6 +150,19 @@ class TopicSubscribeBucket(Base):
     bucket_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     subscribe_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TopicMessageEvent(Base):
+    """Append-only payload history per topic for MQTT Explorer detail view."""
+    __tablename__ = "topic_message_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    event_ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    payload_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    payload_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    qos: Mapped[int] = mapped_column(Integer, default=0)
+    retained: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class ClientRegistry(Base):

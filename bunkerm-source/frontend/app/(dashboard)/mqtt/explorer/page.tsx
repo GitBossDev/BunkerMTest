@@ -33,7 +33,7 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import type { MqttTopic } from '@/types'
+import type { MqttTopic, MqttTopicHistoryMessage } from '@/types'
 
 // ── Tree types ────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,25 @@ interface TreeNode {
   fullPath: string
   children: Map<string, TreeNode>
   leaf?: MqttTopic
+}
+
+const TOPIC_HISTORY_LIMIT = 120
+
+function detectPayloadType(value: string): 'JSON' | 'RAW' {
+  try {
+    JSON.parse(value ?? '')
+    return 'JSON'
+  } catch {
+    return 'RAW'
+  }
+}
+
+function formatPayload(value: string): string {
+  try {
+    return JSON.stringify(JSON.parse(value ?? ''), null, 2)
+  } catch {
+    return value || '(empty)'
+  }
 }
 
 function buildTree(topics: MqttTopic[]): TreeNode {
@@ -66,11 +85,12 @@ function buildTree(topics: MqttTopic[]): TreeNode {
 }
 
 function countLeaves(node: TreeNode): number {
-  if (node.children.size === 0) return node.leaf ? 1 : 0
-  return Array.from(node.children.values()).reduce(
+  const selfCount = node.leaf ? 1 : 0
+  const childrenCount = Array.from(node.children.values()).reduce(
     (sum, child) => sum + countLeaves(child),
     0
   )
+  return selfCount + childrenCount
 }
 
 // ── Tree node component ───────────────────────────────────────────────────────
@@ -89,6 +109,7 @@ function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodePr
   const [visibleCount, setVisibleCount] = useState(TREE_PAGE_SIZE)
   const hasChildren = node.children.size > 0
   const isLeaf = !hasChildren && !!node.leaf
+  const hasOwnTopicValue = !!node.leaf
   const indent = depth * 16
 
   if (isLeaf && node.leaf) {
@@ -128,21 +149,63 @@ function TreeNodeView({ node, depth, defaultOpen = false, onSelect }: TreeNodePr
   const leafCount = countLeaves(node)
   return (
     <div>
-      <button
-        onClick={() => { setOpen((o) => !o); setVisibleCount(TREE_PAGE_SIZE) }}
-        className="flex items-center gap-1.5 w-full py-1.5 px-3 rounded-md hover:bg-muted/50 text-sm text-left"
+      <div
+        className="flex items-center gap-1.5 w-full py-1.5 px-3 rounded-md hover:bg-muted/50 text-sm"
         style={{ paddingLeft: `${indent + 4}px` }}
       >
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        )}
-        <span className="font-mono font-semibold">{node.name}</span>
-        <Badge variant="outline" className="text-xs py-0 px-1.5 ml-1">
-          {leafCount}
-        </Badge>
-      </button>
+        <button
+          onClick={() => { setOpen((o) => !o); setVisibleCount(TREE_PAGE_SIZE) }}
+          className="shrink-0"
+          aria-label={open ? `Collapse ${node.name}` : `Expand ${node.name}`}
+        >
+          {open ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            if (node.leaf) {
+              onSelect?.(node.leaf)
+              return
+            }
+            setOpen((o) => !o)
+            setVisibleCount(TREE_PAGE_SIZE)
+          }}
+          className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+        >
+          <span className="font-mono font-semibold shrink-0">{node.name}</span>
+          <Badge variant="outline" className="text-xs py-0 px-1.5 ml-1 shrink-0">
+            {leafCount}
+          </Badge>
+          {hasOwnTopicValue && node.leaf && (
+            <>
+              <span className="text-muted-foreground font-mono truncate max-w-[220px] ml-1">
+                {node.leaf.value || <em className="not-italic opacity-50">empty</em>}
+              </span>
+              <div className="ml-auto flex items-center gap-1.5 shrink-0">
+                {node.leaf.retained && (
+                  <Badge variant="outline" className="text-xs border-orange-400 text-orange-500 py-0 px-1.5">
+                    retained
+                  </Badge>
+                )}
+                <Badge variant="secondary" className="text-xs py-0 px-1.5">
+                  QoS {node.leaf.qos}
+                </Badge>
+                <Badge variant="secondary" className="text-xs py-0 px-1.5">
+                  ×{node.leaf.count}
+                </Badge>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">
+                  {formatRelativeTime(node.leaf.timestamp)}
+                </span>
+                <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            </>
+          )}
+        </button>
+      </div>
       {open && (
         <div>
           {Array.from(node.children.values()).slice(0, visibleCount).map((child) => (
@@ -344,6 +407,8 @@ function PublishPanel(_props: PublishPanelProps) {
 
 export default function MqttExplorerPage() {
   const [topics, setTopics] = useState<MqttTopic[]>([])
+  const [selectedTopicHistory, setSelectedTopicHistory] = useState<MqttTopicHistoryMessage[]>([])
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [selectedTopic, setSelectedTopic] = useState<MqttTopic | null>(null)
@@ -358,6 +423,24 @@ export default function MqttExplorerPage() {
       toast.error('Failed to fetch MQTT topics')
     } finally {
       if (showLoading) setIsLoading(false)
+    }
+  }, [])
+
+  const fetchSelectedTopicHistory = useCallback(async (topic: string) => {
+    if (!topic.trim()) {
+      setSelectedTopicHistory([])
+      return
+    }
+
+    setIsHistoryLoading(true)
+    try {
+      const data = await monitorApi.getTopicHistory(topic, TOPIC_HISTORY_LIMIT)
+      setSelectedTopicHistory(data.history ?? [])
+    } catch {
+      setSelectedTopicHistory([])
+      toast.error('Failed to fetch topic history')
+    } finally {
+      setIsHistoryLoading(false)
     }
   }, [])
 
@@ -377,6 +460,14 @@ export default function MqttExplorerPage() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topics])
+
+  useEffect(() => {
+    if (!selectedTopic) {
+      setSelectedTopicHistory([])
+      return
+    }
+    fetchSelectedTopicHistory(selectedTopic.topic)
+  }, [selectedTopic?.topic, selectedTopic?.timestamp, fetchSelectedTopicHistory])
 
   const filtered = search
     ? topics.filter((t) => t.topic.toLowerCase().includes(search.toLowerCase()))
@@ -483,20 +574,49 @@ export default function MqttExplorerPage() {
                 <div className="flex items-center justify-between px-3 py-2 border-b">
                   <span className="text-xs font-medium text-muted-foreground">Payload</span>
                   <Badge variant="outline" className="text-xs">
-                    {(() => {
-                      try { JSON.parse(selectedTopic.value ?? ''); return 'JSON' } catch { return 'RAW' }
-                    })()}
+                    {detectPayloadType(selectedTopic.value ?? '')}
                   </Badge>
                 </div>
                 <pre className="text-xs font-mono whitespace-pre-wrap break-all p-4 overflow-auto max-h-[60vh]">
-                  {(() => {
-                    try {
-                      return JSON.stringify(JSON.parse(selectedTopic.value ?? ''), null, 2)
-                    } catch {
-                      return selectedTopic.value || '(empty)'
-                    }
-                  })()}
+                  {formatPayload(selectedTopic.value ?? '')}
                 </pre>
+              </div>
+
+              <div className="rounded-md border">
+                <div className="flex items-center justify-between px-3 py-2 border-b bg-muted/20">
+                  <span className="text-xs font-medium text-muted-foreground">Message History</span>
+                  <Badge variant="secondary" className="text-xs">
+                    {selectedTopicHistory.length} captured
+                  </Badge>
+                </div>
+
+                {isHistoryLoading ? (
+                  <p className="p-4 text-xs text-muted-foreground">Loading topic history...</p>
+                ) : selectedTopicHistory.length === 0 ? (
+                  <p className="p-4 text-xs text-muted-foreground">No history captured for this topic yet.</p>
+                ) : (
+                  <div className="max-h-[52vh] overflow-y-auto divide-y">
+                    {selectedTopicHistory.map((entry, idx) => (
+                      <div key={entry.id} className="p-3 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <Badge variant="outline">#{selectedTopicHistory.length - idx}</Badge>
+                          <span className="text-muted-foreground">{formatRelativeTime(entry.timestamp)}</span>
+                          <Badge variant="secondary">QoS {entry.qos}</Badge>
+                          <Badge variant="outline">{detectPayloadType(entry.value)}</Badge>
+                          <Badge variant="outline">{entry.payload_bytes} B</Badge>
+                          {entry.retained && (
+                            <Badge variant="outline" className="border-orange-400 text-orange-500">
+                              retained
+                            </Badge>
+                          )}
+                        </div>
+                        <pre className="text-xs font-mono whitespace-pre-wrap break-all rounded-md border bg-muted/20 p-3">
+                          {formatPayload(entry.value)}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}

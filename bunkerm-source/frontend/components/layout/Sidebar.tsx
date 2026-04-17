@@ -123,8 +123,14 @@ export function Sidebar({ className, onNavClick }: SidebarProps) {
                 {group.title}
               </p>
               <ul className="space-y-0.5">
-                {group.items.map((item) => {
-                  const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+                {(() => {
+                  const matchingItems = group.items.filter(
+                    (item) => pathname === item.href || pathname.startsWith(item.href + '/')
+                  )
+                  const activeHref = matchingItems.sort((a, b) => b.href.length - a.href.length)[0]?.href
+
+                  return group.items.map((item) => {
+                    const isActive = item.href === activeHref
                   const Icon = item.icon
                   return (
                     <li key={item.href}>
@@ -144,7 +150,8 @@ export function Sidebar({ className, onNavClick }: SidebarProps) {
                       </Link>
                     </li>
                   )
-                })}
+                  })
+                })()}
               </ul>
             </div>
           ))}

@@ -398,8 +398,8 @@ class TopicStore:
 
     def update(self, topic: str, payload: bytes, retained: bool = False, qos: int = 0):
         event_ts = datetime.now(timezone.utc)
+        value = payload.decode("utf-8", errors="replace") if payload else ""
         with self._lock:
-            value = payload.decode("utf-8", errors="replace") if payload else ""
             prev = self._topics.get(topic, {})
             self._topics[topic] = {
                 "topic": topic,
@@ -409,7 +409,14 @@ class TopicStore:
                 "retained": retained,
                 "qos": qos,
             }
-        topic_history_storage.record_publish(topic, payload_bytes=len(payload or b""), event_ts=event_ts)
+        topic_history_storage.record_publish(
+            topic,
+            payload_bytes=len(payload or b""),
+            payload_value=value,
+            qos=qos,
+            retained=retained,
+            event_ts=event_ts,
+        )
 
     def get_all(self) -> list:
         with self._lock:

@@ -8,7 +8,7 @@ from sqlalchemy import delete, desc, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_utc, normalize_datetime, session_scope, utc_now
-from models.orm import TopicPublishBucket, TopicRegistry, TopicSubscribeBucket
+from models.orm import TopicMessageEvent, TopicPublishBucket, TopicRegistry, TopicSubscribeBucket
 from monitor.data_storage import PERIODS
 
 
@@ -30,11 +30,24 @@ class SQLAlchemyTopicHistoryStorage:
         self._engine = create_sync_engine_for_url(database_url)
         ensure_tables(
             self._engine,
-            [TopicRegistry.__table__, TopicPublishBucket.__table__, TopicSubscribeBucket.__table__],
+            [
+                TopicRegistry.__table__,
+                TopicPublishBucket.__table__,
+                TopicSubscribeBucket.__table__,
+                TopicMessageEvent.__table__,
+            ],
         )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
 
-    def record_publish(self, topic: str, payload_bytes: int = 0, event_ts: datetime | None = None) -> None:
+    def record_publish(
+        self,
+        topic: str,
+        payload_bytes: int = 0,
+        payload_value: str = "",
+        qos: int = 0,
+        retained: bool = False,
+        event_ts: datetime | None = None,
+    ) -> None:
         if not topic or topic.startswith("$"):
             return
         event_ts = event_ts or utc_now()
@@ -60,6 +73,16 @@ class SQLAlchemyTopicHistoryStorage:
                     session.add(bucket_row)
                 bucket_row.publish_count += 1
                 bucket_row.bytes_sum += max(0, payload_bytes)
+                session.add(
+                    TopicMessageEvent(
+                        topic_id=topic_row.id,
+                        event_ts=normalize_datetime(event_ts),
+                        payload_text=payload_value or "",
+                        payload_bytes=max(0, payload_bytes),
+                        qos=max(0, min(2, int(qos))),
+                        retained=bool(retained),
+                    )
+                )
                 self._prune_locked(session)
 
     def record_subscribe(self, topic: str, event_ts: datetime | None = None) -> None:
@@ -108,6 +131,54 @@ class SQLAlchemyTopicHistoryStorage:
         cutoff = normalize_datetime(utc_now() - timedelta(days=self._retention_days))
         session.execute(delete(TopicPublishBucket).where(TopicPublishBucket.bucket_start < cutoff))
         session.execute(delete(TopicSubscribeBucket).where(TopicSubscribeBucket.bucket_start < cutoff))
+        session.execute(delete(TopicMessageEvent).where(TopicMessageEvent.event_ts < cutoff))
+
+    def get_topic_messages(self, topic: str, limit: int = 120) -> Dict[str, Any]:
+        topic = (topic or "").strip()
+        if not topic:
+            return {"topic": "", "history": [], "total": 0}
+
+        clamped_limit = max(1, min(limit, 500))
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(
+                    TopicMessageEvent.id,
+                    TopicMessageEvent.event_ts,
+                    TopicMessageEvent.payload_text,
+                    TopicMessageEvent.payload_bytes,
+                    TopicMessageEvent.qos,
+                    TopicMessageEvent.retained,
+                )
+                .join(TopicRegistry, TopicRegistry.id == TopicMessageEvent.topic_id)
+                .where(TopicRegistry.topic == topic)
+                .order_by(TopicMessageEvent.event_ts.desc(), TopicMessageEvent.id.desc())
+                .limit(clamped_limit)
+            ).all()
+
+            total = session.scalar(
+                select(func.count(TopicMessageEvent.id))
+                .join(TopicRegistry, TopicRegistry.id == TopicMessageEvent.topic_id)
+                .where(TopicRegistry.topic == topic)
+            )
+
+        history = [
+            {
+                "id": int(row.id),
+                "topic": topic,
+                "value": row.payload_text or "",
+                "timestamp": iso_utc(row.event_ts) or "",
+                "payload_bytes": int(row.payload_bytes or 0),
+                "qos": int(row.qos or 0),
+                "retained": bool(row.retained),
+                "kind": "message",
+            }
+            for row in rows
+        ]
+        return {
+            "topic": topic,
+            "history": history,
+            "total": int(total or 0),
+        }
 
     def get_top_published(self, limit: int = 15, period: str = "7d") -> Dict[str, Any]:
         minutes = PERIODS.get(period, PERIODS["7d"])

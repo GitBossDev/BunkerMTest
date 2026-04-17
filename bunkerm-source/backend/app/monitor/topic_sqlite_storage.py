@@ -97,11 +97,30 @@ class SQLiteTopicHistoryStorage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_topic_subscribe_buckets_start ON topic_subscribe_buckets(bucket_start);
                 CREATE INDEX IF NOT EXISTS idx_topic_subscribe_buckets_topic ON topic_subscribe_buckets(topic_id);
+
+                CREATE TABLE IF NOT EXISTS topic_message_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    topic_id INTEGER NOT NULL,
+                    event_ts TEXT NOT NULL,
+                    payload_text TEXT NOT NULL DEFAULT '',
+                    payload_bytes INTEGER NOT NULL DEFAULT 0,
+                    qos INTEGER NOT NULL DEFAULT 0,
+                    retained INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE INDEX IF NOT EXISTS idx_topic_message_events_topic_ts ON topic_message_events(topic_id, event_ts DESC);
                 """
             )
             conn.commit()
 
-    def record_publish(self, topic: str, payload_bytes: int = 0, event_ts: datetime | None = None) -> None:
+    def record_publish(
+        self,
+        topic: str,
+        payload_bytes: int = 0,
+        payload_value: str = "",
+        qos: int = 0,
+        retained: bool = False,
+        event_ts: datetime | None = None,
+    ) -> None:
         if not topic or topic.startswith("$"):
             return
         event_ts = event_ts or _utc_now()
@@ -118,6 +137,20 @@ class SQLiteTopicHistoryStorage:
                         bytes_sum = bytes_sum + excluded.bytes_sum
                     """,
                     (_iso_utc(bucket), self._bucket_minutes, topic_id, max(0, payload_bytes)),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO topic_message_events (topic_id, event_ts, payload_text, payload_bytes, qos, retained)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        topic_id,
+                        _iso_utc(event_ts),
+                        payload_value or "",
+                        max(0, payload_bytes),
+                        max(0, min(2, int(qos))),
+                        1 if retained else 0,
+                    ),
                 )
                 self._prune_locked(conn)
                 conn.commit()
@@ -159,6 +192,55 @@ class SQLiteTopicHistoryStorage:
         cutoff = _iso_utc(_utc_now() - timedelta(days=self._retention_days))
         conn.execute("DELETE FROM topic_publish_buckets WHERE bucket_start < ?", (cutoff,))
         conn.execute("DELETE FROM topic_subscribe_buckets WHERE bucket_start < ?", (cutoff,))
+        conn.execute("DELETE FROM topic_message_events WHERE event_ts < ?", (cutoff,))
+
+    def get_topic_messages(self, topic: str, limit: int = 120) -> Dict[str, Any]:
+        topic = (topic or "").strip()
+        if not topic:
+            return {"topic": "", "history": [], "total": 0}
+
+        clamped_limit = max(1, min(limit, 500))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT tme.id, tme.event_ts, tme.payload_text, tme.payload_bytes, tme.qos, tme.retained
+                FROM topic_message_events tme
+                JOIN topic_registry tr ON tr.id = tme.topic_id
+                WHERE tr.topic = ?
+                ORDER BY tme.event_ts DESC, tme.id DESC
+                LIMIT ?
+                """,
+                (topic, clamped_limit),
+            ).fetchall()
+
+            total_row = conn.execute(
+                """
+                SELECT COUNT(tme.id) AS total
+                FROM topic_message_events tme
+                JOIN topic_registry tr ON tr.id = tme.topic_id
+                WHERE tr.topic = ?
+                """,
+                (topic,),
+            ).fetchone()
+
+        history = [
+            {
+                "id": int(row["id"]),
+                "topic": topic,
+                "value": row["payload_text"] or "",
+                "timestamp": row["event_ts"] or "",
+                "payload_bytes": int(row["payload_bytes"] or 0),
+                "qos": int(row["qos"] or 0),
+                "retained": bool(row["retained"]),
+                "kind": "message",
+            }
+            for row in rows
+        ]
+        return {
+            "topic": topic,
+            "history": history,
+            "total": int(total_row["total"] if total_row else 0),
+        }
 
     def get_top_published(self, limit: int = 15, period: str = "7d") -> Dict[str, Any]:
         minutes = PERIODS.get(period, PERIODS["7d"])

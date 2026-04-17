@@ -233,6 +233,14 @@ async def get_topics(api_key: str = Security(get_api_key)):
     return {"topics": topic_store.get_all()}
 
 
+@router.get("/topics/{topic_path:path}/history")
+async def get_topic_history(topic_path: str, limit: int = 120, api_key: str = Security(get_api_key)):
+    topic = (topic_path or "").strip()
+    if not topic:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Topic is required")
+    return topic_history_storage.get_topic_messages(topic=topic, limit=limit)
+
+
 # ---------------------------------------------------------------------------
 # Alertas
 # ---------------------------------------------------------------------------

@@ -412,6 +412,17 @@ export interface MqttTopic {
   qos: number
 }
 
+export interface MqttTopicHistoryMessage {
+  id: number | string
+  topic: string
+  value: string
+  timestamp: string
+  payload_bytes: number
+  qos: number
+  retained: boolean
+  kind: 'message'
+}
+
 // Log types
 export interface LogEntry {
   timestamp: string

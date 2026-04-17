@@ -272,6 +272,10 @@ export const monitorApi = {
     resource_timestamp?: string | null
   }>(buildUrl(MONITOR_API_URL, '/stats/resources')),
   getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
+  getTopicHistory: (topic: string, limit = 120) =>
+    request<{ topic: string; history: import('@/types').MqttTopicHistoryMessage[]; total: number }>(
+      buildUrl(MONITOR_API_URL, `/topics/${encodeURIComponent(topic)}/history?limit=${limit}`)
+    ),
   publishMessage: (data: { topic: string; payload: string; qos?: number; retain?: boolean }) =>
     request(buildUrl(MONITOR_API_URL, '/publish'), {
       method: 'POST',
