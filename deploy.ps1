@@ -85,12 +85,21 @@ function Get-CommandFallbackCandidates {
     }
 
     $candidates = New-Object System.Collections.Generic.List[string]
+    $chocoRoot = if ($env:ChocolateyInstall) { $env:ChocolateyInstall } else { 'C:\ProgramData\chocolatey' }
+    $customToolsRoot = 'C:\tools'
+
     foreach ($name in $names) {
         $candidates.Add((Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\$name"))
         $candidates.Add((Join-Path $env:ProgramFiles "$($name -replace '\.exe$', '')\$name"))
         $candidates.Add((Join-Path $env:USERPROFILE "bin\$name"))
         $candidates.Add((Join-Path $env:USERPROFILE "scoop\shims\$name"))
         $candidates.Add((Join-Path $env:LOCALAPPDATA "Programs\$($name -replace '\.exe$', '')\$name"))
+        $candidates.Add((Join-Path $chocoRoot "bin\$name"))
+
+        $binaryName = ($name -replace '\.exe$', '')
+        $candidates.Add((Join-Path $customToolsRoot $name))
+        $candidates.Add((Join-Path $customToolsRoot "$binaryName\$name"))
+        $candidates.Add((Join-Path $customToolsRoot "$binaryName-win-amd64\$name"))
 
         $localProgramsRoot = Join-Path $env:LOCALAPPDATA 'Programs'
         if (Test-Path $localProgramsRoot) {
@@ -107,6 +116,14 @@ function Get-CommandFallbackCandidates {
                 Where-Object { $_.Name -like "*$($name -replace '.exe', '')*" } |
                 ForEach-Object { Join-Path $_.FullName $name }
             foreach ($match in $wingetMatches) {
+                $candidates.Add($match)
+            }
+        }
+
+        if (Test-Path $customToolsRoot) {
+            $toolsMatches = Get-ChildItem $customToolsRoot -Recurse -Filter $name -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty FullName
+            foreach ($match in $toolsMatches) {
                 $candidates.Add($match)
             }
         }
@@ -464,6 +481,16 @@ function Resolve-CommandTarget {
     $command = Get-Command $Candidate -ErrorAction SilentlyContinue
     if ($command) {
         return $command.Source
+    }
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $whereMatches = @(where.exe $Candidate 2>$null)
+    $ErrorActionPreference = $savedPref
+    foreach ($whereMatch in $whereMatches) {
+        if (Test-Path $whereMatch) {
+            return (Resolve-Path $whereMatch).Path
+        }
     }
 
     foreach ($fallbackCandidate in Get-CommandFallbackCandidates -Candidate $Candidate) {
