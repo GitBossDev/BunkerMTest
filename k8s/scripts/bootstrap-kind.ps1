@@ -133,6 +133,41 @@ function New-KustomizeBaseWithFrontendUrl {
     return $tempDirectory
 }
 
+function Get-KustomizeBootstrapSecretSeedRequirements {
+    return @(
+        'secrets/mosquitto_passwd',
+        'secrets/ca.crt',
+        'secrets/server.crt',
+        'secrets/server.key'
+    )
+}
+
+function Assert-KustomizeBootstrapSeedFiles {
+    param(
+        [string]$BaseDirectory
+    )
+
+    $missing = New-Object System.Collections.Generic.List[string]
+    foreach ($relativePath in Get-KustomizeBootstrapSecretSeedRequirements) {
+        $fullPath = Join-Path $BaseDirectory $relativePath
+        if (-not (Test-Path $fullPath)) {
+            $missing.Add($fullPath)
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        return
+    }
+
+    $joinedMissing = ($missing | ForEach-Object { " - $_" }) -join [Environment]::NewLine
+    throw @"
+Faltan archivos requeridos por kustomize secretGenerator para el bootstrap de kind:
+$joinedMissing
+
+Crea esos archivos (material real) en k8s/base/secrets antes de ejecutar bootstrap-kind.ps1.
+"@
+}
+
 function Get-PodmanMachineState {
     param([string]$PodmanExecutable)
 
@@ -336,6 +371,7 @@ try {
     $resolvedKustomizeBase = New-KustomizeBaseWithFrontendUrl `
         -BaseDirectory (Join-Path (Split-Path $PSScriptRoot -Parent) 'base') `
         -FrontendUrl $frontendUrl
+    Assert-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase
 
     $clusterExists = & $kindExecutable get clusters | Where-Object { $_ -eq $ClusterName }
     Assert-LastExitCode "kind get clusters"
@@ -374,7 +410,7 @@ try {
     Assert-LastExitCode "kubectl apply secret"
 
     Write-Host "[INFO] Aplicando scaffold base de Kubernetes..." -ForegroundColor Cyan
-    & $kubectlExecutable apply -k $resolvedKustomizeBase | Out-Null
+    & $kubectlExecutable apply -k $resolvedKustomizeBase
     Assert-LastExitCode "kubectl apply -k $resolvedKustomizeBase"
 
     Write-Host "" 

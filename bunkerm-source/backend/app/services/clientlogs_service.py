@@ -5,6 +5,7 @@ Estas funciones se ejecutan como hilos daemon, iniciados desde el lifespan del a
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import time
@@ -20,6 +21,9 @@ from clientlogs.activity_storage import client_activity_storage
 from core.config import settings
 from monitor.topic_history_storage import topic_history_storage
 from services import broker_observability_client
+
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constantes y patrones regex
@@ -368,7 +372,13 @@ class MQTTMonitor:
             event = parser(line)
             if event is not None:
                 if parser.__name__ == "parse_subscription_log" and not replay and event.topic:
-                    topic_history_storage.record_subscribe(event.topic, event_ts=datetime.fromisoformat(event.timestamp))
+                    try:
+                        topic_history_storage.record_subscribe(
+                            event.topic,
+                            event_ts=datetime.fromisoformat(event.timestamp),
+                        )
+                    except Exception as exc:
+                        logger.warning("Topic subscribe history persistence failed for topic %s: %s", event.topic, exc)
                 if not replay:
                     client_activity_storage.record_event(event)
                 if not replay:

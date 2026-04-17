@@ -438,14 +438,18 @@ class TopicStore:
                 "retained": retained,
                 "qos": qos,
             }
-        topic_history_storage.record_publish(
-            topic,
-            payload_bytes=len(payload or b""),
-            payload_value=value,
-            qos=qos,
-            retained=retained,
-            event_ts=event_ts,
-        )
+        try:
+            topic_history_storage.record_publish(
+                topic,
+                payload_bytes=len(payload or b""),
+                payload_value=value,
+                qos=qos,
+                retained=retained,
+                event_ts=event_ts,
+            )
+        except Exception as exc:
+            # Never block live MQTT topic rendering if history persistence fails.
+            logger.warning("Topic history persistence failed for topic %s: %s", topic, exc)
 
     def get_all(self) -> list:
         with self._lock:

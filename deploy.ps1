@@ -44,6 +44,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [int]$KindMqttWsHostPort = 29001,
+
+    [Parameter(Mandatory=$false)]
+    [string]$KindPortForwardAddress = '127.0.0.1',
     
     [Parameter(Mandatory=$false)]
     [switch]$Follow
@@ -709,7 +712,7 @@ function Start-KindPortForwardProcess {
         '-n', $KindNamespace,
         'port-forward',
         $Resource
-    ) + $Mappings + @('--address', '127.0.0.1')
+    ) + $Mappings + @('--address', $KindPortForwardAddress)
 
     $process = Start-Process -FilePath $script:KubectlExecutable -ArgumentList $argumentList -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru -WindowStyle Hidden
 
