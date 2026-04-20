@@ -11,7 +11,10 @@ param(
     [int]$MqttHostPort = 21900,
     [int]$MqttWsHostPort = 29001,
     [switch]$LoadLocalImage,
-    [string[]]$LocalImages = @("bunkermtest-bunkerm:latest", "bunkermtest-mosquitto:latest")
+    [string[]]$LocalImages = @("bunkermtest-bunkerm:latest", "bunkermtest-mosquitto:latest", "water-plant-simulator:latest"),
+    [string]$BhmImage = "localhost/bunkermtest-bunkerm:latest",
+    [string]$MosquittoImage = "localhost/bunkermtest-mosquitto:latest",
+    [string]$WaterPlantSimulatorImage = "localhost/water-plant-simulator:latest"
 )
 
 $ErrorActionPreference = "Stop"
@@ -116,11 +119,19 @@ function New-KindConfigForHostPorts {
 function New-KustomizeBaseWithFrontendUrl {
     param(
         [string]$BaseDirectory,
-        [string]$FrontendUrl
+        [string]$FrontendUrl,
+        [string]$BhmImage,
+        [string]$MosquittoImage,
+        [string]$WaterPlantSimulatorImage
     )
 
     $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("bhm-k8s-base-" + [System.Guid]::NewGuid().ToString('N'))
     Copy-Item -Path $BaseDirectory -Destination $tempDirectory -Recurse -Force
+
+    $simulatorConfigSource = Join-Path (Split-Path (Split-Path $BaseDirectory -Parent) -Parent) 'water-plant-simulator\config\plant_config.yaml'
+    $simulatorConfigDirectory = Join-Path $tempDirectory 'water-plant-simulator-config'
+    New-Item -ItemType Directory -Path $simulatorConfigDirectory -Force | Out-Null
+    Copy-Item -Path $simulatorConfigSource -Destination (Join-Path $simulatorConfigDirectory 'plant_config.yaml') -Force
 
     $kustomizationPath = Join-Path $tempDirectory 'kustomization.yaml'
     $kustomizationContent = Get-Content $kustomizationPath -Raw
@@ -128,6 +139,19 @@ function New-KustomizeBaseWithFrontendUrl {
     $kustomizationContent = $kustomizationContent -replace 'FRONTEND_URL=http://localhost:22000', "FRONTEND_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXTAUTH_URL=http://localhost:22000', "NEXTAUTH_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXT_PUBLIC_API_URL=http://localhost:22000', "NEXT_PUBLIC_API_URL=$FrontendUrl"
+    $kustomizationContent = $kustomizationContent -replace '\.\./\.\./water-plant-simulator/config/plant_config\.yaml', 'water-plant-simulator-config/plant_config.yaml'
+    if ($BhmImage -match ':(?<tag>[^:@]+)$') {
+        $bhmTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-bunkerm\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmTag)
+    }
+    if ($MosquittoImage -match ':(?<tag>[^:@]+)$') {
+        $mosquittoTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-mosquitto\s+newTag:\s+)[^\r\n]+', ('$1' + $mosquittoTag)
+    }
+    if ($WaterPlantSimulatorImage -match ':(?<tag>[^:@]+)$') {
+        $waterPlantSimulatorTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/water-plant-simulator\s+newTag:\s+)[^\r\n]+', ('$1' + $waterPlantSimulatorTag)
+    }
     Set-Content -Path $kustomizationPath -Value $kustomizationContent -Encoding ASCII
 
     return $tempDirectory
@@ -335,7 +359,10 @@ try {
         -MqttWsHostPort $MqttWsHostPort
     $resolvedKustomizeBase = New-KustomizeBaseWithFrontendUrl `
         -BaseDirectory (Join-Path (Split-Path $PSScriptRoot -Parent) 'base') `
-        -FrontendUrl $frontendUrl
+        -FrontendUrl $frontendUrl `
+        -BhmImage $BhmImage `
+        -MosquittoImage $MosquittoImage `
+        -WaterPlantSimulatorImage $WaterPlantSimulatorImage
 
     $clusterExists = & $kindExecutable get clusters | Where-Object { $_ -eq $ClusterName }
     Assert-LastExitCode "kind get clusters"

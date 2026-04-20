@@ -33,9 +33,10 @@ sys.path.insert(0, "/app/smart-anomaly")
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.database import init_db
@@ -43,6 +44,7 @@ from core.database import init_db
 # Servicios con estado global (deben importarse antes que los routers que los usan)
 import services.monitor_service as _monitor_svc
 import services.clientlogs_service as _clientlogs_svc
+from services import ip_whitelist_service
 from services.monitor_service import connect_mqtt
 
 # ---------------------------------------------------------------------------
@@ -67,6 +69,7 @@ _smart_anomaly_ok: bool = False
 async def lifespan(app: FastAPI):
     # 1. Esquema del backend unificado sobre PostgreSQL
     await init_db()
+    await ip_whitelist_service.refresh_ip_whitelist_cache()
     logger.info("Base de datos inicializada")
 
     # 2. Conexión MQTT para el monitor
@@ -186,6 +189,21 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def enforce_ip_whitelist(request: Request, call_next):
+    decision = ip_whitelist_service.evaluate_api_admin_request(request)
+    if not decision["allowed"]:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "IP not allowed by whitelist policy",
+                "scope": "api_admin",
+                "clientIp": decision["effectiveIp"],
+            },
+        )
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # Registro de routers del backend unificado
 # ---------------------------------------------------------------------------
@@ -194,6 +212,8 @@ from routers.dynsec import router as dynsec_router
 from routers.monitor import router as monitor_router
 from routers.clientlogs import router as clientlogs_router
 from routers.reporting import router as reporting_router
+from routers.notifications import router as notifications_router
+from routers.security import router as security_router
 from routers.config_mosquitto import router as config_mosquitto_router
 from routers.config_dynsec import router as config_dynsec_router
 
@@ -201,6 +221,8 @@ app.include_router(dynsec_router)
 app.include_router(monitor_router)
 app.include_router(clientlogs_router)
 app.include_router(reporting_router)
+app.include_router(notifications_router)
+app.include_router(security_router)
 app.include_router(config_mosquitto_router)
 app.include_router(config_dynsec_router)
 

@@ -178,15 +178,18 @@ El frontend puede trabajar desde ahora con este carril estable:
 
 - `GET /api/v1/monitor/alerts/config`
 - `PUT /api/v1/monitor/alerts/config`
-- futuro `GET /api/v1/notifications/channels`
-- futuro `POST /api/v1/notifications/channels`
-- futuro `GET /api/v1/notifications/events`
-- futuro `GET /api/v1/notifications/attempts`
+- `GET /api/v1/notifications/channels`
+- `POST /api/v1/notifications/channels`
+- `GET /api/v1/notifications/events`
+- `GET /api/v1/notifications/attempts`
+- `GET /api/v1/notifications/export/events`
+- `GET /api/v1/notifications/export/attempts`
 
 ### Garantías para B
 
 - `alertId`, `severity`, `title`, `description`, `impact` y `status` se mantienen como campos funcionales estables.
 - `channel type`, `enabled`, `lastDeliveryStatus`, `lastAttemptAt` y `retryPolicySummary` son campos seguros para UX y tablas de administración.
+- Las exportaciones de eventos e intentos reutilizan los mismos campos funcionales y no exponen secretos ni material sensible.
 - La implementación interna del worker o del outbox no debe obligar a rehacer pantallas si se respeta este contrato.
 
 ---

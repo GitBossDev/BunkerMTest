@@ -19,8 +19,11 @@ async def health() -> dict:
 
 
 @app.get("/internal/broker/logs")
-async def get_broker_logs(limit: int = Query(default=1000, ge=1, le=5000)) -> dict:
-    return observability_svc.read_broker_logs(limit=limit)
+async def get_broker_logs(
+    limit: int = Query(default=1000, ge=1, le=5000),
+    offset: int | None = Query(default=None, ge=0),
+) -> dict:
+    return observability_svc.read_broker_logs(limit=limit, offset=offset)
 
 
 @app.get("/internal/broker/logs/source-status")

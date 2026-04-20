@@ -71,7 +71,7 @@ export default function LoginPage() {
                   <Input
                     id="email"
                     type="email"
-                    placeholder="admin@brokerpanel.com"
+                    placeholder="admin@bhm.local"
                     className="pl-9"
                     {...register('email')}
                   />

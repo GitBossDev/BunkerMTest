@@ -13,6 +13,8 @@ import time
 from email.message import EmailMessage
 from typing import Dict, List, Optional
 
+from services.alert_delivery_outbox import enqueue_alert_delivery_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -169,6 +171,14 @@ def notify_alert_raised(alert: Dict[str, object]) -> None:
 	Nunca bloquea al motor de alertas.
 	"""
 	if not _as_bool(os.getenv("ALERT_NOTIFY_ENABLED"), default=False):
+		return
+
+	try:
+		enqueue_alert_delivery_event(alert)
+	except Exception as exc:
+		logger.error("Alert delivery outbox enqueue failed: %s", exc)
+
+	if not _as_bool(os.getenv("ALERT_NOTIFY_INLINE_DELIVERY_ENABLED"), default=True):
 		return
 
 	t = threading.Thread(target=_send_all, args=(dict(alert),), daemon=True)

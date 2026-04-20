@@ -67,6 +67,16 @@ async def setup_db():
         await conn.run_sync(ORMBase.metadata.drop_all)
 
 
+@pytest.fixture(autouse=True)
+def reset_ip_whitelist_runtime_state():
+    """Aisla la cache global de whitelist entre tests para evitar fugas de middleware."""
+    from services import ip_whitelist_service
+
+    ip_whitelist_service.clear_ip_whitelist_runtime_state()
+    yield
+    ip_whitelist_service.clear_ip_whitelist_runtime_state()
+
+
 # ---------------------------------------------------------------------------
 # client — cliente autenticado con DB en memoria
 # ---------------------------------------------------------------------------

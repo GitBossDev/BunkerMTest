@@ -168,6 +168,7 @@ services:
       - ALERT_NOTIFY_SMTP_PASSWORD=${ALERT_NOTIFY_SMTP_PASSWORD:-${SMTP_PASSWORD:-}}
       - ALERT_NOTIFY_SMTP_STARTTLS=${ALERT_NOTIFY_SMTP_STARTTLS:-${SMTP_USE_TLS:-true}}
       - ALERT_NOTIFY_SMTP_SSL=${ALERT_NOTIFY_SMTP_SSL:-false}
+      - ALERT_NOTIFY_INLINE_DELIVERY_ENABLED=${ALERT_NOTIFY_INLINE_DELIVERY_ENABLED:-false}
       - MAX_UPLOAD_SIZE=10485760
       - SSL_CERT_PATH=/app/certs/cert.pem
       - SSL_KEY_PATH=/app/certs/key.pem
@@ -280,6 +281,46 @@ services:
       timeout: 10s
       retries: 5
       start_period: 20s
+
+  # ==========================================
+  # Alert delivery worker - consume outbox persistido
+  # ==========================================
+  bhm-alert-delivery:
+    image: bunkermtest-bunkerm:latest
+    container_name: bhm-alert-delivery
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - AUTH_SECRET=${AUTH_SECRET}
+      - API_KEY=${API_KEY:-default_api_key_replace_in_production}
+      - TZ=${TZ:-Europe/Madrid}
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=${DATABASE_URL}
+      - CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL}
+      - ALERT_NOTIFY_ENABLED=${ALERT_NOTIFY_ENABLED:-false}
+      - ALERT_NOTIFY_EMAIL_ENABLED=${ALERT_NOTIFY_EMAIL_ENABLED:-true}
+      - ALERT_NOTIFY_EMAIL_TO=${ALERT_NOTIFY_EMAIL_TO:-}
+      - ALERT_NOTIFY_EMAIL_FROM=${ALERT_NOTIFY_EMAIL_FROM:-${SMTP_FROM_EMAIL:-}}
+      - ALERT_NOTIFY_SMTP_HOST=${ALERT_NOTIFY_SMTP_HOST:-${SMTP_HOST:-}}
+      - ALERT_NOTIFY_SMTP_PORT=${ALERT_NOTIFY_SMTP_PORT:-${SMTP_PORT:-587}}
+      - ALERT_NOTIFY_SMTP_USERNAME=${ALERT_NOTIFY_SMTP_USERNAME:-${SMTP_USERNAME:-}}
+      - ALERT_NOTIFY_SMTP_PASSWORD=${ALERT_NOTIFY_SMTP_PASSWORD:-${SMTP_PASSWORD:-}}
+      - ALERT_NOTIFY_SMTP_STARTTLS=${ALERT_NOTIFY_SMTP_STARTTLS:-${SMTP_USE_TLS:-true}}
+      - ALERT_NOTIFY_SMTP_SSL=${ALERT_NOTIFY_SMTP_SSL:-false}
+    command:
+      - /bin/sh
+      - -c
+      - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
+    volumes:
+      - bunkerm-nextjs:/nextjs/data
+      - bunkerm-logs-api:/var/log/api
+    networks:
+      bunkerm-network:
+        aliases:
+          - bhm-alert-delivery
 
   # ==========================================
   # Nginx Reverse Proxy - DESACTIVADO

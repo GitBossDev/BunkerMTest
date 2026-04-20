@@ -218,6 +218,8 @@ def test_real_stack_applies_client_lifecycle_to_broker():
         status_response = _status_response()
         assert status_response.status_code == 200
         status_body = status_response.json()
+        assert status_body["status"] == "applied"
+        assert status_body["driftDetected"] is False
         assert status_body["desired"]["deleted"] is True
         assert status_body["observed"] is None
 

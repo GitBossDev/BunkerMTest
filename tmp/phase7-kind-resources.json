@@ -1,0 +1,75 @@
+{
+  "capturedAt": "2026-04-20T09:19:56.562979+00:00",
+  "status": "ok",
+  "runtime": "kind",
+  "namespace": "bhm-lab",
+  "podUsage": [
+    {
+      "pod": "bunkerm-platform-64dc7f498c-j28p7",
+      "cpuNanoCores": 12060992,
+      "memoryWorkingSetBytes": 162205696,
+      "containers": [
+        "platform"
+      ],
+      "source": "crictl",
+      "cpuMilliCores": 12.06,
+      "memoryMiB": 154.69
+    },
+    {
+      "pod": "mosquitto-0",
+      "cpuNanoCores": 8495104,
+      "memoryWorkingSetBytes": 139132928,
+      "containers": [
+        "broker",
+        "broker-secrets-bootstrap",
+        "observability",
+        "reconciler"
+      ],
+      "source": "crictl",
+      "cpuMilliCores": 8.5,
+      "memoryMiB": 132.69
+    },
+    {
+      "pod": "postgres-0",
+      "cpuNanoCores": 5810027,
+      "memoryWorkingSetBytes": 43823104,
+      "containers": [
+        "postgres"
+      ],
+      "source": "crictl",
+      "cpuMilliCores": 5.81,
+      "memoryMiB": 41.79
+    }
+  ],
+  "podUsageSource": "crictl",
+  "storage": [
+    {
+      "name": "mosquitto-conf-mosquitto-0",
+      "status": "Bound",
+      "capacity": "1Gi",
+      "storageClass": "standard"
+    },
+    {
+      "name": "mosquitto-data-mosquitto-0",
+      "status": "Bound",
+      "capacity": "5Gi",
+      "storageClass": "standard"
+    },
+    {
+      "name": "mosquitto-log-mosquitto-0",
+      "status": "Bound",
+      "capacity": "1Gi",
+      "storageClass": "standard"
+    },
+    {
+      "name": "postgres-data-postgres-0",
+      "status": "Bound",
+      "capacity": "5Gi",
+      "storageClass": "standard"
+    }
+  ],
+  "errors": [],
+  "warnings": [
+    "error: Metrics API not available"
+  ]
+}

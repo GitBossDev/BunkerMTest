@@ -42,12 +42,18 @@ def _get_json_sync(path: str, params: Dict[str, Any] | None = None) -> Dict[str,
         raise BrokerObservabilityUnavailable(str(exc)) from exc
 
 
-async def fetch_broker_logs(limit: int = 1000) -> Dict[str, Any]:
-    return await _get_json("/internal/broker/logs", params={"limit": limit})
+async def fetch_broker_logs(limit: int = 1000, offset: int | None = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"limit": limit}
+    if offset is not None:
+        params["offset"] = offset
+    return await _get_json("/internal/broker/logs", params=params)
 
 
-def fetch_broker_logs_sync(limit: int = 1000) -> Dict[str, Any]:
-    return _get_json_sync("/internal/broker/logs", params={"limit": limit})
+def fetch_broker_logs_sync(limit: int = 1000, offset: int | None = None) -> Dict[str, Any]:
+    params: Dict[str, Any] = {"limit": limit}
+    if offset is not None:
+        params["offset"] = offset
+    return _get_json_sync("/internal/broker/logs", params=params)
 
 
 async def fetch_broker_log_source_status() -> Dict[str, Any]:

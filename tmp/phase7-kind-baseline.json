@@ -1,0 +1,162 @@
+{
+  "capturedAt": "2026-04-20T09:16:56.476433+00:00",
+  "baseUrl": "http://localhost:22000",
+  "samples": 5,
+  "timeoutSeconds": 10.0,
+  "runtimeLabel": "kind",
+  "endpoints": [
+    {
+      "name": "webUi",
+      "path": "/",
+      "status": "ok",
+      "allowedStatuses": [
+        200,
+        301,
+        302,
+        307,
+        308
+      ],
+      "statuses": [
+        307,
+        307,
+        307,
+        307,
+        307
+      ],
+      "samples": 5,
+      "successCount": 5,
+      "failedCount": 0,
+      "latency": {
+        "minMs": 46.32,
+        "maxMs": 2127.88,
+        "meanMs": 464.35,
+        "medianMs": 48.35,
+        "p95Ms": 1712.66
+      },
+      "errors": []
+    },
+    {
+      "name": "authMe",
+      "path": "/api/auth/me",
+      "status": "ok",
+      "allowedStatuses": [
+        401,
+        403
+      ],
+      "statuses": [
+        401,
+        401,
+        401,
+        401,
+        401
+      ],
+      "samples": 5,
+      "successCount": 5,
+      "failedCount": 0,
+      "latency": {
+        "minMs": 46.67,
+        "maxMs": 55.74,
+        "meanMs": 49.93,
+        "medianMs": 48.94,
+        "p95Ms": 54.54
+      },
+      "errors": []
+    },
+    {
+      "name": "monitorHealth",
+      "path": "/api/monitor/health",
+      "status": "ok",
+      "allowedStatuses": [
+        200
+      ],
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "samples": 5,
+      "successCount": 5,
+      "failedCount": 0,
+      "latency": {
+        "minMs": 47.61,
+        "maxMs": 52.39,
+        "meanMs": 49.68,
+        "medianMs": 48.99,
+        "p95Ms": 52.13
+      },
+      "errors": []
+    },
+    {
+      "name": "dynsecRoles",
+      "path": "/api/dynsec/roles",
+      "status": "ok",
+      "allowedStatuses": [
+        200
+      ],
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "samples": 5,
+      "successCount": 5,
+      "failedCount": 0,
+      "latency": {
+        "minMs": 43.82,
+        "maxMs": 51.83,
+        "meanMs": 47.82,
+        "medianMs": 47.87,
+        "p95Ms": 51.05
+      },
+      "errors": []
+    },
+    {
+      "name": "reporting",
+      "path": "/api/proxy/reports/broker/daily?days=7",
+      "status": "ok",
+      "allowedStatuses": [
+        200
+      ],
+      "statuses": [
+        200,
+        200,
+        200,
+        200,
+        200
+      ],
+      "samples": 5,
+      "successCount": 5,
+      "failedCount": 0,
+      "latency": {
+        "minMs": 54.23,
+        "maxMs": 59.26,
+        "meanMs": 57.21,
+        "medianMs": 58.44,
+        "p95Ms": 59.18
+      },
+      "errors": []
+    }
+  ],
+  "mqtt": {
+    "name": "mqttTcpConnect",
+    "target": "localhost:21900",
+    "status": "ok",
+    "samples": 5,
+    "successCount": 5,
+    "failedCount": 0,
+    "latency": {
+      "minMs": 0.7,
+      "maxMs": 21.73,
+      "meanMs": 5.08,
+      "medianMs": 1.04,
+      "p95Ms": 17.59
+    },
+    "errors": []
+  },
+  "overallStatus": "ok",
+  "degradedChecks": []
+}

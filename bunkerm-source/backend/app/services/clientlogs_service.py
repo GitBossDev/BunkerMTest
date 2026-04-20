@@ -465,6 +465,7 @@ def _process_log_snapshot(
 def monitor_mosquitto_logs() -> None:
     """Consume snapshots de logs vía observabilidad broker-owned y alimenta el MQTTMonitor."""
     log_file = os.getenv("BROKER_LOG_PATH", settings.broker_log_path)
+    log_offset: int | None = None
     recent_signatures: deque[str] = deque(maxlen=10000)
     recent_signature_set: set[str] = set()
     poll_interval = max(settings.broker_observability_log_poll_interval_seconds, 0.5)
@@ -490,7 +491,7 @@ def monitor_mosquitto_logs() -> None:
     replay_completed = False
     while True:
         try:
-            payload = broker_observability_client.fetch_broker_logs_sync(limit=snapshot_limit)
+            payload = broker_observability_client.fetch_broker_logs_sync(limit=snapshot_limit, offset=log_offset)
             source = payload.get("source") or {}
             _update_source_status(
                 "logTail",
@@ -499,6 +500,10 @@ def monitor_mosquitto_logs() -> None:
                 path=source.get("path", log_file),
                 lastError=payload.get("error") or source.get("lastError"),
             )
+
+            if payload.get("rewound"):
+                recent_signatures.clear()
+                recent_signature_set.clear()
 
             lines = payload.get("logs") or []
             if not replay_completed:
@@ -528,6 +533,7 @@ def monitor_mosquitto_logs() -> None:
                         lastEventAt=datetime.now(tz=timezone.utc).isoformat(),
                         lastError=None,
                     )
+            log_offset = payload.get("next_offset", log_offset)
         except broker_observability_client.BrokerObservabilityUnavailable as exc:
             _update_source_status(
                 "logTail",
@@ -603,6 +609,18 @@ def monitor_mqtt_publishes() -> None:
             qos=message.qos,
         )
         mqtt_monitor.events.append(event)
+        try:
+            from services import monitor_service
+
+            monitor_service.record_user_publish(
+                message.topic,
+                message.payload,
+                retained=getattr(message, "retain", False),
+                qos=message.qos,
+                source="broker-observed",
+            )
+        except Exception as exc:
+            print(f"Monitor mirror for observed publish failed: {exc}")
         _update_source_status(
             "mqttPublish",
             lastEventAt=datetime.now(tz=timezone.utc).isoformat(),

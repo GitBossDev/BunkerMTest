@@ -42,6 +42,11 @@ def _serialize_state(state: Any) -> Dict[str, Any]:
     }
 
 
+def _should_expand_all_scopes(scopes: List[str]) -> bool:
+    normalized_scopes = [scope.strip().lower() for scope in scopes if scope and scope.strip()]
+    return bool(normalized_scopes) and any(scope == "all" for scope in normalized_scopes)
+
+
 async def reconcile_scope(session, scope: str) -> Dict[str, Any]:
     if not _is_supported_scope(scope):
         raise ValueError(f"Unsupported scope: {scope}")
@@ -83,7 +88,7 @@ async def list_reconcileable_scopes(session) -> List[str]:
 
 async def reconcile_requested_scopes(scopes: List[str]) -> List[Dict[str, Any]]:
     async with AsyncSessionLocal() as session:
-        expanded_scopes = await list_reconcileable_scopes(session) if scopes == ["all"] else scopes
+        expanded_scopes = await list_reconcileable_scopes(session) if _should_expand_all_scopes(scopes) else scopes
         results: List[Dict[str, Any]] = []
         for scope in expanded_scopes:
             results.append(await reconcile_scope(session, scope))

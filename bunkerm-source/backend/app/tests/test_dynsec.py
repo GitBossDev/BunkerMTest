@@ -686,6 +686,8 @@ async def test_delete_client_marks_desired_state_as_deleted(client, monkeypatch)
     status_resp = await client.get("/api/v1/dynsec/clients/sensor-01/status")
     assert status_resp.status_code == 200
     body = status_resp.json()
+    assert body["status"] == "applied"
+    assert body["driftDetected"] is False
     assert body["desired"]["deleted"] is True
     assert body["observed"] is None
 
@@ -833,5 +835,7 @@ async def test_delete_group_marks_desired_state_as_deleted(client, monkeypatch):
     status_resp = await client.get("/api/v1/dynsec/groups/plantas/status")
     assert status_resp.status_code == 200
     body = status_resp.json()
+    assert body["status"] == "applied"
+    assert body["driftDetected"] is False
     assert body["desired"]["deleted"] is True
     assert body["observed"] is None

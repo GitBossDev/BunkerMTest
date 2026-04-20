@@ -3,7 +3,7 @@
 > Proyecto: BHM (Broker Health Manager)
 > Objetivo: Coordinar el trabajo paralelo de dos compañeros sin solapamientos, reduciendo conflictos de merge y evitando trabajo duplicado.
 > Tipo de documento: Archivo vivo de coordinación
-> Última actualización: 2026-04-16
+> Última actualización: 2026-04-20
 
 ---
 
@@ -18,15 +18,17 @@ El objetivo principal es que ambos puedan trabajar en paralelo con un criterio c
 
 ---
 
-## Estado tras el cierre funcional de Fase 4
+## Estado tras el cierre de Fases 7, 8 y 9
 
 Conclusión operativa actual:
 
-- B no puede completar todavía el 100% de sus actividades asignadas.
-- B sí puede cerrar de punta a punta el trabajo funcional sobre histórico de actividades de clientes, historial de dashboard, historia de topics, estilos/UI, tests funcionales asociados y documentación funcional apoyándose en el baseline PostgreSQL ya validado.
-- B todavía no debería cerrar como definitivas la whitelist por IP, las alertas con canales externos ni el histórico final de logs de broker/clientes, porque siguen dependiendo de definiciones estructurales de A y del arrastre de Fase 5.
+- A ya cerró Fase 7 con baseline de hardening, resiliencia y rollback por capability documentado y validado.
+- A ya cerró Fase 8 con inventario Compose -> Kubernetes, estrategia de empaquetado por tags y verificación del reconciliador como control loop broker-owned.
+- A ya cerró Fase 9 para el alcance actual con un baseline `kind` ejecutable que despliega `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator`.
+- B puede trabajar sobre frontend, UX y refinamiento funcional usando los contratos HTTP actuales sin reabrir persistencia, control-plane ni manifests de Kubernetes.
+- El principal punto todavia delicado para no pisarse es whitelist por IP: B puede trabajar UX y contrato funcional; A sigue siendo owner del enforcement broker-facing y de cualquier cambio estructural de despliegue o seguridad de plataforma.
 
-El motivo principal de este corte es que Fase 4 ya dejó de bloquear la persistencia operativa de históricos y reporting técnico, pero no resolvió todavía tres decisiones estructurales: el modelo final de whitelist sobre el broker/control-plane, el contrato técnico de delivery para alertas y la fuente final de observabilidad desacoplada para logs históricos.
+El motivo principal de este corte es que el proyecto ya no esta solo en un baseline PostgreSQL Compose-first. Ahora existe tambien una topologia Kubernetes real, por lo que este documento debe coordinar trabajo funcional sobre contratos estabilizados y evitar que B toque por accidente el carril de plataforma que A ya materializo.
 
 ---
 
@@ -160,7 +162,7 @@ Regla:
 
 - B debe evitar implementar soluciones que dependan de shared volumes como contrato final.
 - Si necesita una solución temporal, debe dejarla claramente marcada como transicional y validada con A.
-- Mientras Fase 5 no cierre la observabilidad desacoplada, el histórico final de logs debe tratarse como capacidad parcialmente desbloqueada, no como carril totalmente libre.
+- La observabilidad desacoplada ya quedó cerrada en backend; B debe consumir contratos HTTP y `source-status`, no asumir acceso a logs o archivos del broker.
 
 #### 4. Control-plane del broker
 
@@ -171,8 +173,9 @@ Impacta a B en:
 
 Regla:
 
-- B no debe fijar una implementación final de whitelist que contradiga el modelo futuro de estado deseado + reconciliación.
-- Si whitelist se implementa antes del control-plane nuevo, debe quedar encapsulada y preparada para migración posterior.
+- B no debe implementar enforcement directo ni en broker ni en manifests de Kubernetes.
+- `api_admin` ya tiene contrato HTTP estable para avanzar en UX y modelado funcional.
+- `mqtt_clients` sigue siendo carril broker-facing de A; cualquier enforcement real sobre Mosquitto, DynSec o policy runtime debe coordinarse antes.
 
 ---
 
@@ -183,6 +186,9 @@ Regla:
 - [x] Refinamiento del histórico de actividades de clientes.
 - [x] Refinar o ampliar historial para dashboard.
 - [x] Refinar o ampliar historia de topics.
+- [x] UX y pantallas de whitelist por IP sobre el contrato funcional actual `GET/PUT /api/v1/security/ip-whitelist` y `GET /api/v1/security/ip-whitelist/status`.
+- [x] UX y administración de alertas sobre `notifications`, canales, eventos, intentos y exportaciones.
+- [x] Refinamiento funcional del histórico de logs apoyándose en `clientlogs`, `reports` y endpoints de `source-status` ya desacoplados del filesystem del broker.
 - [x] Diseño UI de pantallas nuevas y refinamiento visual de dashboard y vistas existentes.
 - [x] Composición de tablas, filtros, navegación, estados vacíos/error/loading y tests funcionales sobre históricos ya soportados por el baseline PostgreSQL actual.
 - [x] Documentación funcional y de uso para las features históricas y de reporting técnico ya estabilizadas.
@@ -190,16 +196,70 @@ Regla:
 
 ### Puede avanzar, pero coordinando contrato con A
 
-- [ ] Histórico de logs de broker y clientes
-- [ ] Alertas por correo y redes
-- [ ] Nuevos endpoints, payloads o exportaciones que no estén ya cubiertos por los contratos HTTP revalidados en Fase 4.
+- [ ] Nuevos filtros, agregaciones o exportaciones que no estén ya cubiertos por `clientlogs`, `reports`, `monitor` o `notifications`.
+- [ ] UX de whitelist que requiera campos nuevos en payload, nuevos scopes o semántica adicional no incluida en `docs/BHM_IP_WHITELIST_CONTRACT.md`.
+- [ ] Alertas por redes o webhooks si B necesita extender el contrato actual de canales mas alla de `email` y `webhook`.
 
 ### Debe esperar definición o implementación previa de A
 
 - [x] La persistencia definitiva de las features históricas priorizadas en PostgreSQL ya no bloquea a B en el baseline actual.
-- [ ] Solución final de whitelist si requiere tocar configuración efectiva del broker.
+- [ ] Enforcement final de whitelist para `mqtt_clients` si requiere tocar configuración efectiva del broker o policy broker-facing.
 - [x] Contrato final de delivery para alertas por correo, redes o webhooks si implica workers, credenciales o servicios auxiliares. Queda fijado en `docs/BHM_ALERT_DELIVERY_CONTRACT.md`, con payload canónico y separación `bhm-api` -> `bhm-alert-delivery`.
-- [ ] Definición final de la fuente de observabilidad para el histórico de logs de broker y clientes dentro de Fase 5.
+- [x] Definición final de la fuente de observabilidad para el histórico de logs de broker y clientes dentro de Fase 5. Queda fijada en `docs/adr/0007-phase5-observability-pipeline.md` como pipeline broker-owned + eventos técnicos estructurados + read models persistidos.
+
+## Endpoints y contratos ya disponibles para B
+
+### Whitelist por IP
+
+- `GET /api/v1/security/ip-whitelist`
+- `PUT /api/v1/security/ip-whitelist`
+- `GET /api/v1/security/ip-whitelist/status`
+- Contrato funcional base: `docs/BHM_IP_WHITELIST_CONTRACT.md`
+- Regla: B puede trabajar la UX completa del documento y del estado; A mantiene ownership del enforcement broker-facing y de cualquier traduccion a plataforma.
+
+### Alertas y delivery
+
+- `GET /api/v1/monitor/alerts/config`
+- `PUT /api/v1/monitor/alerts/config`
+- `GET /api/v1/notifications/channels`
+- `POST /api/v1/notifications/channels`
+- `GET /api/v1/notifications/events`
+- `GET /api/v1/notifications/attempts`
+- `GET /api/v1/notifications/export/events`
+- `GET /api/v1/notifications/export/attempts`
+- Contrato tecnico base: `docs/BHM_ALERT_DELIVERY_CONTRACT.md`
+- Regla: B puede construir pantallas, formularios, filtros y exportaciones sin tocar secretos, worker ni politicas de reintento.
+
+### Historicos y reporting tecnico
+
+- `GET /api/v1/clientlogs/events`
+- `GET /api/v1/clientlogs/connected-clients`
+- `GET /api/v1/clientlogs/last-connection`
+- `GET /api/v1/clientlogs/top-subscribed`
+- `GET /api/v1/clientlogs/activity-summary`
+- `GET /api/v1/clientlogs/source-status`
+- `GET /api/v1/clientlogs/activity/{username}`
+- `GET /api/v1/reports/broker/daily`
+- `GET /api/v1/reports/broker/weekly`
+- `GET /api/v1/reports/clients/{username}/timeline`
+- `GET /api/v1/reports/incidents/clients`
+- `GET /api/v1/reports/export/broker`
+- `GET /api/v1/reports/export/client-activity/{username}`
+- `GET /api/v1/reports/retention/status`
+- Regla: B puede consumir estos endpoints para UX, filtros y estados de fuente; no debe tocar storages ni migraciones.
+
+### Observabilidad tecnica y estados utiles para UI avanzada
+
+- `GET /api/v1/monitor/stats/resources/source-status`
+- `GET /api/v1/config/broker/source-status`
+- `GET /api/v1/dynsec/default-acl/status`
+- `GET /api/v1/dynsec/clients/{username}/status`
+- `GET /api/v1/dynsec/roles/{role_name}/status`
+- `GET /api/v1/dynsec/groups/{group_name}/status`
+- `GET /api/v1/config/mosquitto-config/status`
+- `GET /api/v1/config/dynsec-json/status`
+- `GET /api/v1/dynsec/password-file-status`
+- Regla: estos endpoints sirven para UI tecnica, debugging y estados de reconciliacion; cualquier pantalla que implique mutacion de broker debe coordinarse con A.
 
 ---
 
@@ -220,6 +280,11 @@ Regla:
 - [x] Mover también las memberships `group-client` DynSec al reconciliador explícito broker-facing, persistiendo además su prioridad en el estado deseado/observado.
 - [x] Introducir un adapter local de runtime broker-facing para preparar el recorte futuro entre `bhm-api` y `bhm-reconciler`.
 - [x] Revisar `docker-compose.dev.yml` según la arquitectura objetivo.
+- [x] Cerrar Fase 7 con baseline de rendimiento, resiliencia, churn, burst y estrategia de rollout/rollback documentada.
+- [x] Materializar y validar el baseline Kubernetes en `kind` para `postgres`, `bunkerm-platform` y `mosquitto` con sidecars broker-owned.
+- [x] Traducir `bhm-alert-delivery` a `Deployment` separado y endurecer probes/recursos en el laboratorio Kubernetes.
+- [x] Integrar `water-plant-simulator` como workload externo desacoplado en `k8s/base`, con contrato exclusivamente MQTT y healthchecks reales.
+- [x] Documentar topologia final, portabilidad Compose -> Kubernetes y estrategia de empaquetado por tags explicitos.
 
 ### Baseline Compose-first
 
@@ -245,8 +310,8 @@ Regla:
 
 ### APIs y contratos
 
-- [~] Definir contratos API para features que B necesita implementar o refinar. Los contratos de históricos/reporting técnico ya tienen baseline estable; siguen pendientes whitelist, alertas y el ajuste final de logs desacoplados.
-- [~] Implementar o adaptar endpoints backend necesarios para frontend. El backend ya cubre los contratos actuales revalidados en Fase 4, pero aún puede requerir endpoints nuevos para alertas, whitelist o refinamientos de logs.
+- [~] Definir contratos API para features que B necesita implementar o refinar. Los contratos de históricos/reporting técnico, alertas y logs desacoplados ya tienen baseline estable; sigue pendiente principalmente whitelist.
+- [~] Implementar o adaptar endpoints backend necesarios para frontend. El backend ya cubre los contratos actuales revalidados de históricos/reporting, `notifications` y logs desacoplados; pueden seguir apareciendo endpoints nuevos sobre whitelist o refinamientos funcionales menores.
 - [x] Documentar breaking changes o compatibilidad temporal del cierre de Fase 4 y del baseline PostgreSQL actual.
 - [x] Mantener tests de integración para endpoints afectados. La regresión ampliada cerró con `40 passed` sobre `monitor`, `clientlogs`, `reports` y la suite enfocada de Fase 4.
 
@@ -337,18 +402,18 @@ Estado actual ya disponible para coordinación con B:
 
 | Feature | Responsable principal | Dependencia de A | Puede avanzar B ya | Nota |
 |--------|------------------------|------------------|--------------------|------|
-| Whitelist por IP | B | Alta | Parcial | Puede diseñar UX y reglas, pero la forma final depende de decidir si vive en broker policy, control-plane o capa de aplicación |
+| Whitelist por IP | B | Media/Alta | Si, con coordinacion | El contrato HTTP ya existe para UX y estados; el enforcement final de `mqtt_clients` sigue siendo broker-facing y owned por A |
 | Histórico actividad clientes | B | Baja | Sí | PostgreSQL ya es baseline operativo para este dominio; puede cerrarse funcionalmente sin tocar persistencia |
 | Historial dashboard | B | Baja | Sí | Puede cerrarse sobre contratos HTTP actuales; coordinar solo si pide endpoints o filtros nuevos |
 | Historia de topics | B | Baja | Sí | PostgreSQL ya cubre el dominio; no hace falta esperar más cambios estructurales para refinamiento funcional |
-| Alertas por correo | B | Media/Alta | Parcial | Requiere validar delivery, configuración y quizá worker |
-| Alertas por redes/webhooks | B | Media/Alta | Parcial | Igual que correo; mejor acordar contrato técnico antes |
-| Histórico logs broker | B | Media/Alta | Parcial | Hay baseline funcional actual, pero el carril final depende de la definición de observabilidad desacoplada de Fase 5 |
-| Histórico logs clientes | B | Media/Alta | Parcial | Igual que broker logs: puede refinar UX/consumo actual, pero no cerrar aún la solución final |
+| Alertas por correo | B | Media | Si | El contrato de canales, eventos, intentos y exportaciones ya existe; A mantiene worker, secretos y retry policy |
+| Alertas por redes/webhooks | B | Media | Si, con coordinacion | El canal `webhook` ya existe como baseline; extensiones de contrato o canales nuevos se coordinan con A |
+| Histórico logs broker | B | Media | Si | Debe apoyarse en `clientlogs`, `reports` y `source-status`; no en mounts ni lectura directa del broker |
+| Histórico logs clientes | B | Media | Si | Igual que broker logs: UX libre sobre contrato actual, persistencia y observabilidad siguen owned por A |
 | Estilos y UI | B | Baja | Sí | Puede avanzar salvo pantallas atadas a contratos inestables |
 | PostgreSQL migration | A | N/A | No | Ownership de A |
 | APIs frontend-backend | A | N/A | No, salvo mocks | Ownership de A cuando el cambio es estructural |
-| Compose-first topology | A | N/A | No | Ownership de A |
+| Compose-first / Kubernetes topology | A | N/A | No | Ownership de A |
 
 ---
 
@@ -444,23 +509,27 @@ Usar esta sección como tablero rápido de coordinación.
 
 ### Bloqueos actuales
 
-- [ ] Definir si whitelist por IP vivirá como política de broker, capa de aplicación o ambas.
+- [ ] Cerrar la estrategia final de enforcement para `mqtt_clients` dentro del control-plane broker-facing sin romper el contrato funcional actual.
 - [x] Definir qué endpoints históricos pasarán primero a PostgreSQL.
-- [ ] Definir el contrato para alertas con canales externos.
-- [ ] Definir si el histórico de logs se alimentará de la fuente actual o de la futura capa de observabilidad.
+- [x] Definir el contrato para alertas con canales externos.
+- [x] Definir si el histórico de logs se alimentará de la fuente actual o de la futura capa de observabilidad.
+- [ ] Reducir la dependencia operativa del laboratorio respecto a `kubectl port-forward` para exposición host-managed estable.
 
 ### Decisiones que deben tomarse con prioridad
 
-- [x] Prioridad de features de B que necesitan soporte temprano de A. En el estado actual, la prioridad estructural pasa a whitelist, alertas y observabilidad de logs; históricos de actividad/dashboard/topics quedan desbloqueados.
+- [x] Prioridad de features de B que necesitan soporte temprano de A. En el estado actual, la prioridad estructural pasa principalmente a enforcement final de whitelist y a cualquier extension de contrato fuera de los endpoints ya listados.
 - [x] Compatibilidad temporal SQLite/PostgreSQL durante el trabajo paralelo.
-- [~] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend. Para históricos principales ya no es bloqueo; sigue pendiente solo para whitelist, alertas y logs si B necesita avanzar antes del contrato final.
-- [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; si se usa más adelante, será solo como validación opcional.
+- [~] Política de mocks o payloads de prueba para que B no quede bloqueado mientras A implementa backend. Ya no es bloqueo para historicos, alerts ni whitelist base; solo reaparece si B necesita campos nuevos.
+- [x] Mantener cualquier laboratorio local de Kubernetes fuera del camino crítico de Fase 3; el laboratorio ya existe y debe usarse como carril de regresion de plataforma, no como espacio de cambios funcionales de B.
 
 ### Actualización operativa reciente
 
-- A ya cerró funcionalmente Fase 4 sobre PostgreSQL para el baseline de desarrollo actual, con runtime Compose-first validado, smoke `7/7 OK`, regresión ampliada `40 passed` y backup/restore PostgreSQL verificado.
-- A ya dejó desbloqueados para B los carriles funcionales de histórico de actividades de clientes, historial de dashboard, historia de topics y reporting técnico asociado sin necesidad de reabrir la capa de persistencia.
-- A mantiene todavía como decisiones estructurales pendientes la whitelist por IP, el contrato técnico de alertas externas y la definición final del carril de observabilidad para logs históricos, por lo que esas actividades de B siguen siendo parciales o bloqueadas.
+- A ya cerró Fase 7, Fase 8 y Fase 9 con evidencia real en el repo y en el laboratorio `kind`, de modo que la coordinacion ya no se limita a Compose-first.
+- A ya dejó estabilizados para B los carriles HTTP de whitelist base, notifications, historicos, reporting tecnico y estados de observabilidad/reconciliacion.
+- A ya materializó el baseline Kubernetes en `k8s/` con `postgres`, `bunkerm-platform`, `mosquitto` broker-owned con sidecars `reconciler` y `observability`, `bhm-alert-delivery` y `water-plant-simulator`.
+- A ya documentó el inventario de portabilidad, la topologia final y la estrategia de empaquetado de imagenes en `k8s/PORTABILITY_INVENTORY.md`, `k8s/FINAL_TOPOLOGY.md` y `k8s/IMAGE_PACKAGING.md`.
+- A ya revalidó en Kubernetes el reconciliador con `--once --scope all`, cerrando con `RECONCILE_ONCE_OK`, y dejó al simulador externo conectado al broker interno por MQTT sin shared volumes.
+- A ya dejó como deuda visible de plataforma la publicacion host-managed por `kubectl port-forward`; B no debe intentar resolver eso desde frontend ni desde manifests.
 
 - A ya movió `defaultACLAccess` y el lifecycle básico de clientes DynSec al patrón de estado deseado + reconciliación.
 - A ya movió también roles, ACLs, grupos y memberships DynSec al mismo patrón transicional.

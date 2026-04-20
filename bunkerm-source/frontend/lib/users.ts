@@ -12,7 +12,7 @@ const USERS_FILE = path.join(DATA_DIR, 'users.json')
 // y se registra en consola para que el operador la conozca en el primer arranque.
 // El email puede personalizarse con ADMIN_INITIAL_EMAIL.
 function buildDefaultAdmin(): UserWithHash {
-  const email = process.env.ADMIN_INITIAL_EMAIL || 'admin@brokerpanel.com'
+  const email = process.env.ADMIN_INITIAL_EMAIL || 'admin@bhm.local'
   const rawPassword = process.env.ADMIN_INITIAL_PASSWORD
   let passwordHash: string
   if (rawPassword) {

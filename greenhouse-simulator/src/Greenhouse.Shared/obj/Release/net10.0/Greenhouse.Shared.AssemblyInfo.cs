@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Greenhouse.Shared")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+dc9e36cd78a3bbe6b11b217c5fad8d46183a453d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+25bba31440a1e0d7204003bb03d7582e9b769145")]
 [assembly: System.Reflection.AssemblyProductAttribute("Greenhouse.Shared")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Greenhouse.Shared")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
