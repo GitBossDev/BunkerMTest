@@ -11,10 +11,10 @@ param(
     [int]$MqttHostPort = 21900,
     [int]$MqttWsHostPort = 29001,
     [switch]$LoadLocalImage,
-    [string[]]$LocalImages = @("bunkermtest-bunkerm:latest", "bunkermtest-mosquitto:latest", "water-plant-simulator:latest"),
+    [string[]]$LocalImages = @("bunkermtest-bunkerm:latest", "bunkermtest-mosquitto:latest"),
     [string]$BhmImage = "localhost/bunkermtest-bunkerm:latest",
     [string]$MosquittoImage = "localhost/bunkermtest-mosquitto:latest",
-    [string]$WaterPlantSimulatorImage = "localhost/water-plant-simulator:latest"
+    [string]$GreenhouseSimulatorImage = "localhost/greenhouse-simulator:latest"
 )
 
 $ErrorActionPreference = "Stop"
@@ -122,16 +122,11 @@ function New-KustomizeBaseWithFrontendUrl {
         [string]$FrontendUrl,
         [string]$BhmImage,
         [string]$MosquittoImage,
-        [string]$WaterPlantSimulatorImage
+        [string]$GreenhouseSimulatorImage
     )
 
     $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("bhm-k8s-base-" + [System.Guid]::NewGuid().ToString('N'))
     Copy-Item -Path $BaseDirectory -Destination $tempDirectory -Recurse -Force
-
-    $simulatorConfigSource = Join-Path (Split-Path (Split-Path $BaseDirectory -Parent) -Parent) 'water-plant-simulator\config\plant_config.yaml'
-    $simulatorConfigDirectory = Join-Path $tempDirectory 'water-plant-simulator-config'
-    New-Item -ItemType Directory -Path $simulatorConfigDirectory -Force | Out-Null
-    Copy-Item -Path $simulatorConfigSource -Destination (Join-Path $simulatorConfigDirectory 'plant_config.yaml') -Force
 
     $kustomizationPath = Join-Path $tempDirectory 'kustomization.yaml'
     $kustomizationContent = Get-Content $kustomizationPath -Raw
@@ -139,7 +134,6 @@ function New-KustomizeBaseWithFrontendUrl {
     $kustomizationContent = $kustomizationContent -replace 'FRONTEND_URL=http://localhost:22000', "FRONTEND_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXTAUTH_URL=http://localhost:22000', "NEXTAUTH_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXT_PUBLIC_API_URL=http://localhost:22000', "NEXT_PUBLIC_API_URL=$FrontendUrl"
-    $kustomizationContent = $kustomizationContent -replace '\.\./\.\./water-plant-simulator/config/plant_config\.yaml', 'water-plant-simulator-config/plant_config.yaml'
     if ($BhmImage -match ':(?<tag>[^:@]+)$') {
         $bhmTag = $Matches['tag']
         $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-bunkerm\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmTag)
@@ -147,10 +141,6 @@ function New-KustomizeBaseWithFrontendUrl {
     if ($MosquittoImage -match ':(?<tag>[^:@]+)$') {
         $mosquittoTag = $Matches['tag']
         $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-mosquitto\s+newTag:\s+)[^\r\n]+', ('$1' + $mosquittoTag)
-    }
-    if ($WaterPlantSimulatorImage -match ':(?<tag>[^:@]+)$') {
-        $waterPlantSimulatorTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/water-plant-simulator\s+newTag:\s+)[^\r\n]+', ('$1' + $waterPlantSimulatorTag)
     }
     Set-Content -Path $kustomizationPath -Value $kustomizationContent -Encoding ASCII
 
@@ -184,55 +174,119 @@ function Get-PodmanMachineState {
     }
 }
 
-function Ensure-PodmanProviderReady {
+function Get-PreferredPodmanMachineName {
     param([string]$PodmanExecutable)
 
+    $machines = @(Get-PodmanMachineState -PodmanExecutable $PodmanExecutable)
+    if ($machines.Count) {
+        $preferredMachine = $machines | Where-Object { $_.Default -eq $true } | Select-Object -First 1
+        if (-not $preferredMachine) {
+            $preferredMachine = $machines | Select-Object -First 1
+        }
+
+        $machineName = "$($preferredMachine.Name)".Trim()
+        if ($machineName) {
+            return $machineName
+        }
+    }
+
     $savedPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $PodmanExecutable info 2>&1 | Out-Null
-    $infoExitCode = $LASTEXITCODE
+    $connectionLines = @(& $PodmanExecutable system connection list 2>&1)
+    $connectionExitCode = $LASTEXITCODE
     $ErrorActionPreference = $savedPref
 
-    if ($infoExitCode -eq 0) {
-        return
+    if ($connectionExitCode -eq 0) {
+        foreach ($line in $connectionLines) {
+            $trimmedLine = "$line".Trim()
+            if (-not $trimmedLine -or $trimmedLine -like 'Name *') {
+                continue
+            }
+
+            if ($trimmedLine -match '^(?<name>\S+)(?:\s+.+?)?\s+(?<default>true|false)\s+(?<rw>true|false)\s*$') {
+                $connectionName = $Matches['name']
+                if ($Matches['default'] -eq 'true') {
+                    return ($connectionName -replace '-root$', '')
+                }
+            }
+        }
+
+        foreach ($line in $connectionLines) {
+            $trimmedLine = "$line".Trim()
+            if (-not $trimmedLine -or $trimmedLine -like 'Name *') {
+                continue
+            }
+
+            if ($trimmedLine -match '^(?<name>\S+)') {
+                return (($Matches['name']) -replace '-root$', '')
+            }
+        }
     }
 
-    $machines = @(Get-PodmanMachineState -PodmanExecutable $PodmanExecutable)
-    if (-not $machines.Count) {
-        throw "Podman no responde y no hay maquinas configuradas para recuperarlo automaticamente."
+    if ($env:PODMAN_MACHINE_NAME) {
+        return $env:PODMAN_MACHINE_NAME.Trim()
     }
 
-    $preferredMachine = $machines | Where-Object { $_.Default -eq $true } | Select-Object -First 1
-    if (-not $preferredMachine) {
-        $preferredMachine = $machines | Select-Object -First 1
-    }
+    return 'podman-machine-default'
+}
 
-    $machineName = "$($preferredMachine.Name)"
-    if (-not $machineName) {
-        throw "No se pudo determinar la maquina Podman a recuperar."
-    }
+function Invoke-PodmanWslRecovery {
+    param(
+        [string]$PodmanExecutable,
+        [string]$MachineName
+    )
 
-    Write-Host "[WARN] Podman no respondio. Recuperando la maquina '$machineName'..." -ForegroundColor Yellow
-
-    $isRunning = $false
-    if ($preferredMachine.PSObject.Properties.Name -contains 'Running') {
-        $isRunning = [bool]$preferredMachine.Running
-    } elseif ("$($preferredMachine.LastUp)" -match 'Currently running') {
-        $isRunning = $true
-    }
+    Write-Host "[WARN] Recuperacion fuerte de Podman: ejecutando 'wsl --shutdown' y reintentando '$MachineName'..." -ForegroundColor Yellow
+    wsl.exe --shutdown 2>&1 | Out-Null
 
     $savedPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if ($isRunning) {
-        & $PodmanExecutable machine stop $machineName 2>&1 | Out-Null
+    & $PodmanExecutable machine start $MachineName 2>&1 | Out-Null
+    $startExitCode = $LASTEXITCODE
+    & $PodmanExecutable system connection default "${MachineName}-root" 2>&1 | Out-Null
+    $ErrorActionPreference = $savedPref
+
+    if ($startExitCode -ne 0) {
+        throw "No se pudo recuperar la maquina Podman '$MachineName' tras reiniciar WSL."
     }
+
+    $deadline = (Get-Date).AddSeconds(60)
+    while ((Get-Date) -lt $deadline) {
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $PodmanExecutable info 2>&1 | Out-Null
+        $infoExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+        if ($infoExitCode -eq 0) {
+            Write-Host "[OK] Podman recuperado tras reiniciar WSL." -ForegroundColor Green
+            return
+        }
+    }
+
+    throw "Podman sigue sin responder tras la recuperacion fuerte de WSL para '$MachineName'."
+}
+
+function Restart-PodmanProvider {
+    param([string]$PodmanExecutable)
+
+    $machineName = Get-PreferredPodmanMachineName -PodmanExecutable $PodmanExecutable
+    if (-not $machineName) {
+        throw "No se pudo determinar la maquina Podman a reiniciar."
+    }
+
+    Write-Host "[WARN] Reiniciando la maquina Podman '$machineName' para recuperar el socket remoto..." -ForegroundColor Yellow
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $PodmanExecutable machine stop $machineName 2>&1 | Out-Null
     & $PodmanExecutable machine start $machineName 2>&1 | Out-Null
     $startExitCode = $LASTEXITCODE
     & $PodmanExecutable system connection default "${machineName}-root" 2>&1 | Out-Null
     $ErrorActionPreference = $savedPref
 
     if ($startExitCode -ne 0) {
-        throw "No se pudo iniciar la maquina Podman '$machineName'."
+        Invoke-PodmanWslRecovery -PodmanExecutable $PodmanExecutable -MachineName $machineName
+        return
     }
 
     $deadline = (Get-Date).AddSeconds(45)
@@ -246,11 +300,30 @@ function Ensure-PodmanProviderReady {
             Write-Host "[OK] Podman recuperado sobre la maquina '$machineName'." -ForegroundColor Green
             return
         }
-
-        Start-Sleep -Seconds 3
     }
 
-    throw "Podman sigue sin responder tras reiniciar la maquina '$machineName'."
+    Invoke-PodmanWslRecovery -PodmanExecutable $PodmanExecutable -MachineName $machineName
+}
+
+function Ensure-PodmanProviderReady {
+    param([string]$PodmanExecutable)
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $PodmanExecutable info 2>&1 | Out-Null
+    $infoExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($infoExitCode -eq 0) {
+        return
+    }
+
+    $machineName = Get-PreferredPodmanMachineName -PodmanExecutable $PodmanExecutable
+    if (-not $machineName) {
+        throw "No se pudo determinar la maquina Podman a recuperar."
+    }
+
+    Restart-PodmanProvider -PodmanExecutable $PodmanExecutable
 }
 
 function Test-LocalImageExists {
@@ -313,11 +386,32 @@ function Import-ImageIntoKind {
     if ($Provider -eq 'podman') {
         $archivePath = Join-Path ([System.IO.Path]::GetTempPath()) ("kind-image-" + [System.Guid]::NewGuid().ToString('N') + ".tar")
         try {
-            & $ContainerEngineExecutable save --format oci-archive -o $archivePath $ImageReference
-            Assert-LastExitCode "podman save $ImageReference"
+            for ($attempt = 1; $attempt -le 2; $attempt++) {
+                Ensure-PodmanProviderReady -PodmanExecutable $ContainerEngineExecutable
 
-            & $KindExecutable load image-archive $archivePath --name $ClusterName
-            Assert-LastExitCode "kind load image-archive $ImageReference"
+                if (Test-Path $archivePath) {
+                    Remove-Item $archivePath -Force -ErrorAction SilentlyContinue
+                }
+
+                & $ContainerEngineExecutable save --format oci-archive -o $archivePath $ImageReference
+                if ($LASTEXITCODE -eq 0) {
+                    & $KindExecutable load image-archive $archivePath --name $ClusterName
+                    if ($LASTEXITCODE -eq 0) {
+                        return
+                    }
+
+                    $failedStep = "kind load image-archive $ImageReference"
+                } else {
+                    $failedStep = "podman save $ImageReference"
+                }
+
+                if ($attempt -ge 2) {
+                    Assert-LastExitCode $failedStep
+                }
+
+                Write-Host "[WARN] '$failedStep' fallo; reintentando tras reiniciar Podman..." -ForegroundColor Yellow
+                Restart-PodmanProvider -PodmanExecutable $ContainerEngineExecutable
+            }
         } finally {
             if (Test-Path $archivePath) {
                 Remove-Item $archivePath -Force -ErrorAction SilentlyContinue

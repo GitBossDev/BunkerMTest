@@ -14,7 +14,6 @@ resources:
   - control-plane.yaml
   - alert-delivery.yaml
   - mosquitto.yaml
-  - water-plant-simulator.yaml
   - observability.yaml
 
 configMapGenerator:
@@ -51,10 +50,6 @@ configMapGenerator:
   - name: postgres-init
     files:
       - init.sql=postgres-init.sql
-  - name: water-plant-simulator-config
-    files:
-      - plant_config.yaml=../../water-plant-simulator/config/plant_config.yaml
-
 secretGenerator:
   - name: mosquitto-passwd-bootstrap
     files:
@@ -72,6 +67,4 @@ images:
   - name: localhost/bunkermtest-bunkerm
     newTag: latest
   - name: localhost/bunkermtest-mosquitto
-    newTag: latest
-  - name: localhost/water-plant-simulator
     newTag: latest

@@ -1,7 +1,7 @@
 # BunkerM — Plan de Reestructuración
 
 > **Scope**: Solo `bunkerm-source/` — backend Python + frontend Next.js.
-> No incluye simuladores (`greenhouse-simulator/`, `water-plant-simulator/`).
+> No incluye simuladores externos como `greenhouse-simulator/`.
 >
 > **Orden de prioridad acordado**: Seguridad → Arquitectura/Refactor → Calidad de código
 > **Última actualización**: 2026-04-09

@@ -1,18 +1,18 @@
 <#
 .SYNOPSIS
-    Script de gestión del simulador de planta de tratamiento.
+    Script de gestión del simulador de invernadero.
 
 .DESCRIPTION
-    Controla el simulador de IoT industrial para Broker Health Manager.
-    Permite iniciar, detener, reiniciar, y gestionar anomalías.
+    Controla el MQTT stresser de greenhouse-simulator para Broker Health Manager.
+    Permite construirlo, ejecutarlo, inspeccionar logs y limpiar recursos.
 
 .PARAMETER Action
     Acción a ejecutar: start, stop, restart, status, logs, anomalies, build, clean
 
 .EXAMPLE
     .\simulator.ps1 start
-    .\simulator.ps1 logs -Follow
-    .\simulator.ps1 anomalies enable
+    .\simulator.ps1 logs
+    .\simulator.ps1 build
 #>
 
 param(
@@ -30,7 +30,7 @@ param(
 $ErrorActionPreference = 'Continue'
 $ComposeFile = 'docker-compose.simulator.yml'
 $EnvFile = '.env.dev'
-$ServiceName = 'water-plant-simulator'
+$ServiceName = 'greenhouse-simulator'
 
 # Motores de contenedor (se asignan en Get-RuntimeEngines al inicio)
 $script:CE = "docker"    # Container Engine: docker o podman
@@ -137,7 +137,7 @@ function Test-Prerequisites {
 
 # Iniciar simulador
 function Invoke-Start {
-    Write-ColorOutput "Iniciando simulador de planta de tratamiento..." -Type INFO
+    Write-ColorOutput "Iniciando simulador de invernadero..." -Type INFO
     
     # Verificar que bunkerm-platform (que incluye el broker MQTT interno) esté corriendo
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
@@ -151,7 +151,7 @@ function Invoke-Start {
     }
     
     # Build si no existe la imagen
-    $imageExists = & $script:CE images -q water-plant-simulator
+    $imageExists = & $script:CE images -q greenhouse-simulator
     if (-not $imageExists) {
         Write-ColorOutput "Construyendo imagen del simulador..." -Type INFO
         Invoke-Build
@@ -162,6 +162,7 @@ function Invoke-Start {
 
     if ($LASTEXITCODE -eq 0) {
         Write-ColorOutput "Simulador iniciado correctamente" -Type OK
+        Write-ColorOutput "El stresser es un proceso one-shot: puede quedar en estado Exited tras completar la carga MQTT." -Type INFO
         Start-Sleep -Seconds 3
         Invoke-Status
     } else {
@@ -230,49 +231,16 @@ function Invoke-Logs {
 # Gestionar anomalías
 function Invoke-Anomalies {
     param([string]$SubCommand)
-    
-    if (-not $SubCommand) {
-        Write-ColorOutput "Uso: .\simulator.ps1 anomalies <enable|disable|trigger>" -Type WARNING
-        Write-Host ""
-        Write-Host "Comandos disponibles:"
-        Write-Host "  enable   - Habilitar generación automática de anomalías"
-        Write-Host "  disable  - Deshabilitar generación automática de anomalías"
-        Write-Host "  trigger  - Generar anomalía específica (requiere parámetros adicionales)"
-        return
-    }
-    
-    switch ($SubCommand.ToLower()) {
-        'enable' {
-            Write-ColorOutput "Habilitando generación de anomalías..." -Type INFO
-            Write-ColorOutput "NOTA: Esta funcionalidad requiere API del simulador" -Type WARNING
-            Write-ColorOutput "Actualiza plant_config.yaml y reinicia el simulador" -Type INFO
-        }
-        
-        'disable' {
-            Write-ColorOutput "Deshabilitando generación de anomalías..." -Type INFO
-            Write-ColorOutput "NOTA: Esta funcionalidad requiere API del simulador" -Type WARNING
-            Write-ColorOutput "Actualiza plant_config.yaml y reinicia el simulador" -Type INFO
-        }
-        
-        'trigger' {
-            Write-ColorOutput "Para generar una anomalía específica:" -Type INFO
-            Write-Host "1. Edita water-plant-simulator/config/plant_config.yaml"
-            Write-Host "2. Ajusta parámetros de anomalies.enabled y probability"
-            Write-Host "3. Reinicia el simulador: .\simulator.ps1 restart"
-        }
-        
-        default {
-            Write-ColorOutput "Subcomando desconocido: $SubCommand" -Type ERROR
-            Invoke-Anomalies -SubCommand ''
-        }
-    }
+
+    Write-ColorOutput "El simulador activo es greenhouse-simulator y no expone gestión de anomalías desde este wrapper." -Type WARNING
+    Write-ColorOutput "Usa greenhouse-simulator/STRESSER_RUNBOOK.md para ajustar el perfil de carga MQTT." -Type INFO
 }
 
 # Construir imagen
 function Invoke-Build {
     Write-ColorOutput "Construyendo imagen del simulador..." -Type INFO
 
-    & $script:CE build -t water-plant-simulator ./water-plant-simulator
+    & $script:CE build -t greenhouse-simulator ./greenhouse-simulator/src/Greenhouse.Sensors
     
     if ($LASTEXITCODE -eq 0) {
         Write-ColorOutput "Imagen construida correctamente" -Type OK
@@ -294,12 +262,7 @@ function Invoke-Clean {
         Invoke-Expression "$script:CCE -f $ComposeFile --env-file $EnvFile down -v"
 
         # Eliminar imagen
-        & $script:CE rmi water-plant-simulator -f 2>$null
-        
-        # Limpiar logs
-        if (Test-Path ".\water-plant-simulator\logs") {
-            Remove-Item ".\water-plant-simulator\logs\*" -Force -ErrorAction SilentlyContinue
-        }
+        & $script:CE rmi greenhouse-simulator -f 2>$null
         
         Write-ColorOutput "Recursos eliminados" -Type OK
     } else {
@@ -311,7 +274,7 @@ function Invoke-Clean {
 function Show-Banner {
     Write-Host ""
     Write-Host "===============================================" -ForegroundColor Cyan
-    Write-Host "  Water Plant Simulator - BHM Test" -ForegroundColor Cyan
+    Write-Host "  Greenhouse Simulator - BHM Test" -ForegroundColor Cyan
     Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -324,7 +287,7 @@ function Show-Menu {
     Write-Host "  restart    - Reiniciar simulador"
     Write-Host "  status     - Ver estado actual"
     Write-Host "  logs       - Ver logs (usa -Follow para tiempo real)"
-    Write-Host "  anomalies  - Gestionar anomalías (enable|disable|trigger)"
+    Write-Host "  anomalies  - Mostrar nota sobre tuning del stresser"
     Write-Host "  build      - Construir imagen de contenedor"
     Write-Host "  clean      - Eliminar recursos"
     Write-Host ""

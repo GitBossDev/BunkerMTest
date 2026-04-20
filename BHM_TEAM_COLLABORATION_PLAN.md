@@ -24,7 +24,7 @@ Conclusión operativa actual:
 
 - A ya cerró Fase 7 con baseline de hardening, resiliencia y rollback por capability documentado y validado.
 - A ya cerró Fase 8 con inventario Compose -> Kubernetes, estrategia de empaquetado por tags y verificación del reconciliador como control loop broker-owned.
-- A ya cerró Fase 9 para el alcance actual con un baseline `kind` ejecutable que despliega `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator`.
+- A ya cerró Fase 9 para el alcance actual con un baseline `kind` ejecutable que despliega `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform` y `bhm-alert-delivery`, dejando `greenhouse-simulator` como herramienta externa fuera del baseline persistente.
 - B puede trabajar sobre frontend, UX y refinamiento funcional usando los contratos HTTP actuales sin reabrir persistencia, control-plane ni manifests de Kubernetes.
 - El principal punto todavia delicado para no pisarse es whitelist por IP: B puede trabajar UX y contrato funcional; A sigue siendo owner del enforcement broker-facing y de cualquier cambio estructural de despliegue o seguridad de plataforma.
 
@@ -283,7 +283,7 @@ Regla:
 - [x] Cerrar Fase 7 con baseline de rendimiento, resiliencia, churn, burst y estrategia de rollout/rollback documentada.
 - [x] Materializar y validar el baseline Kubernetes en `kind` para `postgres`, `bunkerm-platform` y `mosquitto` con sidecars broker-owned.
 - [x] Traducir `bhm-alert-delivery` a `Deployment` separado y endurecer probes/recursos en el laboratorio Kubernetes.
-- [x] Integrar `water-plant-simulator` como workload externo desacoplado en `k8s/base`, con contrato exclusivamente MQTT y healthchecks reales.
+- [x] Retirar `water-plant-simulator` del baseline activo y dejar la simulación en `greenhouse-simulator` como herramienta externa MQTT diferenciada del despliegue persistente.
 - [x] Documentar topologia final, portabilidad Compose -> Kubernetes y estrategia de empaquetado por tags explicitos.
 
 ### Baseline Compose-first
@@ -526,7 +526,7 @@ Usar esta sección como tablero rápido de coordinación.
 
 - A ya cerró Fase 7, Fase 8 y Fase 9 con evidencia real en el repo y en el laboratorio `kind`, de modo que la coordinacion ya no se limita a Compose-first.
 - A ya dejó estabilizados para B los carriles HTTP de whitelist base, notifications, historicos, reporting tecnico y estados de observabilidad/reconciliacion.
-- A ya materializó el baseline Kubernetes en `k8s/` con `postgres`, `bunkerm-platform`, `mosquitto` broker-owned con sidecars `reconciler` y `observability`, `bhm-alert-delivery` y `water-plant-simulator`.
+- A ya materializó el baseline Kubernetes en `k8s/` con `postgres`, `bunkerm-platform`, `mosquitto` broker-owned con sidecars `reconciler` y `observability` y `bhm-alert-delivery`.
 - A ya documentó el inventario de portabilidad, la topologia final y la estrategia de empaquetado de imagenes en `k8s/PORTABILITY_INVENTORY.md`, `k8s/FINAL_TOPOLOGY.md` y `k8s/IMAGE_PACKAGING.md`.
 - A ya revalidó en Kubernetes el reconciliador con `--once --scope all`, cerrando con `RECONCILE_ONCE_OK`, y dejó al simulador externo conectado al broker interno por MQTT sin shared volumes.
 - A ya dejó como deuda visible de plataforma la publicacion host-managed por `kubectl port-forward`; B no debe intentar resolver eso desde frontend ni desde manifests.

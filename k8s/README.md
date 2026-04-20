@@ -7,10 +7,10 @@ Este directorio abre un carril opcional de laboratorio sobre `kind` para validar
 - `PostgreSQL` como estado persistente del control-plane.
 - `bunkerm-platform` como `Deployment` de control-plane HTTP.
 - `bhm-alert-delivery` como `Deployment` separado consumiendo el outbox persistido de alertas.
-- `water-plant-simulator` como `Deployment` externo que publica y consume por MQTT sin compartir ownership con el broker.
 - `mosquitto` como `StatefulSet` broker-owned con PVCs propios.
 - `bhm-reconciler` y `bhm-broker-observability` como sidecars dentro del pod del broker.
 - `mosquitto_passwd` y TLS ya tienen traducción inicial a `Secret` dedicados de Kubernetes.
+- `greenhouse-simulator` permanece como herramienta externa de carga MQTT, fuera del baseline persistente de `kind`.
 
 ## Decisión transicional relevante
 
@@ -29,7 +29,7 @@ Eso deja visible el gap real hacia la fase posterior:
 - `PORTABILITY_INVENTORY.md`: inventario Compose -> Kubernetes y gaps transicionales visibles
 - `IMAGE_PACKAGING.md`: lineamiento operativo para tags, build y arranque del laboratorio sin depender de `latest`
 - `RECONCILER_CONTROL_LOOP_EVOLUTION.md`: verificacion tecnica del paso sidecar -> control loop -> controlador
-- `FINAL_TOPOLOGY.md`: topologia final minima ya materializada para Fase 9, incluyendo el workload externo del simulador
+- `FINAL_TOPOLOGY.md`: topologia final minima ya materializada para Fase 9, centrada en los workloads persistentes del core BHM
 - `scripts/bootstrap-kind.ps1`: crea el clúster, genera el secret desde `.env.dev`, aplica el scaffold y opcionalmente carga la imagen local
 
 ## Secrets broker-facing en este laboratorio
@@ -45,10 +45,10 @@ Eso es deliberadamente transicional: ya existe traducción a primitivas de Kuber
 
 - `kind`
 - `kubectl`
-- imágenes locales `bunkermtest-bunkerm:latest`, `bunkermtest-mosquitto:latest` y `water-plant-simulator:latest` ya construidas con `./deploy.ps1 -Action build`
+- imágenes locales `bunkermtest-bunkerm:latest` y `bunkermtest-mosquitto:latest` ya construidas con `./deploy.ps1 -Action build`
 - `.env.dev` existente y válido
 
-Este laboratorio asume imágenes locales cargadas en `kind` para los workloads propios de BHM y del simulador externo. Dentro de los nodos de `kind` esas imágenes quedan registradas como `localhost/bunkermtest-bunkerm:latest`, `localhost/bunkermtest-mosquitto:latest` y `localhost/water-plant-simulator:latest`, por eso los manifiestos usan esos nombres junto con `imagePullPolicy: Never`.
+Este laboratorio asume imágenes locales cargadas en `kind` para los workloads propios de BHM. Dentro de los nodos de `kind` esas imágenes quedan registradas como `localhost/bunkermtest-bunkerm:latest` y `localhost/bunkermtest-mosquitto:latest`, por eso los manifiestos usan esos nombres junto con `imagePullPolicy: Never`.
 
 Si Podman Desktop muestra extensiones activas pero la terminal no resuelve los binarios, hay dos opciones válidas:
 
@@ -96,7 +96,6 @@ kubectl get pods -n bhm-lab
 kubectl get svc -n bhm-lab
 kubectl logs deployment/bunkerm-platform -n bhm-lab
 kubectl logs deployment/bhm-alert-delivery -n bhm-lab
-kubectl logs deployment/water-plant-simulator -n bhm-lab
 kubectl logs statefulset/mosquitto -n bhm-lab -c broker
 kubectl logs statefulset/mosquitto -n bhm-lab -c reconciler
 kubectl logs statefulset/mosquitto -n bhm-lab -c observability

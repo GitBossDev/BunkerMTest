@@ -68,7 +68,7 @@ Este plano vive dentro del pod de `mosquitto`, no en el pod web.
 ### Plano 4: workloads externos
 
 - consumidores o productores de datos que no deben mezclarse con el ownership de BHM
-- ejemplo actual: `water-plant-simulator`
+- ejemplo actual: `greenhouse-simulator` como herramienta externa de carga MQTT
 
 Estos workloads se integran por MQTT, HTTP o datos persistidos, pero no por volumen compartido con el broker.
 
@@ -86,7 +86,7 @@ El baseline actual en `kind` despliega estos workloads:
 | `reconciler` | sidecar en `mosquitto` | Aplicacion broker-facing de desired state |
 | `observability` | sidecar en `mosquitto` | Lectura broker-owned de logs, config y artefactos observados |
 | `bhm-alert-delivery` | `Deployment` | Worker que consume outbox y hace delivery externo |
-| `water-plant-simulator` | `Deployment` | Workload externo de simulacion integrado solo por MQTT |
+| `greenhouse-simulator` | herramienta externa | Carga MQTT externa usada fuera del baseline persistente |
 
 ---
 
@@ -158,7 +158,7 @@ Separa deteccion de alerta y envio externo. La idea es simple:
 
 Eso evita hacer delivery en el hilo sincrono del request original.
 
-### `water-plant-simulator`
+### `greenhouse-simulator`
 
 Es el ejemplo concreto del workload externo desacoplado. Sirve para validar que la arquitectura ya admite otro producto o consumidor sin mezclar ownership.
 
@@ -194,7 +194,7 @@ Usuario/Navegador
     |                                           |
     +---------------- MQTT / runtime -----------+
 
-water-plant-simulator --------------------> mosquitto
+greenhouse-simulator ---------------------> mosquitto
 
 bhm-alert-delivery <---------------------- postgres
         |
@@ -263,7 +263,7 @@ La plataforma sigue pudiendo hablar con el broker por los contratos de producto 
 
 ### Canal 7: simulator -> mosquitto
 
-`water-plant-simulator` se conecta al broker interno por DNS de cluster:
+`greenhouse-simulator` se conecta al broker por `localhost:21900` desde Windows o por `bhm-lab-control-plane:31900` cuando corre en contenedor unido a la red `kind`:
 
 - host: `mosquitto`
 - puerto: `1900`

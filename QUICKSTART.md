@@ -123,7 +123,7 @@ The command fetches `http://localhost:2000/api/openapi.json` and overwrites
 ## Metodo 3: Simulador Industrial
 
 ```powershell
-# Iniciar simulador de planta de tratamiento de aguas
+# Ejecutar simulador de invernadero
 .\simulator.ps1 start
 
 # Ver estado del simulador
@@ -222,5 +222,5 @@ BunkerMTest/
 │   ├── mosquitto/
 │   └── postgres/
 ├── scripts/                    # Scripts de utilidad
-└── water-plant-simulator/      # Simulador industrial
+└── greenhouse-simulator/       # Simulador MQTT de invernadero
 ```
