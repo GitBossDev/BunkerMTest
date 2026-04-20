@@ -1,6 +1,6 @@
 # Topologia Final Objetivo en Kubernetes
 
-Este documento materializa el primer corte ejecutable de Fase 9: BHM deja de validarse solo como control-plane aislado y pasa a convivir en el laboratorio con un workload externo desacoplado, `water-plant-simulator`, que representa el producto o consumidor de datos que vive fuera del ownership broker-facing de BHM.
+Este documento materializa el corte ejecutable de Fase 9 ya saneado: BHM deja de validarse solo como control-plane aislado y pasa a convivir en el laboratorio con sus workloads persistentes core, mientras que `greenhouse-simulator` queda como herramienta externa de carga MQTT fuera del baseline estable de `kind`.
 
 ## Workloads activos en el laboratorio final actual
 
@@ -12,9 +12,8 @@ Este documento materializa el primer corte ejecutable de Fase 9: BHM deja de val
 | Observabilidad broker-owned | `observability` | sidecar en `StatefulSet/mosquitto` | broker-owned |
 | Persistencia control-plane | `postgres` | `StatefulSet` | BHM |
 | Delivery de alertas | `bhm-alert-delivery` | `Deployment` | BHM |
-| Producto externo/simulador | `water-plant-simulator` | `Deployment` | externo a BHM |
 
-## Contrato de integracion del workload externo
+## Contrato de integracion del simulador externo
 
 - no comparte volumen con el broker
 - no entra en el pod `mosquitto`
@@ -27,17 +26,16 @@ Este documento materializa el primer corte ejecutable de Fase 9: BHM deja de val
 ### Secretos
 
 - `bhm-env` sigue siendo el secreto transicional del laboratorio
-- `water-plant-simulator` consume `MQTT_USERNAME` y `MQTT_PASSWORD` desde ese secreto para no duplicar credenciales durante el corte actual
+- `greenhouse-simulator` reutiliza esas credenciales solo cuando se ejecuta como herramienta externa fuera de `kind`
 
 ### Almacenamiento
 
-- `water-plant-simulator` usa `ConfigMap` para `plant_config.yaml`
-- logs y estado de healthcheck viven en `emptyDir`
-- no se añade PVC nuevo porque el simulador no es un source-of-truth durable del sistema
+- el baseline persistente no añade `ConfigMap`, `PVC` ni `Deployment` para simuladores externos
+- `greenhouse-simulator` se ejecuta fuera del baseline como stresser one-shot
 
 ### Red
 
-- `water-plant-simulator` resuelve el broker por `Service` interno `mosquitto:1900`
+- `greenhouse-simulator` se conecta al broker por `localhost:21900` desde Windows o por `bhm-lab-control-plane:31900` cuando corre en contenedor unido a la red `kind`
 - no expone `Service` propio porque el flujo actual es publish/subscribe hacia el broker, no API entrante
 
 ## Reconciliacion del broker en el entorno final
@@ -53,12 +51,12 @@ Eso confirma que la migracion a Kubernetes se hace sobre la arquitectura saneada
 ## Estrategia de despliegue actual
 
 - `k8s/base` como baseline de manifests
-- `deploy.ps1 -Action build -Runtime kind -ImageTag <tag>` construye las tres imagenes locales del laboratorio
+- `deploy.ps1 -Action build -Runtime kind -ImageTag <tag>` construye las imagenes locales del core del laboratorio
 - `deploy.ps1 -Action start -Runtime kind -ImageTag <tag>` crea `kind`, carga imagenes y aplica la topologia
 
 ## Siguiente corte fuera de este baseline
 
-1. separar credenciales del simulador de las credenciales admin del laboratorio
-2. mover el workload externo a imagen publicada en registry real
-3. decidir si el producto de transformacion definitivo reemplaza o acompaña a `water-plant-simulator`
+1. separar por completo las credenciales del stresser externo de las credenciales admin del laboratorio
+2. decidir si `greenhouse-simulator` debe seguir como herramienta externa o convertirse en workload formal del cluster
+3. publicar la imagen del simulador en registry real si pasa a formar parte del baseline operativo
 4. formalizar chart u overlay por entorno si el laboratorio deja de ser el unico cluster objetivo

@@ -18,7 +18,7 @@ Este documento inicia el trabajo operativo de Fase 8 convirtiendo el baseline Co
 | `bhm-broker-observability` | Traducido como sidecar | sidecar + `Service` interno | acceso read-only a PVCs del broker | decidir si queda sidecar o collector/deployment dedicado |
 | `mosquitto` | Traducido | `StatefulSet` + `Service` + PVCs | `Secret` bootstrap, PVCs data/conf/log | rotacion nativa de passwd/TLS, estrategia final de exposicion |
 | `bhm-alert-delivery` | Traducido en este corte | `Deployment` | `bhm-env`, PostgreSQL, outbox persistido | politicas de escalado, readiness mas funcional |
-| `water-plant-simulator` | Traducido en Fase 9 | `Deployment` | `ConfigMap` propio, MQTT interno, credenciales desde `bhm-env` | separar credenciales del simulador y decidir imagen final del producto externo |
+| `greenhouse-simulator` | Fuera del baseline persistente | herramienta externa | MQTT contra `localhost:21900` o `NodePort 31900` | decidir si debe seguir externo o traducirse despues como workload formal |
 | `pgadmin` | Fuera del baseline | sin objeto actual | solo herramienta operativa | mantener fuera del carril principal |
 
 ## Configuracion y secretos

@@ -64,8 +64,8 @@ $script:KindExecutable = $null
 $script:KubectlExecutable = $null
 $script:BhmPlatformImageName = 'bunkermtest-bunkerm'
 $script:MosquittoImageName = 'bunkermtest-mosquitto'
-$script:WaterPlantSimulatorImageName = 'water-plant-simulator'
-$script:KindImages = @("$($script:BhmPlatformImageName):$ImageTag", "$($script:MosquittoImageName):$ImageTag", "$($script:WaterPlantSimulatorImageName):$ImageTag")
+$script:GreenhouseSimulatorImageName = 'greenhouse-simulator'
+$script:KindImages = @("$($script:BhmPlatformImageName):$ImageTag", "$($script:MosquittoImageName):$ImageTag")
 $script:KindWebBaseUrl = "http://localhost:$KindWebHostPort"
 $script:KindKubectlContext = "kind-$KindClusterName"
 $script:KindPortForwardDir = Join-Path $PSScriptRoot 'tmp\kind-port-forward'
@@ -166,6 +166,60 @@ function Get-PodmanMachineState {
     }
 }
 
+function Get-PreferredPodmanMachineName {
+    $machines = @(Get-PodmanMachineState)
+    if ($machines.Count) {
+        $preferredMachine = $machines | Where-Object { $_.Default -eq $true } | Select-Object -First 1
+        if (-not $preferredMachine) {
+            $preferredMachine = $machines | Select-Object -First 1
+        }
+
+        $machineName = "$($preferredMachine.Name)".Trim()
+        if ($machineName) {
+            return $machineName
+        }
+    }
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $connectionLines = @(podman system connection list 2>&1)
+    $connectionExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($connectionExitCode -eq 0) {
+        foreach ($line in $connectionLines) {
+            $trimmedLine = "$line".Trim()
+            if (-not $trimmedLine -or $trimmedLine -like 'Name *') {
+                continue
+            }
+
+            if ($trimmedLine -match '^(?<name>\S+)(?:\s+.+?)?\s+(?<default>true|false)\s+(?<rw>true|false)\s*$') {
+                $connectionName = $Matches['name']
+                if ($Matches['default'] -eq 'true') {
+                    return ($connectionName -replace '-root$', '')
+                }
+            }
+        }
+
+        foreach ($line in $connectionLines) {
+            $trimmedLine = "$line".Trim()
+            if (-not $trimmedLine -or $trimmedLine -like 'Name *') {
+                continue
+            }
+
+            if ($trimmedLine -match '^(?<name>\S+)') {
+                return (($Matches['name']) -replace '-root$', '')
+            }
+        }
+    }
+
+    if ($env:PODMAN_MACHINE_NAME) {
+        return $env:PODMAN_MACHINE_NAME.Trim()
+    }
+
+    return 'podman-machine-default'
+}
+
 function Ensure-PodmanServiceAvailable {
     $savedPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -177,35 +231,16 @@ function Ensure-PodmanServiceAvailable {
         return
     }
 
-    $machines = @(Get-PodmanMachineState)
-    if (-not $machines.Count) {
-        throw 'Podman no responde y no hay maquinas configuradas para recuperarlo automaticamente. Ejecuta podman machine init/start o revisa podman system connection list.'
-    }
-
-    $preferredMachine = $machines | Where-Object { $_.Default -eq $true } | Select-Object -First 1
-    if (-not $preferredMachine) {
-        $preferredMachine = $machines | Select-Object -First 1
-    }
-
-    $machineName = "$($preferredMachine.Name)"
+    $machineName = Get-PreferredPodmanMachineName
     if (-not $machineName) {
         throw 'No se pudo determinar la maquina Podman a recuperar.'
     }
 
     Write-Warning "Podman no respondio. Intentando recuperar la maquina '$machineName'..."
 
-    $isRunning = $false
-    if ($preferredMachine.PSObject.Properties.Name -contains 'Running') {
-        $isRunning = [bool]$preferredMachine.Running
-    } elseif ("$($preferredMachine.LastUp)" -match 'Currently running') {
-        $isRunning = $true
-    }
-
     $savedPref = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    if ($isRunning) {
-        podman machine stop $machineName 2>&1 | Out-Null
-    }
+    podman machine stop $machineName 2>&1 | Out-Null
     podman machine start $machineName 2>&1 | Out-Null
     $startExitCode = $LASTEXITCODE
     podman system connection default "${machineName}-root" 2>&1 | Out-Null
@@ -235,17 +270,7 @@ function Ensure-PodmanServiceAvailable {
 }
 
 function Restart-PodmanMachine {
-    $machines = @(Get-PodmanMachineState)
-    if (-not $machines.Count) {
-        throw 'No hay maquinas Podman disponibles para reiniciar.'
-    }
-
-    $preferredMachine = $machines | Where-Object { $_.Default -eq $true } | Select-Object -First 1
-    if (-not $preferredMachine) {
-        $preferredMachine = $machines | Select-Object -First 1
-    }
-
-    $machineName = "$($preferredMachine.Name)"
+    $machineName = Get-PreferredPodmanMachineName
     if (-not $machineName) {
         throw 'No se pudo determinar la maquina Podman a reiniciar.'
     }
@@ -786,20 +811,71 @@ function Wait-KindPortForwardReady {
     throw "El port-forward '$($Entry.Name)' no quedo listo dentro de ${TimeoutSeconds}s."
 }
 
-function Start-KindPortForwards {
-    Ensure-KubernetesTooling
-    Stop-KindPortForwards
-
-    $entries = @(
-        (Start-KindPortForwardProcess -Name 'platform' -Resource 'service/bunkerm-platform' -Mappings @("${KindWebHostPort}:2000") -LocalPorts @($KindWebHostPort)),
-        (Start-KindPortForwardProcess -Name 'mosquitto' -Resource 'service/mosquitto' -Mappings @("${KindMqttHostPort}:1900", "${KindMqttWsHostPort}:9001") -LocalPorts @($KindMqttHostPort, $KindMqttWsHostPort))
+function Wait-KubernetesApiResponsive {
+    param(
+        [int]$TimeoutSeconds = 45,
+        [int]$IntervalSeconds = 3
     )
 
-    foreach ($entry in $entries) {
-        Wait-KindPortForwardReady -Entry $entry
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $script:KubectlExecutable --context $script:KindKubectlContext get namespace $KindNamespace 2>&1 | Out-Null
+        $kubectlExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+
+        if ($kubectlExitCode -eq 0) {
+            return $true
+        }
+
+        Start-Sleep -Seconds $IntervalSeconds
     }
 
-    $entries | ConvertTo-Json | Set-Content -Path $script:KindPortForwardStatePath -Encoding ASCII
+    return $false
+}
+
+function Start-KindPortForwards {
+    Ensure-KubernetesTooling
+
+    $lastFailure = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Stop-KindPortForwards
+
+        if (-not (Wait-KubernetesApiResponsive -TimeoutSeconds 45)) {
+            $lastFailure = "El API server del cluster kind no respondio a tiempo antes de abrir los port-forward."
+            if ($attempt -lt 3) {
+                Write-Warning "Reintentando port-forward tras espera adicional del API server (intento $attempt/3)..."
+                continue
+            }
+
+            throw $lastFailure
+        }
+
+        try {
+            $entries = @(
+                (Start-KindPortForwardProcess -Name 'platform' -Resource 'service/bunkerm-platform' -Mappings @("${KindWebHostPort}:2000") -LocalPorts @($KindWebHostPort)),
+                (Start-KindPortForwardProcess -Name 'mosquitto' -Resource 'service/mosquitto' -Mappings @("${KindMqttHostPort}:1900", "${KindMqttWsHostPort}:9001") -LocalPorts @($KindMqttHostPort, $KindMqttWsHostPort))
+            )
+
+            foreach ($entry in $entries) {
+                Wait-KindPortForwardReady -Entry $entry
+            }
+
+            $entries | ConvertTo-Json | Set-Content -Path $script:KindPortForwardStatePath -Encoding ASCII
+            return
+        } catch {
+            $lastFailure = $_
+            Stop-KindPortForwards
+            if ($attempt -lt 3) {
+                Write-Warning "Fallo transitorio al levantar port-forward de kind (intento $attempt/3). Reintentando..."
+                Start-Sleep -Seconds 5
+                continue
+            }
+        }
+    }
+
+    throw $lastFailure
 }
 
 function Ensure-KindPortForwardsHealthy {
@@ -917,11 +993,43 @@ function Test-KindClusterExists {
 function Wait-KubernetesRuntimeReady {
     Ensure-KubernetesTooling
 
-    $timeout = '240s'
-    foreach ($target in @('statefulset/postgres', 'statefulset/mosquitto', 'deployment/bunkerm-platform', 'deployment/water-plant-simulator', 'deployment/bhm-alert-delivery')) {
-        & $script:KubectlExecutable rollout status $target -n $KindNamespace --timeout=$timeout | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "El workload $target no alcanzo estado listo en Kubernetes."
+    $perAttemptTimeout = '45s'
+    foreach ($target in @('statefulset/postgres', 'statefulset/mosquitto', 'deployment/bunkerm-platform', 'deployment/bhm-alert-delivery')) {
+        $deadline = (Get-Date).AddMinutes(5)
+        $lastRolloutOutput = ''
+        while ((Get-Date) -lt $deadline) {
+            $savedPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $rolloutOutput = & $script:KubectlExecutable --context $script:KindKubectlContext rollout status $target -n $KindNamespace --timeout=$perAttemptTimeout 2>&1
+            $rolloutExitCode = $LASTEXITCODE
+            $ErrorActionPreference = $savedPref
+
+            if ($rolloutExitCode -eq 0) {
+                $lastRolloutOutput = ''
+                break
+            }
+
+            $lastRolloutOutput = ($rolloutOutput | Out-String)
+            $normalizedOutput = $lastRolloutOutput.ToLowerInvariant()
+            if (
+                $normalizedOutput.Contains('tls handshake timeout') -or
+                $normalizedOutput.Contains('unable to connect to the server') -or
+                $normalizedOutput.Contains('i/o timeout') -or
+                $normalizedOutput.Contains('connection refused') -or
+                $normalizedOutput.Contains('eof') -or
+                $normalizedOutput.Contains('timed out waiting for the condition')
+            ) {
+                Write-Warning "Kubectl devolvio un fallo transitorio al esperar $target. Reintentando..."
+                Start-Sleep -Seconds 5
+                continue
+            }
+
+            Write-Error "El workload $target no alcanzo estado listo en Kubernetes. Salida: $lastRolloutOutput"
+            exit 1
+        }
+
+        if ($lastRolloutOutput) {
+            Write-Error "El workload $target no alcanzo estado listo en Kubernetes dentro del tiempo esperado. Ultima salida: $lastRolloutOutput"
             exit 1
         }
     }
@@ -967,7 +1075,7 @@ function Invoke-StartKindRuntime {
         -LocalImages $script:KindImages `
         -BhmImage "localhost/$($script:BhmPlatformImageName):$ImageTag" `
         -MosquittoImage "localhost/$($script:MosquittoImageName):$ImageTag" `
-        -WaterPlantSimulatorImage "localhost/$($script:WaterPlantSimulatorImageName):$ImageTag"
+        -GreenhouseSimulatorImage "localhost/$($script:GreenhouseSimulatorImageName):$ImageTag"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Fallo el arranque del laboratorio kind. Revisa la salida anterior.'
@@ -1287,10 +1395,10 @@ function Invoke-Status {
         Write-Host 'Contenedores Compose:' -ForegroundColor Yellow
         $containers = & $script:CE ps --format json 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
         if ($containers) {
-            $containers | Where-Object { $_.Names -match 'bunkerm|water-plant' } |
+            $containers | Where-Object { $_.Names -match 'bunkerm|greenhouse' } |
                 Format-Table @{L='Nombre';E={$_.Names}}, @{L='Estado';E={$_.State}}, @{L='Puertos';E={$_.Ports}} -AutoSize
         } else {
-            Invoke-Expression "$script:CE ps" | Select-String 'bunkerm|water-plant|NAME'
+            Invoke-Expression "$script:CE ps" | Select-String 'bunkerm|greenhouse|NAME'
         }
 
         Write-Host ''
@@ -1388,9 +1496,6 @@ function Invoke-Logs {
             Write-Info 'bunkerm-platform:'
             & $script:KubectlExecutable logs deployment/bunkerm-platform -n $KindNamespace --all-containers=true --tail=80
             Write-Host ''
-            Write-Info 'water-plant-simulator:'
-            & $script:KubectlExecutable logs deployment/water-plant-simulator -n $KindNamespace --tail=80
-            Write-Host ''
             Write-Info 'mosquitto/reconciler:'
             & $script:KubectlExecutable logs statefulset/mosquitto -n $KindNamespace -c reconciler --tail=80
         }
@@ -1481,7 +1586,7 @@ function Invoke-Build {
         exit 1
     }
 
-    Invoke-BuildWaterPlantSimulator
+    Invoke-BuildGreenhouseSimulator
     Write-Host ""
 }
 
@@ -1520,24 +1625,24 @@ function Invoke-BuildMosquitto {
     Write-Host ""
 }
 
-function Invoke-BuildWaterPlantSimulator {
-    Write-Info "Construyendo imagen de Water Plant Simulator..."
+function Invoke-BuildGreenhouseSimulator {
+    Write-Info "Construyendo imagen de Greenhouse Simulator..."
     Write-Host ""
 
-    if (-not (Test-Path "water-plant-simulator\Dockerfile")) {
-        Write-Host "[ERROR] water-plant-simulator/Dockerfile no encontrado." -ForegroundColor Red
+    if (-not (Test-Path "greenhouse-simulator\src\Greenhouse.Sensors\Dockerfile")) {
+        Write-Host "[ERROR] greenhouse-simulator/src/Greenhouse.Sensors/Dockerfile no encontrado." -ForegroundColor Red
         exit 1
     }
 
     & $script:CE build `
-        -t "$($script:WaterPlantSimulatorImageName):$ImageTag" `
-        .\water-plant-simulator
+        -t "$($script:GreenhouseSimulatorImageName):$ImageTag" `
+        .\greenhouse-simulator\src\Greenhouse.Sensors
     $buildExit = $LASTEXITCODE
 
     if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen Water Plant Simulator construida: $($script:WaterPlantSimulatorImageName):$ImageTag"
+        Write-Success "[OK] Imagen Greenhouse Simulator construida: $($script:GreenhouseSimulatorImageName):$ImageTag"
     } else {
-        Write-Host "[ERROR] Fallo en el build de Water Plant Simulator." -ForegroundColor Red
+        Write-Host "[ERROR] Fallo en el build de Greenhouse Simulator." -ForegroundColor Red
         exit 1
     }
     Write-Host ""
@@ -1556,7 +1661,7 @@ function Invoke-KubernetesSmoke {
 
     $passed = 0
     $failed = 0
-    $totalChecks = if ($apiKey) { 6 } else { 5 }
+    $totalChecks = if ($apiKey) { 5 } else { 4 }
 
     Write-Host -NoNewline "  [1/$totalChecks] Workloads Kubernetes listos ............... "
     try {
@@ -1607,27 +1712,8 @@ function Invoke-KubernetesSmoke {
         $failed++
     }
 
-    Write-Host -NoNewline "  [5/$totalChecks] Water Plant Simulator readiness .......... "
-    try {
-        $simulatorPod = & $script:KubectlExecutable get pod -n $KindNamespace -l app.kubernetes.io/name=water-plant-simulator -o jsonpath='{.items[0].metadata.name}'
-        if ($LASTEXITCODE -ne 0 -or -not $simulatorPod) {
-            throw 'No se encontro el pod del simulador.'
-        }
-
-        & $script:KubectlExecutable exec -n $KindNamespace $simulatorPod -- python -m src.healthcheck --mode readiness --max-heartbeat-age 30 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'El healthcheck de readiness del simulador devolvio error.'
-        }
-
-        Write-Host 'OK' -ForegroundColor Green
-        $passed++
-    } catch {
-        Write-Host "FAIL $($_.Exception.Message)" -ForegroundColor Red
-        $failed++
-    }
-
     if ($apiKey) {
-        Write-Host -NoNewline "  [6/$totalChecks] Backend /api/dynsec/roles (API key) ...... "
+        Write-Host -NoNewline "  [5/$totalChecks] Backend /api/dynsec/roles (API key) ...... "
         try {
             $r = Invoke-WebRequest -Uri "$script:KindWebBaseUrl/api/dynsec/roles" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
             Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green

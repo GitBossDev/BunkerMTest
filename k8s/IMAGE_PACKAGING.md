@@ -1,10 +1,10 @@
 # Empaquetado e Imagenes del Laboratorio Kubernetes
 
-Este documento cierra el trabajo pendiente de Fase 8 sobre empaquetado del laboratorio `kind` y deja un lineamiento concreto para abandonar `latest` sin romper el baseline local. En Fase 9 el mismo carril ya cubre tambien la imagen `water-plant-simulator`.
+Este documento cierra el trabajo pendiente de Fase 8 sobre empaquetado del laboratorio `kind` y deja un lineamiento concreto para abandonar `latest` sin romper el baseline local. El baseline persistente actual ya no incluye el antiguo simulador de planta de agua.
 
 ## Estado actual
 
-- las imagenes base siguen siendo `bunkermtest-bunkerm`, `bunkermtest-mosquitto` y `water-plant-simulator`
+- las imagenes base del laboratorio `kind` son `bunkermtest-bunkerm` y `bunkermtest-mosquitto`
 - el laboratorio `kind` ya no requiere editar manifests para cambiar de tag
 - `deploy.ps1` y `k8s/scripts/bootstrap-kind.ps1` aceptan un tag explicito mediante `-ImageTag`
 - `k8s/base/kustomization.yaml` fija los nombres de imagen y permite sobrescribir el tag con Kustomize antes de aplicar
@@ -25,7 +25,7 @@ Baseline con tag explicito de corte:
 ./deploy.ps1 -Action start -Runtime kind -ImageTag phase8-lab
 ```
 
-Eso construye imagenes locales `bunkermtest-bunkerm:phase8-lab`, `bunkermtest-mosquitto:phase8-lab` y `water-plant-simulator:phase8-lab`, las carga en `kind` y aplica el laboratorio con manifests ya resueltos a `localhost/...:phase8-lab`.
+Eso construye imagenes locales `bunkermtest-bunkerm:phase8-lab` y `bunkermtest-mosquitto:phase8-lab`, las carga en `kind` y aplica el laboratorio con manifests ya resueltos a `localhost/...:phase8-lab`.
 
 ## Convencion minima de tags
 

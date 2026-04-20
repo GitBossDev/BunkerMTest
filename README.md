@@ -128,7 +128,7 @@ Acceder en **http://localhost:2000**
 .\deploy.ps1 -Action patch-backend     # Hot-patch Python (sin rebuild)
 .\deploy.ps1 -Action patch-frontend    # Hot-patch Next.js (sin rebuild)
 
-.\simulator.ps1 start                  # Iniciar simulador Water Plant
+.\simulator.ps1 start                  # Ejecutar simulador de invernadero (greenhouse MQTT stresser)
 .\simulator.ps1 stop
 .\simulator.ps1 status
 ```

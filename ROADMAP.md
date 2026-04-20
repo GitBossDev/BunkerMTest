@@ -182,7 +182,7 @@ BunkerMTest/
 │   ├── migrate-to-postgres.py    # Migración SQLite → PostgreSQL
 │   ├── setup-initial-users.sh    # Usuarios MQTT iniciales
 │   └── check-health.sh            # Health check de servicios
-└── water-plant-simulator/         # [FASE 2] Simulador
+└── greenhouse-simulator/          # [FASE 2] Simulador MQTT de invernadero
 ```
 
 #### 1.2 Servicios Docker Compose
@@ -269,239 +269,65 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml --profile tools up 
 
 ---
 
-## FASE 2: Simulación de Planta de Tratamiento de Aguas
+## FASE 2: Simulación MQTT de Invernadero
 
-**Duración e[OK] COMPLETO
+**Duración**: [OK] COMPLETO
 
 ### Objetivos
-- [x] Simulador de planta implementado en Python
-- [x] 8 sensores + 4 actuadores IoT publicando datos realistas
-- [x] Controlador automático de planta implementado
-- [x] Modelo físico con dinámica de tanques, flujos y presiones
-- [x] Generador de anomalías operativo (freeze, spike, drift, disconnect)
-- [x] Docker Compose configurado (docker-compose.simulator.yml)
-- [x] Script de gestión automatizado (simulator.ps1)
-- [x] Documentación completa (PHASE2_SIMULATOR.md)ficos
-- [ ] Generador de anomalías operativo
+- [x] Simulador activo consolidado en `greenhouse-simulator`
+- [x] Generación de carga MQTT desacoplada para validar broker, ACLs y churn de clientes
+- [x] Ejecución soportada desde Windows o desde contenedor Podman contra el baseline `kind`
+- [x] Wrapper operativo unificado en `simulator.ps1`
+- [x] Compose auxiliar actualizado en `docker-compose.simulator.yml`
+- [x] Runbook operativo disponible en `greenhouse-simulator/STRESSER_RUNBOOK.md`
 
-### 2.1 Arquitectura de la Planta Simulada
+### 2.1 Arquitectura del simulador activo
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                  Planta de Tratamiento                   │
-│                                                           │
-│  ┌────────┐      ┌─────────┐      ┌────────┐           │
-│  │ Tanque │──────│ Bomba 1 │──────│ Tanque │           │
-│  │   1    │      │         │      │   2    │           │
-│  │        │      └─────────┘      │        │           │
-│  └────────┘                       └────────┘           │
-│      │                                 │                │
-│      │                                 │                │
-│  ┌───▼───┐                        ┌───▼───┐           │
-│  │Válvula│                        │Válvula│           │
-│  │   1   │                        │   2   │           │
-│  └───────┘                        └───────┘           │
-│                                                         │
-│  Sensores:                                              │
-│  • Nivel (tank1, tank2)                                 │
-│  • pH, Turbidez                                         │
-│  • Caudal (inlet, outlet)                               │
-│  • Presión (pump1, pump2)                               │
-│  • Temperatura ambiente                                 │
-└─────────────────────────────────────────────────────────┘
+El simulador vigente no modela una planta de agua ni forma parte del baseline persistente de Kubernetes. El componente activo es un MQTT stresser de invernadero que vive fuera del cluster estable y se usa para:
+
+- generar carga MQTT concurrente
+- validar credenciales DynSec por cliente o credenciales compartidas
+- comprobar conectividad contra `localhost:21900` o contra el `NodePort` del broker en `kind`
+
+### 2.2 Variables principales del stresser
+
+```env
+MQTT_HOST=localhost
+MQTT_PORT=21900
+MQTT_AUTH_MODE=per-client
+MQTT_CLIENT_PASSWORD=123456
+CLIENTS=50
+TIMEUNIT=3
+TIME=10
+MSGS=100
+QOS=0
+RETAIN=false
 ```
 
-### 2.2 Topics MQTT
-
-**Sensores (Publishers):**
-```
-sensors/tank1/level         → float (0-100%)
-sensors/tank1/ph            → float (6.0-8.5)
-sensors/tank1/turbidity     → float (0-10 NTU)
-sensors/flow/inlet          → float (0-500 L/min)
-sensors/flow/outlet         → float (0-500 L/min)
-sensors/pump1/pressure      → float (0-5 bar)
-sensors/pump2/pressure      → float (0-5 bar)
-sensors/ambient/temperature → float (15-35°C)
-```
-
-**Actuadores (Subscribers + Publishers):**
-```
-actuators/pump1/command     → JSON {"action": "start|stop", "speed": 0-100}
-actuators/pump1/status      → JSON {"status": "running|stopped", "speed": int, ...}
-actuators/pump2/command     → JSON
-actuators/pump2/status      → JSON
-actuators/valve1/command    → JSON {"action": "open|close", "position": 0-100}
-actuators/valve1/status     → JSON {"position": int, ...}
-actuators/valve2/command    → JSON
-actuators/valve2/status     → JSON
-```
-
-**Control Central:**
-```
-control/plant/status        → JSON (estado general)
-control/alerts              → JSON (alertas generadas)
-control/commands            → JSON (comandos broadcast)
-```
-
-### 2.3 Formato de Mensajes
-
-```json
-// Sensor
-{
-  "timestamp": "2026-03-25T10:30:45Z",
-  "device_id": "sensor_tank1_level",
-  "value": 75.3,
-  "unit": "%",
-  "quality": "good"
-}
-
-// Actuator Status
-{
-  "timestamp": "2026-03-25T10:30:45Z",
-  "device_id": "pump1",
-  "status": "running",
-  "speed": 85,
-  "power_consumption": 2.3,
-  "hours_operation": 1234.5
-}
-```
-
-### 2.4 Lógica de Control Automático
-
-```python
-# Pseudocódigo del controlador
-if tank1_level < 20%:
-    start_pump1()
-    send_alert("Low water level in tank1")
-
-if tank1_level > 90%:
-    stop_pump1()
-
-if ph < 6.5 or ph > 8.0:
-    send_alert("pH out of range")
-    adjust_chemical_dosing()
-
-if turbidity > 5:
-    send_alert("High turbidity detected")
-    increase_filtration()
-```
-
-### 2.5 Generador de Anomalías
-
-| Tipo de Anomalía | Descripción | Detectable por |
-|------------------|-------------|----------------|
-| **Freeze** | Sensor congela valor durante 5+ min | Silence Detector |
-| **Spike** | Valor aumenta >3× repentinamente | Spike Detector |
-| **Drift** | Incremento gradual sostenido | EWMA Detector |
-| **Desconexión** | Cliente MQTT se desconecta temporalmente | BunkerM Monitor |
-| **Out of Range** | Valores fuera de rangos físicos posibles | Z-score Detector |
-
-### 2.6 Configuración de ACL
-
-**Usuarios MQTT:**
-- `simulator_sensors` → role: `sensor_publisher`
-- `simulator_actuators` → role: `actuator_full`
-- `simulator_controller` → role: `controller_full`
-- `admin_user` → role: `admin`
-
-**ACL Rules:**
-```json
-{
-  "roles": [
-    {
-      "rolename": "sensor_publisher",
-      "acls": [
-        {
-          "acltype": "publishClientSend",
-          "topic": "sensors/#",
-          "allow": true
-        },
-        {
-          "acltype": "subscribeLiteral",
-          "topic": "control/commands",
-          "allow": true
-        }
-      ]
-    },
-    {
-      "rolename": "actuator_full",
-      "acls": [
-        {
-          "acltype": "publishClientSend",
-          "topic": "actuators/#",
-          "allow": true
-        },
-        {
-          "acltype": "subscribeLiteral",
-          "topic": "actuators/+/command",
-          "allow": true
-        },
-        {
-          "acltype": "subscribeLiteral",
-          "topic": "control/commands",
-          "allow": true
-        }
-      ]
-    },
-    {
-      "rolename": "controller_full",
-      "acls": [
-        {
-          "acltype": "publishClientSend",
-          "topic": "#",
-          "allow": true
-        },
-        {
-          "acltype": "subscribeLiteral",
-          "topic": "#",
-          "allow": true
-        }
-      ]
-    }
-  ]
-}
-```
-
-### 2.7 Estructura del Simulador
+### 2.3 Estructura del simulador
 
 ```
-water-plant-simulator/
-├── Dockerfile
-├── docker-compose.simulator.yml
-├── requirements.txt
-├── config/
-│   └── plant_config.yaml
-├── src/
-│   ├── main.py
-│   ├── devices/
-│   │   ├── __init__.py
-│   │   ├── base_device.py
-│   │   ├── sensor.py
-│   │   ├── actuator.py
-│   │   └── controller.py
-│   ├── simulation/
-│   │   ├── __init__.py
-│   │   ├── physics_model.py
-│   │   └── anomaly_generator.py
-│   └── mqtt_client.py
-└── README.md
+greenhouse-simulator/
+├── STRESSER_RUNBOOK.md
+├── mosquitto/
+└── src/
+    ├── Greenhouse.Sensors/
+    │   ├── Dockerfile
+    │   ├── Program.cs
+    │   ├── mqtt-stresser.env.example
+    │   └── mqtt-stresser.kind.env
+    ├── Greenhouse.Controller/
+    ├── Greenhouse.ClientCreator/
+    └── Greenhouse.Shared/
 ```
-x] Simulador se levanta con `.\simulator.ps1 start`
-- [x] 12 dispositivos (8 sensores + 4 actuadores) implementados
-- [x] Sensores publican cada 5-10 segundos (configurable)
-- [x] Actuadores responden a comandos MQTT (on, off, set_value, set_mode)
-- [x] Controlador automático implementado con reglas de nivel, pH y turbidez
-- [x] Modelo físico calcula dinámica de tanques, flujos y presiones
-- [x] Generador de anomalías con 4 tipos (freeze, spike, drift, disconnect)
-- [x] Docker Compose configurado con dependencia en red bunkerm-network
-- [x] Script simulator.ps1 con 8 acciones (start, stop, restart, status, logs, anomalies, build, clean)
-- [x] Documentación completa en PHASE2_SIMULATOR.md (400+ líneas)
-- [x] Archivo plant_config.yaml con configuración completa (130+ líneas)
-- [x] Dockerfile optimizado con usuario no privilegiado
-- [x] ACL funciona: roles simulator/admin/sub_sensors configurados
-- [x] Controlador automático enciende bomba cuando nivel < 20%
-- [x] Anomalías generadas son visibles en logs
+
+### 2.4 Criterios de éxito
+
+- [x] `greenhouse-simulator` sustituye al simulador de agua como única referencia activa de simulación
+- [x] `.\simulator.ps1 start` ejecuta el stresser de invernadero
+- [x] `docker-compose.simulator.yml` ya no depende de `water-plant-simulator`
+- [x] El simulador legado de agua queda movido a `_legacy/water-plant-simulator`
+- [x] El baseline `kind` arranca sin requerir manifiestos ni imágenes del simulador de agua
 
 ---
 

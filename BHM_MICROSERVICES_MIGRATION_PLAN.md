@@ -16,7 +16,7 @@ El objetivo inmediato fue estabilizar primero Docker/Podman Compose con límites
 
 - [x] Las Fases 0 a 9 ya tienen evidencia operativa en el repositorio y las Fases 7, 8 y 9 quedaron cerradas con validación real.
 - [x] Compose-first sigue siendo la base conceptual del plan, pero ya no es el único runtime validado: existe laboratorio Kubernetes funcional en `k8s/`.
-- [x] La migración a Kubernetes dejó de ser solo una intención futura y pasó a tener topología mínima ejecutable con `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator`.
+- [x] La migración a Kubernetes dejó de ser solo una intención futura y pasó a tener topología mínima ejecutable con `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform` y `bhm-alert-delivery`, dejando `greenhouse-simulator` como herramienta externa de carga MQTT fuera del baseline persistente.
 - [x] El principal gap operativo que sigue visible en el laboratorio es la publicación host-managed por `kubectl port-forward`; no bloquea la arquitectura ni el cierre de fase porque la validación final se hizo directamente sobre el clúster.
 
 ---
@@ -110,7 +110,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] `bunkerm-source/docs/faq.md` - documentación upstream de producto base.
 - [x] `bunkerm-source/ARCHITECTURE.md` - arquitectura histórica del código base integrado.
 - [x] `bunkerm-source/RESTRUCTURE_PLAN.md` - documento histórico de la consolidación previa.
-- [x] `water-plant-simulator/README.md` - referencia ya alineada al naming activo; conservar solo el contexto histórico que siga siendo útil.
+- [x] `_legacy/water-plant-simulator/README.md` - referencia histórica conservada fuera del flujo activo; no usarla como baseline vigente.
 - [x] `SQLITE_PERSISTENCE_PHASES.md` - documento técnico vigente; mantiene identificadores y rutas técnicas heredadas.
 
 #### Identificadores técnicos que permanecen temporalmente
@@ -950,10 +950,10 @@ Estado actual del carril opcional:
 
 ### Actividades previstas
 
-- [x] Definir la topología final en Kubernetes. La topología mínima ya quedó fijada en `k8s/FINAL_TOPOLOGY.md`, incorporando `water-plant-simulator` como workload externo sin mezclar ownership con `bunkerm-platform` ni con `mosquitto`.
-- [x] Integrar la imagen del producto de transformación de datos en la arquitectura objetivo. El primer carril ejecutable ya usa `water-plant-simulator` como `Deployment` externo en `k8s/base/water-plant-simulator.yaml`, con imagen local versionable y contrato exclusivamente MQTT.
-- [x] Implementar manifests, charts o la estrategia de despliegue elegida. El baseline `k8s/base` ya incorpora el manifiesto del simulador, su `ConfigMap` de configuración y el flujo de empaquetado/carga de imagen para `kind`.
-- [x] Adaptar secretos, almacenamiento persistente y networking al clúster objetivo. El simulador ya consume credenciales MQTT vía `Secret`, configuración vía `ConfigMap`, `emptyDir` para logs/estado y DNS interno hacia `mosquitto:1900`.
+- [x] Definir la topología final en Kubernetes. La topología mínima ya quedó fijada en `k8s/FINAL_TOPOLOGY.md`, centrada en los workloads persistentes del core BHM y sin mantener el simulador de agua en el baseline activo.
+- [x] Integrar la estrategia de workload externo en la arquitectura objetivo. El baseline persistente ya no despliega `water-plant-simulator`; el simulador vigente pasa a ser `greenhouse-simulator` como herramienta externa de carga MQTT.
+- [x] Implementar manifests, charts o la estrategia de despliegue elegida. El baseline `k8s/base` ya incorpora solo los manifests activos del core BHM y elimina el manifiesto legacy del simulador de agua.
+- [x] Adaptar secretos, almacenamiento persistente y networking al clúster objetivo. El baseline actual mantiene secretos y red para BHM; `greenhouse-simulator` reutiliza acceso MQTT solo cuando se ejecuta fuera del baseline estable.
 - [x] Validar la estrategia de reconciliación del broker en entorno Kubernetes. La convivencia con el workload externo mantiene el reconciliador broker-owned como sidecar y se revalidó con ejecución `--once --scope all` sobre el clúster refrescado.
 
 ### Verificaciones
@@ -962,18 +962,17 @@ Estado actual del carril opcional:
 
 ### Tests
 
-- [x] Tests unitarios del healthcheck del simulador en `water-plant-simulator/tests/test_healthcheck.py`.
 - [x] Validación de render `kubectl kustomize k8s/base` con la topología final ya incluyendo el simulador.
-- [x] Build y despliegue real del laboratorio con tag explícito (`phase9-lab`), incluyendo `water-plant-simulator` como tercera imagen local cargada en `kind`.
+- [x] Build y despliegue real del laboratorio con tag explícito (`phase9-lab`) para el core BHM en `kind`, ya sin depender del simulador legacy de agua.
 - [x] Smoke del runtime `kind` tras recreación completa del clúster.
-- [x] Validación de `rollout` de `deployment/water-plant-simulator` y comprobación de probes sobre archivos de estado/heartbeat del simulador.
-- [x] Validación de logs del simulador confirmando conexión al broker MQTT interno del laboratorio.
+- [x] Validación de arranque limpio del baseline `kind` tras retirar el simulador legacy de agua.
+- [x] Validación operativa separada de `greenhouse-simulator` como herramienta externa de carga MQTT.
 
 ### Evidencia reciente
 
-- [x] El laboratorio final quedó ejecutando imágenes explícitas `phase9-lab`: `bunkerm-platform`, `bhm-alert-delivery` y los sidecars broker-owned con `localhost/bunkermtest-bunkerm:phase9-lab`, `mosquitto` con `localhost/bunkermtest-mosquitto:phase9-lab` y el workload externo con `localhost/water-plant-simulator:phase9-lab`.
-- [x] `kubectl get pods -n bhm-lab` confirmó `postgres`, `mosquitto`, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator` en `Running`, con `water-plant-simulator 1/1` y `mosquitto 3/3`.
-- [x] Los logs del simulador confirmaron conexión real al broker interno del clúster: `Conectando a broker MQTT: mosquitto:1900...` seguido de `[OK] Conectado al broker MQTT: mosquitto:1900`, más arranque de `11` sensores, `4` actuadores y suscripciones a topics de comando.
+- [x] El laboratorio final quedó ejecutando imágenes explícitas `phase9-lab` para el core BHM: `bunkerm-platform`, `bhm-alert-delivery` y los sidecars broker-owned con `localhost/bunkermtest-bunkerm:phase9-lab` y `mosquitto` con `localhost/bunkermtest-mosquitto:phase9-lab`.
+- [x] `kubectl get pods -n bhm-lab` confirmó `postgres`, `mosquitto`, `bunkerm-platform` y `bhm-alert-delivery` en `Running`, con `mosquitto 3/3`.
+- [x] La simulación activa queda trasladada a `greenhouse-simulator` como stresser externo, fuera del baseline persistente del clúster.
 - [x] La reconciliación broker-facing volvió a validarse en el entorno final con `kubectl exec ... services.broker_reconcile_daemon --once --scope all`, cerrando con `RECONCILE_ONCE_OK`.
 - [x] Durante esta validación apareció inestabilidad del carril auxiliar de `kubectl port-forward` para exposición host-managed; no bloqueó el cierre de Fase 9 porque la verificación final se completó directamente sobre Kubernetes (`rollout`, `logs`, `exec`, healthchecks y estado de pods) y no sobre el helper de publicación local.
 
