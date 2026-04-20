@@ -1,0 +1,128 @@
+{
+  "capturedAt": "2026-04-20T09:02:46.448252+00:00",
+  "runtimeLabel": "kind",
+  "baseUrl": "http://localhost:22000",
+  "count": 8,
+  "startIndex": 1,
+  "roleName": "subscribe-and-publish",
+  "clients": [
+    {
+      "username": "1",
+      "createMessage": "Client 1 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 1",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:30.767937",
+      "appliedAt": "2026-04-20T09:02:31.024620",
+      "reconciledAt": "2026-04-20T09:02:31.024620",
+      "reconcileWindowMs": 256.68,
+      "endToEndMs": 3871.31
+    },
+    {
+      "username": "2",
+      "createMessage": "Client 2 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 2",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:32.275662",
+      "appliedAt": "2026-04-20T09:02:33.281574",
+      "reconciledAt": "2026-04-20T09:02:33.281574",
+      "reconcileWindowMs": 1005.91,
+      "endToEndMs": 2159.46
+    },
+    {
+      "username": "3",
+      "createMessage": "Client 3 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 3",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:34.430508",
+      "appliedAt": "2026-04-20T09:02:35.439963",
+      "reconciledAt": "2026-04-20T09:02:35.439963",
+      "reconcileWindowMs": 1009.46,
+      "endToEndMs": 2106.74
+    },
+    {
+      "username": "4",
+      "createMessage": "Client 4 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 4",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:36.743561",
+      "appliedAt": "2026-04-20T09:02:37.626622",
+      "reconciledAt": "2026-04-20T09:02:37.626622",
+      "reconcileWindowMs": 883.06,
+      "endToEndMs": 2316.52
+    },
+    {
+      "username": "5",
+      "createMessage": "Client 5 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 5",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:38.862957",
+      "appliedAt": "2026-04-20T09:02:39.844321",
+      "reconciledAt": "2026-04-20T09:02:39.844321",
+      "reconcileWindowMs": 981.36,
+      "endToEndMs": 2209.33
+    },
+    {
+      "username": "6",
+      "createMessage": "Client 6 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 6",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:41.065465",
+      "appliedAt": "2026-04-20T09:02:41.999636",
+      "reconciledAt": "2026-04-20T09:02:41.999636",
+      "reconcileWindowMs": 934.17,
+      "endToEndMs": 2111.83
+    },
+    {
+      "username": "7",
+      "createMessage": "Client 7 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 7",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:43.217240",
+      "appliedAt": "2026-04-20T09:02:44.204510",
+      "reconciledAt": "2026-04-20T09:02:44.204510",
+      "reconcileWindowMs": 987.27,
+      "endToEndMs": 2153.53
+    },
+    {
+      "username": "8",
+      "createMessage": "Client 8 created successfully",
+      "roleMessage": "Role subscribe-and-publish assigned to client 8",
+      "status": "applied",
+      "version": 2,
+      "driftDetected": false,
+      "desiredUpdatedAt": "2026-04-20T09:02:45.376981",
+      "appliedAt": "2026-04-20T09:02:46.365303",
+      "reconciledAt": "2026-04-20T09:02:46.365303",
+      "reconcileWindowMs": 988.32,
+      "endToEndMs": 2199.37
+    }
+  ],
+  "summary": {
+    "reconcileWindow": {
+      "minMs": 256.68,
+      "maxMs": 1009.46,
+      "meanMs": 880.78,
+      "medianMs": 984.32
+    },
+    "endToEnd": {
+      "minMs": 2106.74,
+      "maxMs": 3871.31,
+      "meanMs": 2391.01,
+      "medianMs": 2179.41
+    }
+  }
+}

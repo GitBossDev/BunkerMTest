@@ -36,6 +36,10 @@ from services.alert_notifications import notify_alert_raised
 
 logger = logging.getLogger(__name__)
 
+_MIRRORED_PUBLISH_DEDUP_SECONDS = 2.0
+_mirrored_publish_lock = threading.Lock()
+_mirrored_publish_signatures: Dict[tuple[str, str, int, bool], tuple[float, str]] = {}
+
 # ---------------------------------------------------------------------------
 # Tópicos $SYS que el monitor procesa
 # ---------------------------------------------------------------------------
@@ -425,8 +429,15 @@ class TopicStore:
         self._lock = threading.Lock()
         self._topics: Dict[str, dict] = {}
 
-    def update(self, topic: str, payload: bytes, retained: bool = False, qos: int = 0):
-        event_ts = datetime.now(timezone.utc)
+    def update(
+        self,
+        topic: str,
+        payload: bytes,
+        retained: bool = False,
+        qos: int = 0,
+        event_ts: datetime | None = None,
+    ):
+        event_ts = event_ts or datetime.now(timezone.utc)
         value = payload.decode("utf-8", errors="replace") if payload else ""
         with self._lock:
             prev = self._topics.get(topic, {})
@@ -454,6 +465,47 @@ class TopicStore:
     def get_all(self) -> list:
         with self._lock:
             return sorted(self._topics.values(), key=lambda x: x["topic"])
+
+
+def _should_skip_mirrored_publish(topic: str, payload: bytes, qos: int, retained: bool, source: str) -> bool:
+    signature = (
+        topic,
+        (payload or b"")[:256].hex(),
+        max(0, min(2, int(qos))),
+        bool(retained),
+    )
+    now = time.monotonic()
+    with _mirrored_publish_lock:
+        expired = [key for key, (seen_at, _) in _mirrored_publish_signatures.items() if now - seen_at > _MIRRORED_PUBLISH_DEDUP_SECONDS]
+        for key in expired:
+            _mirrored_publish_signatures.pop(key, None)
+        previous = _mirrored_publish_signatures.get(signature)
+        _mirrored_publish_signatures[signature] = (now, source)
+    return previous is not None and previous[1] != source and now - previous[0] <= _MIRRORED_PUBLISH_DEDUP_SECONDS
+
+
+def record_user_publish(
+    topic: str,
+    payload: bytes,
+    retained: bool = False,
+    qos: int = 0,
+    *,
+    source: str = "mqtt-monitor",
+    event_ts: datetime | None = None,
+) -> bool:
+    if not topic or topic.startswith("$"):
+        return False
+    if _should_skip_mirrored_publish(topic, payload, qos, retained, source):
+        return False
+
+    observed_at = event_ts or datetime.now(timezone.utc)
+    topic_store.update(topic, payload, retained=retained, qos=qos, event_ts=observed_at)
+
+    if source != "mqtt-monitor":
+        with mqtt_stats._lock:
+            mqtt_stats.messages_received_total += 1
+            mqtt_stats.last_broker_sample_at = observed_at.isoformat().replace("+00:00", "Z")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +860,13 @@ def on_message(client, userdata, msg):
         except (ValueError, AttributeError):
             pass
     elif not msg.topic.startswith("$SYS/"):
-        topic_store.update(msg.topic, msg.payload, getattr(msg, "retain", False), msg.qos)
+        record_user_publish(
+            msg.topic,
+            msg.payload,
+            retained=getattr(msg, "retain", False),
+            qos=msg.qos,
+            source="mqtt-monitor",
+        )
 
 
 def connect_mqtt():
@@ -822,7 +880,7 @@ def connect_mqtt():
         if rc == 0:
             logger.info("Conectado al broker MQTT %s:%s", broker_host, broker_port)
             mqtt_stats._is_connected = True
-            client.subscribe([("$SYS/broker/#", 0), ("#", 2)])
+            client.subscribe([("$SYS/broker/#", 0), ("#", 0)])
         else:
             mqtt_stats._is_connected = False
             logger.error("Fallo de conexión al broker MQTT, código %s", rc)

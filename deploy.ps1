@@ -59,7 +59,10 @@ $script:CE = "docker"    # Container Engine: docker o podman
 $script:CCE = "docker-compose"  # Compose Engine: docker-compose, docker compose, o podman compose
 $script:KindExecutable = $null
 $script:KubectlExecutable = $null
-$script:KindImages = @('bunkermtest-bunkerm:latest', 'bunkermtest-mosquitto:latest')
+$script:BhmPlatformImageName = 'bunkermtest-bunkerm'
+$script:MosquittoImageName = 'bunkermtest-mosquitto'
+$script:WaterPlantSimulatorImageName = 'water-plant-simulator'
+$script:KindImages = @("$($script:BhmPlatformImageName):$ImageTag", "$($script:MosquittoImageName):$ImageTag", "$($script:WaterPlantSimulatorImageName):$ImageTag")
 $script:KindWebBaseUrl = "http://localhost:$KindWebHostPort"
 $script:KindKubectlContext = "kind-$KindClusterName"
 $script:KindPortForwardDir = Join-Path $PSScriptRoot 'tmp\kind-port-forward'
@@ -671,7 +674,12 @@ function Get-KindPortForwardEntries {
 
 function Stop-KindPortForwards {
     $entries = @(Get-KindPortForwardEntries)
+    $portsToRelease = @()
     foreach ($entry in $entries) {
+        if ($entry.PSObject.Properties.Name -contains 'Ports') {
+            $portsToRelease += @($entry.Ports)
+        }
+
         $processIdToStop = 0
         try {
             $processIdToStop = [int]$entry.Pid
@@ -686,6 +694,23 @@ function Stop-KindPortForwards {
         $process = Get-Process -Id $processIdToStop -ErrorAction SilentlyContinue
         if ($process) {
             Stop-Process -Id $processIdToStop -Force -ErrorAction SilentlyContinue
+            $deadline = (Get-Date).AddSeconds(10)
+            while ((Get-Date) -lt $deadline) {
+                if (-not (Get-Process -Id $processIdToStop -ErrorAction SilentlyContinue)) {
+                    break
+                }
+                Start-Sleep -Milliseconds 250
+            }
+        }
+    }
+
+    foreach ($port in ($portsToRelease | Sort-Object -Unique)) {
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $deadline) {
+            if (-not (Test-TcpPortOpen -Port $port)) {
+                break
+            }
+            Start-Sleep -Milliseconds 250
         }
     }
 
@@ -772,6 +797,31 @@ function Start-KindPortForwards {
     }
 
     $entries | ConvertTo-Json | Set-Content -Path $script:KindPortForwardStatePath -Encoding ASCII
+}
+
+function Ensure-KindPortForwardsHealthy {
+    Ensure-KubernetesTooling
+
+    $entries = @(Get-KindPortForwardEntries)
+    if ($entries.Count -eq 0) {
+        Start-KindPortForwards
+        return
+    }
+
+    foreach ($entry in $entries) {
+        $process = Get-Process -Id $entry.Pid -ErrorAction SilentlyContinue
+        if (-not $process) {
+            Start-KindPortForwards
+            return
+        }
+
+        foreach ($port in $entry.Ports) {
+            if (-not (Test-TcpPortOpen -Port $port)) {
+                Start-KindPortForwards
+                return
+            }
+        }
+    }
 }
 
 function Wait-HttpEndpoint {
@@ -865,7 +915,7 @@ function Wait-KubernetesRuntimeReady {
     Ensure-KubernetesTooling
 
     $timeout = '240s'
-    foreach ($target in @('statefulset/postgres', 'statefulset/mosquitto', 'deployment/bunkerm-platform')) {
+    foreach ($target in @('statefulset/postgres', 'statefulset/mosquitto', 'deployment/bunkerm-platform', 'deployment/water-plant-simulator', 'deployment/bhm-alert-delivery')) {
         & $script:KubectlExecutable rollout status $target -n $KindNamespace --timeout=$timeout | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Error "El workload $target no alcanzo estado listo en Kubernetes."
@@ -911,7 +961,10 @@ function Invoke-StartKindRuntime {
         -MqttHostPort $KindMqttHostPort `
         -MqttWsHostPort $KindMqttWsHostPort `
         -LoadLocalImage `
-        -LocalImages $script:KindImages
+        -LocalImages $script:KindImages `
+        -BhmImage "localhost/$($script:BhmPlatformImageName):$ImageTag" `
+        -MosquittoImage "localhost/$($script:MosquittoImageName):$ImageTag" `
+        -WaterPlantSimulatorImage "localhost/$($script:WaterPlantSimulatorImageName):$ImageTag"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Fallo el arranque del laboratorio kind. Revisa la salida anterior.'
@@ -1332,6 +1385,9 @@ function Invoke-Logs {
             Write-Info 'bunkerm-platform:'
             & $script:KubectlExecutable logs deployment/bunkerm-platform -n $KindNamespace --all-containers=true --tail=80
             Write-Host ''
+            Write-Info 'water-plant-simulator:'
+            & $script:KubectlExecutable logs deployment/water-plant-simulator -n $KindNamespace --tail=80
+            Write-Host ''
             Write-Info 'mosquitto/reconciler:'
             & $script:KubectlExecutable logs statefulset/mosquitto -n $KindNamespace -c reconciler --tail=80
         }
@@ -1408,19 +1464,21 @@ function Invoke-Build {
     Write-Info "Construyendo imagen (puede tardar 5-15 minutos la primera vez)..."
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     & $script:CE build `
-        -t bunkermtest-bunkerm:latest `
+        -t "$($script:BhmPlatformImageName):$ImageTag" `
         -f bunkerm-source/Dockerfile.next `
         bunkerm-source
     $buildExit = $LASTEXITCODE
     $ErrorActionPreference = $savedPref
 
     if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen de Broker Health Manager construida correctamente: bunkermtest-bunkerm:latest"
+        Write-Success "[OK] Imagen de Broker Health Manager construida correctamente: $($script:BhmPlatformImageName):$ImageTag"
         Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
     } else {
         Write-Host "[ERROR] Fallo en el build. Revisa los logs de arriba." -ForegroundColor Red
         exit 1
     }
+
+    Invoke-BuildWaterPlantSimulator
     Write-Host ""
 }
 
@@ -1445,15 +1503,38 @@ function Invoke-BuildMosquitto {
     }
 
     & $script:CE build `
-        -t bunkermtest-mosquitto:latest `
+        -t "$($script:MosquittoImageName):$ImageTag" `
         -f Dockerfile.mosquitto `
         .
     $buildExit = $LASTEXITCODE
 
     if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen Mosquitto construida: bunkermtest-mosquitto:latest"
+        Write-Success "[OK] Imagen Mosquitto construida: $($script:MosquittoImageName):$ImageTag"
     } else {
         Write-Host "[ERROR] Fallo en el build de Mosquitto." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host ""
+}
+
+function Invoke-BuildWaterPlantSimulator {
+    Write-Info "Construyendo imagen de Water Plant Simulator..."
+    Write-Host ""
+
+    if (-not (Test-Path "water-plant-simulator\Dockerfile")) {
+        Write-Host "[ERROR] water-plant-simulator/Dockerfile no encontrado." -ForegroundColor Red
+        exit 1
+    }
+
+    & $script:CE build `
+        -t "$($script:WaterPlantSimulatorImageName):$ImageTag" `
+        .\water-plant-simulator
+    $buildExit = $LASTEXITCODE
+
+    if ($buildExit -eq 0) {
+        Write-Success "[OK] Imagen Water Plant Simulator construida: $($script:WaterPlantSimulatorImageName):$ImageTag"
+    } else {
+        Write-Host "[ERROR] Fallo en el build de Water Plant Simulator." -ForegroundColor Red
         exit 1
     }
     Write-Host ""
@@ -1464,6 +1545,7 @@ function Invoke-KubernetesSmoke {
     Write-Host ''
 
     Ensure-KubernetesTooling
+    Ensure-KindPortForwardsHealthy
     $apiKey = Get-ApiKey
     if (-not $apiKey) {
         Write-Warning '  API_KEY no encontrada en .env.dev -- el check autenticado se omitira si aplica'
@@ -1471,7 +1553,7 @@ function Invoke-KubernetesSmoke {
 
     $passed = 0
     $failed = 0
-    $totalChecks = if ($apiKey) { 5 } else { 4 }
+    $totalChecks = if ($apiKey) { 6 } else { 5 }
 
     Write-Host -NoNewline "  [1/$totalChecks] Workloads Kubernetes listos ............... "
     try {
@@ -1522,8 +1604,27 @@ function Invoke-KubernetesSmoke {
         $failed++
     }
 
+    Write-Host -NoNewline "  [5/$totalChecks] Water Plant Simulator readiness .......... "
+    try {
+        $simulatorPod = & $script:KubectlExecutable get pod -n $KindNamespace -l app.kubernetes.io/name=water-plant-simulator -o jsonpath='{.items[0].metadata.name}'
+        if ($LASTEXITCODE -ne 0 -or -not $simulatorPod) {
+            throw 'No se encontro el pod del simulador.'
+        }
+
+        & $script:KubectlExecutable exec -n $KindNamespace $simulatorPod -- python -m src.healthcheck --mode readiness --max-heartbeat-age 30 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw 'El healthcheck de readiness del simulador devolvio error.'
+        }
+
+        Write-Host 'OK' -ForegroundColor Green
+        $passed++
+    } catch {
+        Write-Host "FAIL $($_.Exception.Message)" -ForegroundColor Red
+        $failed++
+    }
+
     if ($apiKey) {
-        Write-Host -NoNewline "  [5/$totalChecks] Backend /api/dynsec/roles (API key) ...... "
+        Write-Host -NoNewline "  [6/$totalChecks] Backend /api/dynsec/roles (API key) ...... "
         try {
             $r = Invoke-WebRequest -Uri "$script:KindWebBaseUrl/api/dynsec/roles" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
             Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green

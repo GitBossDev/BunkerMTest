@@ -82,6 +82,8 @@ EXPECTED_ROUTERS = [
     "routers.dynsec",
     "routers.monitor",
     "routers.clientlogs",
+    "routers.notifications",
+    "routers.security",
     "routers.config_mosquitto",
     "routers.config_dynsec",
 ]
@@ -98,7 +100,7 @@ def test_all_routers_registered_in_main():
     registered_prefixes = {route.path.split("/")[1] for route in app.routes if hasattr(route, "path")}
 
     # Los tags declarados en cada router deben aparecer en alguna ruta
-    expected_tags = {"dynsec", "monitor", "clientlogs", "config-mosquitto", "config-dynsec"}
+    expected_tags = {"dynsec", "monitor", "clientlogs", "notifications", "security", "config-mosquitto", "config-dynsec"}
     registered_tags: set[str] = set()
     for route in app.routes:
         if hasattr(route, "tags") and route.tags:
@@ -217,9 +219,9 @@ def test_compose_web_service_uses_daemon_mode_and_read_only_broker_mounts():
 
     assert "BROKER_RECONCILE_MODE=daemon" in compose_text
     assert "BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102" in compose_text
-    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL:-}" in bunkerm_block
-    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL:-}" in bunkerm_block
-    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL:-}" in bunkerm_block
+    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL}" in bunkerm_block
+    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL}" in bunkerm_block
+    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL}" in bunkerm_block
     assert "mosquitto-data:/var/lib/mosquitto:ro" not in bunkerm_block
     assert "mosquitto-conf:/etc/mosquitto:ro" not in bunkerm_block
     assert "mosquitto-log:/var/log/mosquitto:ro" not in bunkerm_block
@@ -231,9 +233,9 @@ def test_compose_reconciler_receives_domain_database_urls_for_phase4():
     compose_text = compose_path.read_text(encoding="utf-8")
     reconciler_block = _compose_service_block(compose_text, "bhm-reconciler")
 
-    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL:-}" in reconciler_block
-    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL:-}" in reconciler_block
-    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL:-}" in reconciler_block
+    assert "CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL}" in reconciler_block
+    assert "HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL}" in reconciler_block
+    assert "REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL}" in reconciler_block
 
 
 def test_compose_baseline_includes_broker_observability_service():
@@ -260,8 +262,8 @@ def test_web_surfaces_no_longer_read_shared_broker_files_directly():
 
     assert "broker_observability_client" in config_text
     assert "broker_observability_client" in monitor_text
-    assert "get_observed_dynsec_config" in dynsec_text
-    assert "get_observed_dynsec_config" in clientlogs_text
+    assert "get_cached_observed_dynsec_index" in dynsec_text
+    assert "get_cached_observed_dynsec_capability_map" in clientlogs_text
     assert "settings.mosquitto_conf_path" not in monitor_text
     assert 'open(log_path' not in config_text
     assert "read_dynsec()" not in dynsec_text

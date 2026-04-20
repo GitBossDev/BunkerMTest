@@ -1801,12 +1801,12 @@ async def reconcile_client(
 
     if errors:
         state.reconcile_status = "error"
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.last_error = "; ".join(errors)
     else:
         state.applied_payload_json = _dump_json(desired)
         state.applied_at = now
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
         if creation_password is None and staged_creation_password is not None:
@@ -1840,12 +1840,11 @@ async def get_client_status(session: AsyncSession, username: str) -> Dict[str, A
     desired = normalize_client_payload(_load_json(state.desired_payload_json))
     applied_raw = _load_json(state.applied_payload_json)
     applied = normalize_client_payload(applied_raw) if applied_raw else None
-    drift_detected = desired != observed if desired is not None else False
+    drift_detected = _has_dynsec_entity_drift(desired, observed)
 
     if drift_detected != state.drift_detected:
         state.drift_detected = drift_detected
-        if state.reconcile_status == "applied" and drift_detected:
-            state.reconcile_status = "drift"
+        state.reconcile_status = "drift" if drift_detected else "applied"
         await session.commit()
         await session.refresh(state)
 
@@ -1862,6 +1861,18 @@ async def get_client_status(session: AsyncSession, username: str) -> Dict[str, A
         "reconciledAt": state.reconciled_at.isoformat() if state.reconciled_at else None,
         "appliedAt": state.applied_at.isoformat() if state.applied_at else None,
     }
+
+
+def _is_deleted_dynsec_entity(desired: Dict[str, Any] | None, observed: Dict[str, Any] | None) -> bool:
+    return bool(desired and desired.get("deleted") is True and observed is None)
+
+
+def _has_dynsec_entity_drift(desired: Dict[str, Any] | None, observed: Dict[str, Any] | None) -> bool:
+    if desired is None:
+        return False
+    if _is_deleted_dynsec_entity(desired, observed):
+        return False
+    return desired != observed
 
 
 async def get_role_state(session: AsyncSession, role_name: str) -> BrokerDesiredState | None:
@@ -1917,12 +1928,12 @@ async def reconcile_role(session: AsyncSession, role_name: str) -> BrokerDesired
 
     if errors:
         state.reconcile_status = "error"
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.last_error = "; ".join(errors)
     else:
         state.applied_payload_json = _dump_json(desired)
         state.applied_at = now
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
@@ -1954,12 +1965,11 @@ async def get_role_status(session: AsyncSession, role_name: str) -> Dict[str, An
     desired = normalize_role_payload(_load_json(state.desired_payload_json))
     applied_raw = _load_json(state.applied_payload_json)
     applied = normalize_role_payload(applied_raw) if applied_raw else None
-    drift_detected = desired != observed if desired is not None else False
+    drift_detected = _has_dynsec_entity_drift(desired, observed)
 
     if drift_detected != state.drift_detected:
         state.drift_detected = drift_detected
-        if state.reconcile_status == "applied" and drift_detected:
-            state.reconcile_status = "drift"
+        state.reconcile_status = "drift" if drift_detected else "applied"
         await session.commit()
         await session.refresh(state)
 
@@ -2034,12 +2044,12 @@ async def reconcile_group(
 
     if errors:
         state.reconcile_status = "error"
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.last_error = "; ".join(errors)
     else:
         state.applied_payload_json = _dump_json(desired)
         state.applied_at = now
-        state.drift_detected = desired != observed
+        state.drift_detected = _has_dynsec_entity_drift(desired, observed)
         state.reconcile_status = "drift" if state.drift_detected else "applied"
         state.last_error = None
 
@@ -2071,12 +2081,11 @@ async def get_group_status(session: AsyncSession, group_name: str) -> Dict[str, 
     desired = normalize_group_payload(_load_json(state.desired_payload_json))
     applied_raw = _load_json(state.applied_payload_json)
     applied = normalize_group_payload(applied_raw) if applied_raw else None
-    drift_detected = desired != observed if desired is not None else False
+    drift_detected = _has_dynsec_entity_drift(desired, observed)
 
     if drift_detected != state.drift_detected:
         state.drift_detected = drift_detected
-        if state.reconcile_status == "applied" and drift_detected:
-            state.reconcile_status = "drift"
+        state.reconcile_status = "drift" if drift_detected else "applied"
         await session.commit()
         await session.refresh(state)
 

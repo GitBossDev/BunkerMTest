@@ -157,8 +157,15 @@ public class MqttClientHelper
         }
         else if (qos == MqttQualityOfServiceLevel.AtMostOnce)
         {
-            Console.WriteLine($"[MQTT] Error al publicar en '{topic}'. ReasonCode: {result.ReasonCode} (sin confirmación en QoS 0)");
-            errores_mqttClient = errores_mqttClient + 1;
+            if (result.ReasonCode == MqttClientPublishReasonCode.Success)
+            {
+                Console.WriteLine($"[MQTT] Mensaje publicado en '{topic}' | QoS: {qos} | Retain: {retain} | Resultado: {result.ReasonCode}");
+            }
+            else
+            {
+                Console.WriteLine($"[MQTT] Error al publicar en '{topic}'. ReasonCode: {result.ReasonCode} (sin confirmación en QoS 0)");
+                errores_mqttClient = errores_mqttClient + 1;
+            }
         }
 
     }

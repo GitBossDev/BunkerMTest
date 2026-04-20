@@ -83,8 +83,8 @@ class Programa
                     ["username"] = username,
                     ["textname"] = textname,
                     ["roles"] = new JsonArray(new JsonObject { ["rolename"] = selectedRole }),
-                    ["password"] = "whKZVT0mN53xaOppC4UTu7rZjny8qnAHXvllD2/O1HZB4aAgQaavucQU0l7kpzBbADv7bakea3yKndZbxHhlUA==",
-                    ["salt"] = "Q6wkX9DTyPc6Y8Nf",
+                    ["password"] = creds.PasswordBase64,
+                    ["salt"] = creds.SaltBase64,
                     ["iterations"] = creds.Iterations
                 };
                 clients.Add(newClient);

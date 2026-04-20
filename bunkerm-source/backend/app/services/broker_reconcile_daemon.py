@@ -18,7 +18,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--scope",
         action="append",
         dest="scopes",
-        default=["all"],
+        default=[],
         help="Control-plane scope to reconcile. Repeatable. Defaults to 'all'.",
     )
     parser.add_argument(
@@ -58,7 +58,8 @@ async def _async_main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    return await run_daemon(args.scopes, args.interval, once=args.once)
+    scopes = args.scopes or ["all"]
+    return await run_daemon(scopes, args.interval, once=args.once)
 
 
 def main() -> int:

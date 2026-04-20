@@ -170,3 +170,42 @@ async def test_reconcile_client_consumes_staged_creation_secret_without_db_passw
 async def test_reconcile_scope_rejects_unknown_scope():
     with pytest.raises(ValueError, match="Unsupported scope"):
         await broker_reconcile_runner.reconcile_scope(object(), "broker.unknown")
+
+
+@pytest.mark.asyncio
+async def test_reconcile_requested_scopes_expands_all_alias_variants(monkeypatch):
+    async def fake_list_reconcileable_scopes(session):
+        return [desired_state_svc.MOSQUITTO_PASSWD_SCOPE]
+
+    async def fake_reconcile_scope(session, scope):
+        assert scope == desired_state_svc.MOSQUITTO_PASSWD_SCOPE
+        return {
+            "scope": scope,
+            "version": 1,
+            "status": "applied",
+            "driftDetected": False,
+            "lastError": None,
+        }
+
+    class FakeSessionContextManager:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(broker_reconcile_runner, "list_reconcileable_scopes", fake_list_reconcileable_scopes)
+    monkeypatch.setattr(broker_reconcile_runner, "reconcile_scope", fake_reconcile_scope)
+    monkeypatch.setattr(broker_reconcile_runner, "AsyncSessionLocal", lambda: FakeSessionContextManager())
+
+    result = await broker_reconcile_runner.reconcile_requested_scopes(["all", "all"])
+
+    assert result == [
+        {
+            "scope": desired_state_svc.MOSQUITTO_PASSWD_SCOPE,
+            "version": 1,
+            "status": "applied",
+            "driftDetected": False,
+            "lastError": None,
+        }
+    ]

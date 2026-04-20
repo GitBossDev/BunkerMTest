@@ -5,6 +5,7 @@ MQTT Client Manager - Gestión de conexión MQTT para el simulador
 import logging
 import paho.mqtt.client as mqtt
 import json
+import time
 from typing import Dict, Any, Callable, Optional
 
 
@@ -14,7 +15,7 @@ class MQTTClientManager:
     Proporciona métodos simplificados para publicar y suscribirse.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], connection_state_callback: Optional[Callable[[bool], None]] = None):
         """
         Inicializar cliente MQTT.
         
@@ -23,6 +24,7 @@ class MQTTClientManager:
         """
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.connection_state_callback = connection_state_callback
         
         # Crear cliente MQTT
         client_id = f"{config['client_id_prefix']}_{id(self)}"
@@ -39,12 +41,17 @@ class MQTTClientManager:
         # Estado
         self.connected = False
         self.subscriptions = {}  # topic -> callback
+
+    def _notify_connection_state(self, connected: bool):
+        if self.connection_state_callback:
+            self.connection_state_callback(connected)
         
     def _on_connect(self, client, userdata, flags, rc):
         """Callback cuando se conecta al broker."""
         if rc == 0:
             self.logger.info(f"[OK] Conectado al broker MQTT: {self.config['broker']}:{self.config['port']}")
             self.connected = True
+            self._notify_connection_state(True)
             
             # Resuscribirse a topics si hay
             for topic in self.subscriptions.keys():
@@ -53,10 +60,12 @@ class MQTTClientManager:
         else:
             self.logger.error(f"[ERROR] Falló conexión MQTT. Código: {rc}")
             self.connected = False
+            self._notify_connection_state(False)
     
     def _on_disconnect(self, client, userdata, rc):
         """Callback cuando se desconecta del broker."""
         self.connected = False
+        self._notify_connection_state(False)
         if rc != 0:
             self.logger.warning(f"[WARNING] Desconexión inesperada del broker MQTT. Código: {rc}")
         else:
@@ -89,6 +98,14 @@ class MQTTClientManager:
         except Exception as e:
             self.logger.error(f"[ERROR] No se pudo conectar al broker MQTT: {e}")
             raise
+
+    def wait_until_connected(self, timeout_seconds: float = 15.0, poll_interval_seconds: float = 0.2) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if self.connected:
+                return True
+            time.sleep(poll_interval_seconds)
+        return self.connected
     
     def disconnect(self):
         """Desconectar del broker MQTT."""

@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bhm-alert-delivery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bhm-alert-delivery
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bhm-alert-delivery
+    spec:
+      containers:
+        - name: worker
+          image: localhost/bunkermtest-bunkerm:latest
+          imagePullPolicy: Never
+          envFrom:
+            - secretRef:
+                name: bhm-env
+            - configMapRef:
+                name: bhm-k8s-config
+          command:
+            - /bin/sh
+            - -c
+            - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
+          volumeMounts:
+            - name: api-logs
+              mountPath: /var/log/api
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - ps -ef | grep alert_delivery_daemon | grep -v grep
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - /opt/venv/bin/python
+                - -c
+                - import sys; sys.path.insert(0, '/app'); from sqlalchemy import create_engine, text; from core.config import Settings; from core.database_url import get_sync_database_url; settings = Settings(); engine = create_engine(get_sync_database_url(settings.resolved_control_plane_database_url), future=True); connection = engine.connect(); connection.execute(text('SELECT 1')); connection.close()
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - ps -ef | grep alert_delivery_daemon | grep -v grep
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: api-logs
+          emptyDir: {}

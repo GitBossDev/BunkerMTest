@@ -194,6 +194,34 @@ async def test_stats_resources_falls_back_when_observability_service_is_unavaila
     assert body["source"]["mode"] in {"fallback-process", "unavailable"}
 
 
+def test_record_user_publish_updates_monitor_state_from_broker_observer(monkeypatch):
+    """Los publishes broker-observed deben poblar topics y sumar actividad cuando el monitor MQTT va rezagado."""
+    original_total = monitor_svc.mqtt_stats.messages_received_total
+    original_sample = monitor_svc.mqtt_stats.last_broker_sample_at
+    observed_updates: list[tuple[str, bytes, bool, int]] = []
+
+    def fake_update(topic: str, payload: bytes, retained: bool = False, qos: int = 0, event_ts=None):
+        observed_updates.append((topic, payload, retained, qos))
+
+    monkeypatch.setattr(monitor_svc.topic_store, "update", fake_update)
+
+    try:
+        recorded = monitor_svc.record_user_publish(
+            "lab/device/100000111/Temperatura",
+            b'{"value":24.1}',
+            qos=0,
+            source="broker-observed",
+        )
+
+        assert recorded is True
+        assert observed_updates == [("lab/device/100000111/Temperatura", b'{"value":24.1}', False, 0)]
+        assert monitor_svc.mqtt_stats.messages_received_total == original_total + 1
+        assert monitor_svc.mqtt_stats.last_broker_sample_at
+    finally:
+        monitor_svc.mqtt_stats.messages_received_total = original_total
+        monitor_svc.mqtt_stats.last_broker_sample_at = original_sample
+
+
 async def test_topic_history_returns_persisted_messages(client, monkeypatch):
     """El endpoint de historial por tópico debe delegar en el storage persistido."""
 

@@ -12,6 +12,9 @@ Su objetivo es dejar registradas las decisiones estructurales del proyecto para 
 - [ADR-0004](./0004-postgresql-per-bounded-context.md) - PostgreSQL separado por bounded context para BHM.
 - [ADR-0005](./0005-compose-first-service-topology.md) - Topologia de servicios objetivo para Compose-first.
 - [ADR-0006](./0006-local-kubernetes-lab-strategy.md) - Laboratorio local de Kubernetes como validacion opcional.
+- [ADR-0007](./0007-phase5-observability-pipeline.md) - Pipeline de observabilidad tecnica para Fase 5.
+- [ADR-0008](./0008-phase6-identity-and-secrets.md) - Modelo de identidades y secretos para Fase 6.
+- [ADR-0009](./0009-phase6-ip-whitelist-ownership.md) - Ownership y modelo final de whitelist por IP para Fase 6.
 
 ## Reglas de uso
 

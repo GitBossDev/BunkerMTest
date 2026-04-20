@@ -10,6 +10,7 @@ import time
 import logging
 import yaml
 import os
+import json
 from pathlib import Path
 from typing import Dict, Any
 
@@ -48,9 +49,13 @@ class WaterPlantSimulator:
         self.controller = None
         self.physics_model = None
         self.anomaly_generator = None
+        self.status_file = Path(os.getenv('SIMULATOR_STATUS_FILE', '/app/status/simulator-status.json'))
+        self.heartbeat_file = Path(os.getenv('SIMULATOR_HEARTBEAT_FILE', '/app/status/heartbeat.txt'))
+        self.mqtt_connect_timeout_seconds = float(os.getenv('MQTT_CONNECT_TIMEOUT_SECONDS', '15'))
         
         # Control de ejecución
         self.running = False
+        self._update_runtime_status(initialized=False, running=False, mqttConnected=False)
         
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Cargar configuración desde archivo YAML."""
@@ -84,15 +89,37 @@ class WaterPlantSimulator:
         log_config = self.config.get('logging', {})
         log_level = getattr(logging, log_config.get('level', 'INFO'))
         log_format = log_config.get('format', '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        log_file = Path(os.getenv('SIMULATOR_LOG_FILE', 'simulator.log'))
+        log_file.parent.mkdir(parents=True, exist_ok=True)
         
         logging.basicConfig(
             level=log_level,
             format=log_format,
             handlers=[
                 logging.StreamHandler(sys.stdout),
-                logging.FileHandler('simulator.log')
+                logging.FileHandler(log_file)
             ]
         )
+
+    def _update_runtime_status(self, **fields):
+        self.status_file.parent.mkdir(parents=True, exist_ok=True)
+        current = {}
+        if self.status_file.exists():
+            try:
+                current = json.loads(self.status_file.read_text(encoding='utf-8'))
+            except json.JSONDecodeError:
+                current = {}
+
+        current.update(fields)
+        current['updatedAtEpoch'] = time.time()
+        self.status_file.write_text(json.dumps(current, ensure_ascii=True), encoding='utf-8')
+
+    def _write_heartbeat(self):
+        self.heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
+        self.heartbeat_file.write_text(str(time.time()), encoding='utf-8')
+
+    def _handle_mqtt_connection_state(self, connected: bool):
+        self._update_runtime_status(mqttConnected=connected)
     
     def initialize(self):
         """Inicializar todos los componentes del simulador."""
@@ -100,8 +127,10 @@ class WaterPlantSimulator:
         
         # 1. Cliente MQTT
         mqtt_config = self.config['mqtt']
-        self.mqtt_client = MQTTClientManager(mqtt_config)
+        self.mqtt_client = MQTTClientManager(mqtt_config, connection_state_callback=self._handle_mqtt_connection_state)
         self.mqtt_client.connect()
+        if not self.mqtt_client.wait_until_connected(timeout_seconds=self.mqtt_connect_timeout_seconds):
+            raise TimeoutError(f"El simulador no logró conectar al broker MQTT en {self.mqtt_connect_timeout_seconds} segundos")
         
         # 2. Crear sensores
         sensors_config = self.config['sensors']
@@ -159,6 +188,7 @@ class WaterPlantSimulator:
             )
             self.logger.info("Generador de anomalías habilitado")
         
+        self._update_runtime_status(initialized=True, mqttConnected=self.mqtt_client.connected)
         self.logger.info("Inicialización completada")
     
     def start(self):
@@ -170,6 +200,8 @@ class WaterPlantSimulator:
         self.logger.info(f"Actuadores activos: {len(self.actuators)}")
         
         self.running = True
+        self._update_runtime_status(running=True, mqttConnected=bool(self.mqtt_client and self.mqtt_client.connected))
+        self._write_heartbeat()
         
         # Iniciar sensores
         for sensor in self.sensors.values():
@@ -196,6 +228,7 @@ class WaterPlantSimulator:
         # Loop principal
         try:
             while self.running:
+                self._write_heartbeat()
                 time.sleep(1)
         except KeyboardInterrupt:
             self.logger.info("Interrupción detectada (Ctrl+C)")
@@ -207,6 +240,7 @@ class WaterPlantSimulator:
         self.logger.info("Deteniendo simulador...")
         
         self.running = False
+        self._update_runtime_status(running=False)
         
         # Detener componentes en orden inverso
         if self.anomaly_generator:
@@ -227,6 +261,7 @@ class WaterPlantSimulator:
         if self.mqtt_client:
             self.mqtt_client.disconnect()
         
+        self._update_runtime_status(mqttConnected=False)
         self.logger.info("Simulador detenido correctamente")
     
     def signal_handler(self, signum, frame):

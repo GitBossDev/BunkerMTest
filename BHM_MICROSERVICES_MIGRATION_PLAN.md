@@ -1,8 +1,8 @@
 # BHM - Plan de Migración a Microservicios
 
 > **Proyecto**: BHM (Broker Health Manager)
-> **Objetivo**: Migrar la solución actual a una arquitectura de microservicios, operativa primero sobre Docker/Podman Compose y preparada para una evolución posterior a Kubernetes.
-> **Última actualización**: 2026-04-17
+> **Objetivo**: Migrar la solución actual a una arquitectura de microservicios, operativa primero sobre Docker/Podman Compose y ya validada en un baseline Kubernetes de laboratorio coherente con la arquitectura objetivo.
+> **Última actualización**: 2026-04-20
 
 ---
 
@@ -10,7 +10,14 @@
 
 Este documento define las fases de trabajo, el orden recomendado de ejecución y el checklist operativo para migrar BHM hacia una arquitectura más desacoplada, portable y mantenible.
 
-El objetivo inmediato es que los contenedores funcionen correctamente en Docker/Podman con límites claros entre servicios. La migración futura a Kubernetes se considera una etapa posterior, por lo que cada decisión de esta hoja de ruta debe evitar acoplamientos que dificulten esa evolución.
+El objetivo inmediato fue estabilizar primero Docker/Podman Compose con límites claros entre servicios. Ese objetivo ya quedó cumplido y, tras la revisión general actual, el plan también deja registrado un baseline Kubernetes ejecutado y validado en `kind`, sin perder la trazabilidad de la secuencia Compose-first que permitió llegar a ese punto.
+
+## Estado general tras la revisión actual
+
+- [x] Las Fases 0 a 9 ya tienen evidencia operativa en el repositorio y las Fases 7, 8 y 9 quedaron cerradas con validación real.
+- [x] Compose-first sigue siendo la base conceptual del plan, pero ya no es el único runtime validado: existe laboratorio Kubernetes funcional en `k8s/`.
+- [x] La migración a Kubernetes dejó de ser solo una intención futura y pasó a tener topología mínima ejecutable con `postgres`, `mosquitto`, sidecars broker-owned, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator`.
+- [x] El principal gap operativo que sigue visible en el laboratorio es la publicación host-managed por `kubectl port-forward`; no bloquea la arquitectura ni el cierre de fase porque la validación final se hizo directamente sobre el clúster.
 
 ---
 
@@ -36,6 +43,9 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] ADR-0003 - Control-plane del broker basado en estado deseado y reconciliación.
 - [x] ADR-0004 - PostgreSQL separado por bounded context para BHM.
 - [x] ADR-0005 - Topología de servicios objetivo para Compose-first.
+- [x] ADR-0007 - Pipeline de observabilidad técnica para Fase 5.
+- [x] ADR-0008 - Modelo de identidades y secretos para Fase 6.
+- [x] ADR-0009 - Ownership y modelo final de whitelist por IP para Fase 6.
 
 ---
 
@@ -63,7 +73,7 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 | 6 | Seguridad e identidad técnica | Preparar autenticación y autorización para evolución futura | Fase 5 |
 | 7 | Hardening, rendimiento y resiliencia | Consolidar comportamiento stateless y medir baseline | Fase 6 |
 | 8 | Preparación para Kubernetes | Dejar lista la transición posterior a Kubernetes | Fase 7 |
-| 9 | Implementación posterior en Kubernetes | Ejecutar la migración de plataforma con la imagen del producto de transformación de datos | Fuera del alcance inmediato |
+| 9 | Implementación posterior en Kubernetes | Materializar un baseline Kubernetes ejecutable con el core BHM y el workload externo desacoplado | Fase 8 |
 
 ---
 
@@ -733,41 +743,44 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] La configuración de alertas del monitor ya dejó de persistirse en JSON local y pasa al control-plane PostgreSQL mediante Alembic, lo que elimina otro remanente activo de filesystem antes de profundizar el contrato de delivery externo.
 - [x] El contrato técnico de delivery externo quedó fijado en `docs/BHM_ALERT_DELIVERY_CONTRACT.md`, separando detección en `bhm-api` de entrega en un worker dedicado `bhm-alert-delivery` y dejando estable el payload canónico para frontend.
 - [x] El primer slice técnico del outbox de alertas ya quedó materializado en el esquema del control-plane con `alert_delivery_channel`, `alert_delivery_event` y `alert_delivery_attempt`, versionados por Alembic para que el worker pueda nacer sobre PostgreSQL sin bootstraps ad hoc.
-- [x] Para el compañero B, el carril funcional ya abierto es el refinamiento de UX, filtros, tablas, estados y reporting técnico sobre los endpoints existentes; lo que sigue bloqueado estructuralmente en esta fase es la definición final de la fuente de logs históricos y del contrato técnico de alertas externas.
+- [x] El monitor ya persiste también el evento canónico `raised` en `alert_delivery_event` al disparar una alerta, con `dedupeKey`, `routing.channelCount` y payload estable alineados al contrato técnico; el envío inline actual queda sólo como compatibilidad transicional mientras nace el worker dedicado.
+- [x] Para el compañero B, el carril funcional ya abierto es el refinamiento de UX, filtros, tablas, estados y reporting técnico sobre los endpoints existentes; los bloqueos estructurales originales de observabilidad histórica y contrato técnico de alertas externas ya quedaron resueltos en esta fase mediante ADR-0007, `notifications` y el worker `bhm-alert-delivery`.
 
 ### Actividades
 
-- [ ] Sustituir el uso de `tail -f` y lectura directa de logs compartidos como mecanismo principal.
-- [ ] Definir si la observabilidad técnica irá por collector, pipeline de logs o eventos técnicos estructurados.
-- [ ] Separar reporting técnico de BHM del reporting de negocio del otro producto.
-- [ ] Ajustar el pipeline de incidentes, timeline y reporting operativo para la nueva fuente de datos.
-- [ ] Definir métricas, logs y eventos mínimos por servicio.
-- [ ] Revisar retención, purga y exportaciones del reporting técnico.
+- [x] Sustituir el uso de `tail -f` y lectura directa de logs compartidos como mecanismo principal. `bhm-api` ya no lee directamente logs compartidos del broker: consume snapshots incrementales y `source-status` por HTTP interno desde `bhm-broker-observability`, que conserva el ownership broker-facing dentro de un componente separado.
+- [x] Definir si la observabilidad técnica irá por collector, pipeline de logs o eventos técnicos estructurados. Queda fijado en `docs/adr/0007-phase5-observability-pipeline.md` como pipeline híbrido broker-owned: snapshots internos en `bhm-broker-observability`, transformación a eventos técnicos estructurados en `bhm-api` y read models persistidos en PostgreSQL para reporting.
+- [x] Separar reporting técnico de BHM del reporting de negocio del otro producto. El carril de Fase 5 queda acotado a reporting técnico propio de BHM (`monitor`, `clientlogs`, `reports`, `notifications`) con read models y exports HTTP independientes de cualquier reporting de negocio externo.
+- [x] Ajustar el pipeline de incidentes, timeline y reporting operativo para la nueva fuente de datos. `clientlogs_service`, `monitor_service` y `reporting` ya operan sobre el pipeline broker-owned + eventos técnicos estructurados + PostgreSQL fijado en ADR-0007, y la regresión focalizada se mantiene verde.
+- [x] Definir métricas, logs y eventos mínimos por servicio. El mismo ADR de Fase 5 fija el inventario mínimo de snapshots, eventos técnicos, métricas `$SYS`, incidentes y contratos `source-status` por servicio.
+- [x] Revisar retención, purga y exportaciones del reporting técnico. El storage y la API de reporting ya cubren estado de retención, purga ejecutable y exports CSV/JSON para broker y actividad por cliente, con regresiones específicas sobre ambos carriles.
 - [x] Definir el contrato técnico de alertas por correo, redes o webhooks: payload canónico, ownership del intento de entrega, reintentos, idempotencia, auditoría y manejo de credenciales.
 - [x] Decidir si la entrega de alertas externas vivirá en `bhm-api`, en un worker dedicado o en un servicio auxiliar, sin reintroducir acoplamientos al broker ni al filesystem. La decisión actual es `bhm-alert-delivery` como worker dedicado con outbox persistido en PostgreSQL.
 - [x] Materializar la persistencia mínima del outbox en PostgreSQL con tablas de canales, eventos e intentos, alineadas con el contrato técnico acordado para Fase 5.
-- [ ] Mantener compatibilidad razonable de `/api/v1/clientlogs`, `/api/v1/monitor` y `/api/v1/reports` mientras cambia la fuente observacional, para que B pueda seguir refinando producto sin rehacer contratos en cada corte.
-- [ ] Hacer explícito el carril seguro de B durante Fase 5: UX, filtros, payloads esperados, exportaciones, copy funcional y tests de interfaz pueden avanzar sobre contratos acordados aunque el pipeline interno de observabilidad siga evolucionando.
+- [x] Desacoplar el delivery externo del hilo del motor de alertas. Ya existe `bhm-alert-delivery` como worker Compose-first que consume `alert_delivery_event`, registra `alert_delivery_attempt` y deja el envío inline detrás de `ALERT_NOTIFY_INLINE_DELIVERY_ENABLED` solo como fallback opcional.
+- [x] Mantener compatibilidad razonable de `/api/v1/clientlogs`, `/api/v1/monitor` y `/api/v1/reports` mientras cambia la fuente observacional, para que B pueda seguir refinando producto sin rehacer contratos en cada corte. La regresión focalizada de Fase 5 ya cubre esos contratos junto con `notifications` y confirma que el read-model HTTP sigue estable durante el recorte observacional.
+- [x] Hacer explícito el carril seguro de B durante Fase 5: ya existen superficies HTTP estables para `GET/POST /api/v1/notifications/channels`, `GET /api/v1/notifications/events` y `GET /api/v1/notifications/attempts`, con payload redacted y `retryPolicySummary` aptos para UX, filtros y tablas sin depender todavía del plan de integración end-to-end.
 
 ### Verificaciones
 
-- [ ] Monitoring y reporting técnico siguen funcionando sin mounts cruzados obligatorios de logs.
-- [ ] Las incidencias técnicas continúan disponibles para auditoría y diagnóstico.
-- [ ] El producto externo no depende de leer internamente la observabilidad de BHM.
-- [ ] Los contratos HTTP que usa frontend para históricos, timeline, incidentes y reporting técnico se mantienen estables o documentan claramente cualquier ajuste derivado del nuevo pipeline observacional.
+- [x] Monitoring y reporting técnico siguen funcionando sin mounts cruzados obligatorios de logs en el proceso web principal. El carril activo se valida sobre `bhm-broker-observability` + read models persistidos y la regresión focalizada de Fase 5 permanece verde.
+- [x] Las incidencias técnicas continúan disponibles para auditoría y diagnóstico. El pipeline fijado en ADR-0007 mantiene `clientlogs`, `reports/incidents` y `source-status` como contrato estable sobre eventos persistidos.
+- [x] El producto externo no depende de leer internamente la observabilidad de BHM. La fuente final queda encapsulada como HTTP interno broker-owned + PostgreSQL, no como acceso directo a artefactos internos del broker.
+- [x] Los contratos HTTP que usa frontend para históricos, timeline, incidentes y reporting técnico se mantienen estables o documentan claramente cualquier ajuste derivado del nuevo pipeline observacional. La regresión de Fase 5 cubre `monitor`, `clientlogs`, `reports` y `notifications`, incluyendo exports CSV/JSON y endpoints de retención sin introducir cambios contractuales pendientes.
 - [x] El contrato de alertas externas queda definido con suficiente detalle para que B pueda cerrar UX y flujos funcionales sin duplicar la implementación de delivery.
+- [x] B dispone además de read models HTTP y exportaciones (`notifications/channels`, `notifications/events`, `notifications/attempts` y sus exports) para avanzar en tablas, filtros, copy funcional y exportaciones sin esperar todavía la validación end-to-end del worker.
 
 ### Tests
 
-- [ ] Test de integración de ingesta de eventos/logs técnicos.
-- [ ] Test de reporting técnico sobre la nueva fuente de datos.
-- [ ] Test de purga y retención.
-- [ ] Test de exportación CSV/JSON si sigue aplicando.
-- [ ] Test del contrato de alertas externas, incluyendo éxito, fallo, reintento y deduplicación cuando aplique.
+- [x] Test de integración de ingesta de eventos/logs técnicos. La API interna broker-owned queda cubierta por regresiones específicas de offsets incrementales, `source-status` y resource stats.
+- [x] Test de reporting técnico sobre la nueva fuente de datos. La regresión focalizada de Fase 5 valida que `monitor`, `clientlogs` y `reports` siguen operando sobre el pipeline observacional desacoplado y sus read models persistidos.
+- [x] Test de purga y retención. La batería de `reports` cubre ahora `GET /api/v1/reports/retention/status`, `POST /api/v1/reports/retention/purge` y el storage subyacente, además de verificar exports JSON del timeline por cliente.
+- [x] Test de exportación CSV/JSON si sigue aplicando. El carril de notificaciones ya cubre export de eventos e intentos sobre el read-model estable de Fase 5.
+- [x] Test del contrato de alertas externas en modo API/read-model: canales redacted, eventos canónicos e intentos auditables ya cubiertos por regresión de `notifications`; la validación end-to-end de delivery, éxito real y reintentos queda diferida al plan de integración.
 
 ### Criterio de salida
 
-- [ ] La observabilidad de BHM es compatible con una arquitectura de microservicios y deja de depender de lecturas acopladas al broker.
+- [x] La observabilidad de BHM es compatible con una arquitectura de microservicios y deja de depender de lecturas acopladas al broker. El ownership broker-facing queda encapsulado en `bhm-broker-observability`, mientras `bhm-api` y frontend consumen solo HTTP interno y read models persistidos.
 
 ---
 
@@ -777,31 +790,31 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Actividades
 
-- [ ] Separar identidad humana de gestión, identidad service-to-service y credenciales MQTT.
-- [ ] Mantener temporalmente el mecanismo actual si es necesario, con una ruta clara de endurecimiento.
-- [ ] Diseñar puntos de extensión para OAuth2/OpenID Connect en una fase posterior.
-- [ ] Revisar secretos, rotación y manejo seguro de credenciales en Compose.
-- [ ] Diseñar cómo evolucionará ese manejo de secretos cuando se pase a Kubernetes.
-- [ ] Definir la política final de whitelist por IP y su ownership técnico: si vive como capability del control-plane broker-facing, como regla de aplicación o como combinación de ambas.
-- [ ] Alinear esa decisión con autorización técnica, DynSec/ACL y trazabilidad auditable para que B pueda cerrar la funcionalidad sin contradecir el modelo de reconciliación.
+- [x] Separar identidad humana de gestión, identidad service-to-service y credenciales MQTT. Queda fijado en `docs/adr/0008-phase6-identity-and-secrets.md`: sesión humana web, `API_KEY` service-to-service transicional y credenciales MQTT/DynSec como dominios distintos.
+- [x] Mantener temporalmente el mecanismo actual si es necesario, con una ruta clara de endurecimiento. ADR-0008 acepta el baseline actual solo con límites explícitos: sin hardcodes nuevos, sin exposición de secretos por API y sin mezclar sesión web con `API_KEY` o credenciales MQTT.
+- [x] Diseñar puntos de extensión para OAuth2/OpenID Connect en una fase posterior. ADR-0008 deja definida la costura: IdP humano posterior sin rediseñar DynSec ni reutilizar la sesión humana como identidad service-to-service.
+- [x] Revisar secretos, rotación y manejo seguro de credenciales en Compose. ADR-0008 fija ownership por dominio para `AUTH_SECRET`/`NEXTAUTH_SECRET`, `API_KEY`, credenciales MQTT, `secretRef` de alertas y secretos efímeros del reconciliador.
+- [x] Diseñar cómo evolucionará ese manejo de secretos cuando se pase a Kubernetes. ADR-0008 y el baseline Kubernetes ya dejan mapeada la proyección a `Secret` por dominio y mantienen `broker_reconcile_secret` como secreto efímero del control-plane en PostgreSQL.
+- [x] Definir la política final de whitelist por IP y su ownership técnico: si vive como capability del control-plane broker-facing, como regla de aplicación o como combinación de ambas. ADR-0009 fija un modelo híbrido por scope: `api_admin` en el plano HTTP y `mqtt_clients` como capability broker-facing del control-plane.
+- [x] Alinear esa decisión con autorización técnica, DynSec/ACL y trazabilidad auditable para que B pueda cerrar la funcionalidad sin contradecir el modelo de reconciliación. ADR-0009 separa whitelist de DynSec/ACL, define enforcement points correctos y deja auditoría/versionado como requisito del contrato.
 
 ### Verificaciones
 
-- [ ] Los flujos actuales de acceso siguen funcionando.
-- [ ] Los secretos y credenciales tienen ownership y almacenamiento claros.
-- [ ] La arquitectura no queda bloqueada por esperar OAuth/OIDC.
-- [ ] La whitelist por IP queda definida con un contrato técnico estable, compatible con el control-plane y consumible por frontend sin ambigüedad de ownership.
+- [x] Los flujos actuales de acceso siguen funcionando. El baseline Compose-first ya estaba validado con login web y auth API, y la regresión de Fase 6 añade cobertura explícita de auth sobre `reports` y `notifications` como endpoints críticos recientes.
+- [x] Los secretos y credenciales tienen ownership y almacenamiento claros. ADR-0008 documenta la separación entre sesión humana, `API_KEY`, credenciales MQTT, `secretRef` de alert delivery y secreto efímero del reconciliador.
+- [x] La arquitectura no queda bloqueada por esperar OAuth/OIDC. ADR-0008 fija una costura de extensión explícita sin exigir federación inmediata.
+- [x] La whitelist por IP queda definida con un contrato técnico estable, compatible con el control-plane y consumible por frontend sin ambigüedad de ownership. ADR-0009 fija el ownership y `docs/BHM_IP_WHITELIST_CONTRACT.md` deja el modelo funcional y los endpoints previstos para UX/backend.
 
 ### Tests
 
-- [ ] Test de autenticación en endpoints críticos.
-- [ ] Test de autorización en endpoints administrativos.
-- [ ] Test de acceso denegado y auditoría básica.
-- [ ] Test de whitelist por IP para el modelo finalmente elegido, incluyendo observación/auditoría del estado aplicado.
+- [x] Test de autenticación en endpoints críticos. La suite cubre ahora auth requerida en `monitor`, `clientlogs`, `dynsec`, `reports` y `notifications`, incluyendo endpoints de retención/purga y read models de alertas.
+- [x] Test de autorización en endpoints administrativos. La regresión de `tests/test_auth.py` valida que endpoints administrativos rechazan `X-API-Key` inválida con `401` en el baseline actual de autorización coarse-grained.
+- [x] Test de acceso denegado y auditoría básica. La misma regresión comprueba además que `core.auth` registra el intento inválido en el logger de seguridad básico actual.
+- [x] Test de whitelist por IP para el modelo finalmente elegido, incluyendo observación/auditoría del estado aplicado. `tests/test_security.py` cubre el roundtrip del contrato, el status auditable, el enforcement HTTP del scope `api_admin` y la exclusión correcta de endpoints públicos de health.
 
 ### Criterio de salida
 
-- [ ] La seguridad acompaña la migración sin introducir nuevos acoplamientos ni bloquear el avance principal.
+- [x] La seguridad acompaña la migración sin introducir nuevos acoplamientos ni bloquear el avance principal. Fase 6 ya deja separadas identidades y secretos, cubre denegación/auditoría básica, y materializa la whitelist HTTP con contrato estable, enforcement `api_admin` y estado auditable sin reabrir acoplamientos al broker.
 
 ---
 
@@ -816,34 +829,46 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 - [x] La pagina de clientes del frontend ya no refetcha en exceso roles y grupos junto con cada pagina de resultados, recortando latencia visible en listados y filtros.
 - [x] La aplicacion de `mosquitto.conf` paso de recarga ligera a semantica de reinicio controlado del broker, con invalidacion de cache de `max_connections` y regresiones especificas para evitar falsos `applied`.
 - [x] El modo daemon/Kubernetes ya toma `mosquitto.conf` observado desde `bhm-broker-observability` en vez de preferir el filesystem local del pod web, cerrando un caso real de drift falso en runtime distribuido.
-- [~] El baseline de resiliencia ya incluye recuperacion automatica de la maquina Podman y del socket remoto antes de bootstrapear `kind`, pero el laboratorio sigue mostrando una inestabilidad residual en la Web UI aunque el backend y los workloads queden arriba.
+- [x] El baseline de resiliencia ya incluye recuperacion automatica de la maquina Podman y del socket remoto antes de bootstrapear `kind`, junto con publicacion host-managed por `kubectl port-forward` en `22000/21900/29001` para evitar la fragilidad previa de `extraPortMappings` sobre Podman.
+- [x] El flujo validado de laboratorio `deploy.ps1 -Action start -Runtime kind` ya vuelve a cerrar con smoke verde (`5/5 OK`) sobre Web UI/API, MQTT TCP y MQTT WebSocket, dejando `kind` como carril util de regresion y no solo como bootstrap parcial.
+- [x] Se anadio `scripts/dev-tools/phase7_baseline.py` para capturar un baseline reproducible de latencia HTTP y conectividad MQTT en host, con salida JSON y endpoints configurables por runtime.
+- [x] Se documento el primer carril operativo de Fase 7 en `docs/BHM_PHASE7_BASELINE.md`, fijando smoke previo, baseline JSON y uso del stresser MQTT existente como señal de carga ligera.
+- [x] La primera captura real del baseline sobre `kind` ya quedo registrada con `overallStatus=ok` en HTTP/MQTT base: Web UI `mean 476.54 ms` con outlier frio visible, `auth/me` `49.97 ms`, `monitor/health` `44.84 ms`, `dynsec/roles` `48.83 ms` y MQTT TCP `11.32 ms`.
+- [x] Se anadio `scripts/dev-tools/phase7_resource_snapshot.py` para capturar CPU/memoria cuando exista `Metrics API` y, como minimo actual, PVCs/capacidad de almacenamiento por servicio en `kind`, con snapshot JSON versionable.
+- [x] La resiliencia por restart controlado y por fallo parcial ya quedo validada para el laboratorio `kind`: `deploy.ps1 -Action restart -Runtime kind` recreo el cluster con smoke `5/5 OK`, y la eliminacion del pod `bunkerm-platform` tambien recupero servicio completo tras endurecer la autorecuperacion de `kubectl port-forward`.
+- [x] El carril de carga MQTT ya dispone de un recovery repetible post-restart: `scripts/dev-tools/phase7_provision_mqtt_clients.py` reprovisiona DynSec `1..8`, mide la ventana broker-facing `desiredUpdatedAt -> appliedAt` y devolvio el modo recomendado `per-client` a verde con `160` relaciones simuladas y `0` errores en `kind`.
+- [x] El baseline host-facing ya suma reporting tecnico autenticado via `/api/proxy/reports/broker/daily?days=7`, quedando verde junto con Web UI, `auth/me`, `monitor/health`, `dynsec/roles` y MQTT TCP en `tmp/phase7-kind-baseline.json`.
+- [x] El snapshot de recursos de `kind` ya tiene medicion real de CPU/memoria por pod sin `Metrics API`, usando fallback `crictl` agregado sobre todos los nodos y manteniendo PVCs/capacidad en `tmp/phase7-kind-resources.json`.
+- [x] La semantica de borrado de DynSec ya quedo corregida y validada en runtime: los clientes eliminados convergen a `status=applied`, `driftDetected=false`, `desired.deleted=true` y `observed=null` en churn real sobre `kind`.
+- [x] Las comprobaciones ligeras adicionales de Fase 7 ya quedaron en verde en runtime: concurrencia sobre APIs criticas (`10/10` OK por endpoint), burst MQTT corto (`480` relaciones, `0` errores) y churn de clientes DynSec `create -> role -> delete`.
+- [x] Quedó formalizada la estrategia de activación gradual y reversión por capability en `docs/BHM_PHASE7_ROLLOUT_STRATEGY.md`, reutilizando los toggles reales del baseline (`BROKER_RECONCILE_MODE`, `BROKER_OBSERVABILITY_ENABLED`, `ALERT_NOTIFY_ENABLED`, `ALERT_NOTIFY_INLINE_DELIVERY_ENABLED`, probes del harness) en vez de introducir flags artificiales.
 
 ### Actividades
 
-- [ ] Definir baseline del sistema actual antes de cambios mayores.
-- [ ] Medir throughput MQTT, latencia de API, latencia de reporting técnico y tiempo de aplicación de cambios al broker.
-- [ ] Medir consumo de CPU, memoria y almacenamiento por servicio.
-- [ ] Validar reinicios, recuperación y comportamiento ante fallos parciales.
-- [ ] Validar que el backend de gestión puede operar sin estado local exclusivo.
-- [ ] Definir feature flags, estrategia de rollout y rollback por capability.
+- [x] Definir baseline del sistema actual antes de cambios mayores.
+- [x] Medir throughput MQTT, latencia de API, latencia de reporting técnico y tiempo de aplicación de cambios al broker. El harness publicado ya deja baseline host-facing con reporting verde, `shared` y `per-client` en verde, burst MQTT corto verde y una primera métrica broker-facing `desiredUpdatedAt -> appliedAt` con media `880.78 ms`.
+- [x] Medir consumo de CPU, memoria y almacenamiento por servicio. El snapshot de `kind` ya captura PVCs y, aun sin `Metrics API`, CPU/memoria reales mediante `crictl` agregado sobre todos los nodos.
+- [x] Validar reinicios, recuperación y comportamiento ante fallos parciales. El restart controlado y la recuperacion tras borrar el pod principal ya quedaron verdes en `kind`, con smoke host-facing `5/5 OK` despues de cada ejercicio.
+- [x] Validar que el backend de gestión puede operar sin estado local exclusivo. El carril `kind` siguio operativo con backend separado del broker, observabilidad broker-owned y publicacion host-managed, incluyendo reporting, DynSec y recovery tras reinicios y reemplazo de pods.
+- [x] Definir feature flags, estrategia de rollout y rollback por capability. La estrategia queda fijada en `docs/BHM_PHASE7_ROLLOUT_STRATEGY.md` con rollout por capability, smoke/baseline inmediato y rollback operacional o broker-facing segun el dominio.
 
 ### Verificaciones
 
-- [ ] Existen métricas de referencia antes y después de cada cambio mayor.
-- [ ] El sistema soporta reinicios controlados sin pérdida de operación esencial.
-- [ ] La degradación ante fallo parcial es entendible y observable.
+- [x] Existen métricas de referencia antes y después de cada cambio mayor. El baseline inicial ya puede capturarse de forma repetible para HTTP/MQTT/reporting, el carril broker-facing ya suma la medición `desiredUpdatedAt -> appliedAt` y el snapshot de recursos ya captura CPU/memoria/almacenamiento en `kind`.
+- [x] El sistema soporta reinicios controlados sin pérdida de operación esencial. El laboratorio `kind` ya supero tanto un `restart` completo como la recuperacion del pod principal con smoke `5/5 OK`.
+- [x] La degradación ante fallo parcial es entendible y observable. El fallo parcial real de publicacion host-facing quedo aislado en `kubectl port-forward`, se corrigio en `deploy.ps1` y la validacion posterior confirmo recuperacion completa y medible.
 
 ### Tests
 
-- [ ] Test de carga MQTT.
-- [ ] Test de churn de clientes.
-- [ ] Test de bursts de publish.
-- [ ] Test de concurrencia sobre APIs críticas.
-- [ ] Test de resiliencia tras restart de servicios.
+- [x] Test de carga MQTT. El carril ligero en `kind` ya quedo validado tanto en `shared` como en el modo recomendado `per-client`: ambos completaron `160` relaciones con `0` errores, y el reprovisioning DynSec `1..8` ya quedo automatizado para recovery post-restart.
+- [x] Test de churn de clientes. El flujo real `create -> role -> delete` ya quedo verde en `kind` para `phase7-churn-1..4`, incluyendo settlement final `applied` sin drift falso tras borrado.
+- [x] Test de bursts de publish. La corrida corta `CLIENTS=8`, `MSGS=60`, `TIME=1` ya cerro con `480` relaciones y `0` errores.
+- [x] Test de concurrencia sobre APIs críticas. La comprobacion ligera ya devolvio `10/10` respuestas correctas en `monitor/health`, `dynsec/roles` y `reports/broker/daily`.
+- [x] Test de resiliencia tras restart de servicios. Ya se validaron restart completo y fallo parcial real del pod principal con recuperacion completa y smoke verde posterior en `kind`.
 
 ### Criterio de salida
 
-- [ ] BHM dispone de una base objetiva de rendimiento y resiliencia para continuar la evolución de plataforma.
+- [x] BHM dispone ya de una base objetiva y ejecutada de rendimiento, resiliencia y compatibilidad para continuar la evolución de plataforma. Fase 7 queda cerrada con baseline, resiliencia, churn/burst/concurrencia y estrategia explícita de rollout/rollback por capability.
 
 ---
 
@@ -853,87 +878,108 @@ Los ADRs definidos para iniciar la migración se encuentran en `docs/adr/`.
 
 ### Actividades
 
-- [ ] Revisar qué configuraciones de Compose deben transformarse después en objetos de Kubernetes.
-- [ ] Identificar futuras necesidades de ConfigMaps, Secrets, PVCs, Deployments, StatefulSets, Jobs u operador.
-- [ ] Verificar que el reconciliador del broker puede evolucionar a patrón operador/control loop.
-- [ ] Preparar lineamientos de empaquetado e imágenes para la plataforma final.
-- [ ] Documentar dependencias de red, almacenamiento y secretos que deberán resolverse en Kubernetes.
-- [ ] Verificar compatibilidad futura con la imagen del producto de transformación de datos.
+- [x] Revisar qué configuraciones de Compose deben transformarse después en objetos de Kubernetes. El inventario explícito ya quedó levantado en `k8s/PORTABILITY_INVENTORY.md`.
+- [x] Identificar futuras necesidades de ConfigMaps, Secrets, PVCs, Deployments, StatefulSets, Jobs u operador. El mismo inventario ya deja separados objetos actuales y gaps transicionales.
+- [x] Verificar que el reconciliador del broker puede evolucionar a patrón operador/control loop. La verificación técnica y la ruta sidecar -> control loop -> controlador quedaron fijadas en `k8s/RECONCILER_CONTROL_LOOP_EVOLUTION.md`, apoyadas además por el modo `--once` del daemon actual como seam operativo para `Job` o reconciliación puntual.
+- [x] Preparar lineamientos de empaquetado e imágenes para la plataforma final. El laboratorio ya admite tags explícitos vía `deploy.ps1 -ImageTag ...` y `k8s/scripts/bootstrap-kind.ps1`, y el lineamiento operativo quedó documentado en `k8s/IMAGE_PACKAGING.md` para abandonar `latest` fuera del carril local.
+- [x] Documentar dependencias de red, almacenamiento y secretos que deberán resolverse en Kubernetes. Quedan explicitadas en `k8s/PORTABILITY_INVENTORY.md`.
+- [x] Verificar compatibilidad futura con la imagen del producto de transformación de datos. Quedó explicitado que su carril compatible es imagen y `Deployment` separados, sin mezcla de ownership con broker ni web, tanto en `k8s/PORTABILITY_INVENTORY.md` como en `k8s/IMAGE_PACKAGING.md`.
 
 ### Carril opcional de laboratorio Kubernetes
 
 Este carril puede ejecutarse antes del cierre formal de Fase 8, pero solo como validación temprana de portabilidad. No sustituye el baseline Compose-first ni debe mezclarse con la resolución de incidencias aún abiertas del runtime principal.
 
-- [ ] Mantener como prerequisito un baseline verde en Compose-first antes de introducir el laboratorio Kubernetes: smoke completo, import/export DynSec estable y reconciliación sin caída del broker.
-- [ ] Tratar el incidente DynSec actual como bloqueo previo: reproducir con el JSON exportado real, capturar `desired/applied/observed`, logs de `bunkerm-mosquitto`, `bunkerm-reconciler` y `bunkerm-platform`, y aislar si la caída ocurre en validación, escritura, reload DynSec o arranque posterior del broker.
-- [ ] No simular "nodo maestro" y "nodos worker" con contenedores ad hoc en Podman Compose; usar un clúster Kubernetes real pero efímero, preferentemente `kind`, sobre Podman si el entorno Windows lo soporta de forma estable.
-- [ ] Empezar con un laboratorio mínimo: `1` control-plane y `1-2` workers solo para validar scheduling, networking interno, secrets/config y lifecycle de los servicios BHM.
-- [ ] Mantener el laboratorio desacoplado del flujo diario: scripts y manifests separados del `docker-compose.dev.yml`, sin convertirlo en nuevo baseline de desarrollo mientras Fases 4-7 sigan abiertas.
-- [ ] Desplegar primero los componentes más portables: `bunkerm-platform`, `bhm-reconciler`, `bhm-broker-observability` y PostgreSQL; posponer endurecimiento de Mosquitto como `StatefulSet` hasta cerrar storage, probes, restart semantics y estrategia de rollback del plugin DynSec.
-- [ ] Traducir explícitamente el control-plane actual a primitivas Kubernetes: `mosquitto.conf` como ConfigMap, TLS y `mosquitto_passwd` como Secret, `dynamic-security.json` como artefacto privado reconciliado por un componente broker-owned, y `broker_desired_state` sobre PostgreSQL persistente.
-- [ ] Validar en el laboratorio solo hipótesis de portabilidad: arranque, configuración, resolución DNS interna, health/readiness, persistencia y separación de ownership. No usar todavía ese carril para diagnosticar bugs funcionales del broker que siguen reproduciéndose en Compose.
+- [x] Mantener como prerequisito un baseline verde en Compose-first antes de introducir el laboratorio Kubernetes: smoke completo, import/export DynSec estable y reconciliación sin caída del broker.
+- [x] El incidente DynSec que bloqueaba la portabilidad temprana quedó mitigado en el baseline actual mediante mejoras de caching, semántica de reinicio controlado y validaciones adicionales sobre `desired/applied/observed`, por lo que ya no bloquea el carril opcional.
+- [x] No simular "nodo maestro" y "nodos worker" con contenedores ad hoc en Podman Compose; usar un clúster Kubernetes real pero efímero, preferentemente `kind`, sobre Podman si el entorno Windows lo soporta de forma estable.
+- [x] Empezar con un laboratorio mínimo: `1` control-plane y `1-2` workers solo para validar scheduling, networking interno, secrets/config y lifecycle de los servicios BHM. El baseline actual ya opera con `1` control-plane y `1` worker, y en este corte suma además el `Deployment` separado de `bhm-alert-delivery`.
+- [x] Mantener el laboratorio desacoplado del flujo diario: scripts y manifests separados del `docker-compose.dev.yml`, sin convertirlo en nuevo baseline de desarrollo mientras Fases 4-7 sigan abiertas.
+- [x] Traducir explícitamente el control-plane actual a primitivas Kubernetes: `mosquitto.conf` como ConfigMap, TLS y `mosquitto_passwd` como Secret, `dynamic-security.json` como artefacto privado reconciliado por un componente broker-owned, y `broker_desired_state` sobre PostgreSQL persistente.
+- [x] Validar en el laboratorio solo hipótesis de portabilidad: arranque, configuración, resolución DNS interna, health/readiness, persistencia y separación de ownership. El carril ya sirvió para validar bootstrap, runtime y exposición host-managed sin reemplazar Compose como baseline.
 
 Estado actual del carril opcional:
 
 - [x] El baseline Compose-first quedó verde antes de abrir el laboratorio: DynSec export/import estable de punta a punta y smoke `7/7 OK`.
 - [x] Se abrió un scaffold inicial desacoplado en `k8s/` con `kind/cluster.yaml`, `k8s/base/` y `k8s/scripts/bootstrap-kind.ps1`.
 - [x] El laboratorio actual ya quedó validado en runtime sobre `kind` + Podman con `1` control-plane y `1` worker, `bunkerm-platform 1/1`, `mosquitto 3/3` y `postgres 1/1`, además de `HTTP 200` en `http://localhost:22000/api/monitor/health` y conectividad TCP en `localhost:21900` y `localhost:29001`.
-- [x] `Mosquitto` ya dejó de ser placeholder y quedó modelado como `StatefulSet` broker-owned con PVCs propios, sidecars `bhm-reconciler` y `bhm-broker-observability`, y exposición controlada por `NodePort` en el laboratorio.
+- [x] `Mosquitto` ya dejó de ser placeholder y quedó modelado como `StatefulSet` broker-owned con PVCs propios y sidecars `bhm-reconciler` y `bhm-broker-observability`; la exposición al host del laboratorio se estabilizó con `kubectl port-forward` gestionado en vez de depender de `NodePort/extraPortMappings` frágiles sobre Podman.
 - [x] El handoff efímero de `create_client` ya se movió al control-plane PostgreSQL, lo que permitió separar el pod HTTP del broker en el laboratorio Kubernetes sin depender de un volumen compartido `/nextjs/data/reconcile-secrets`.
 - [x] TLS y `mosquitto_passwd` ya tienen una traducción inicial a `Secret` dedicados de Kubernetes mediante bootstrap por `initContainer`, aunque la rotación y reconciliación nativa sobre objetos `Secret` siga pendiente como siguiente corte.
 - [x] `deploy.ps1` y `k8s/scripts/bootstrap-kind.ps1` ya recuperan automaticamente una maquina Podman rota o sin socket util antes de invocar `kind`, evitando que el flujo limpio falle en `kind create cluster` por estado remoto corrupto del proveedor.
 - [x] El bootstrap de `kind` ya carga las imagenes locales del laboratorio mediante `image-archive` cuando el proveedor es Podman, evitando la inconsistencia de `kind load docker-image` con tags canonicos `localhost/...`.
-- [~] El flujo limpio `setup -> build -> start` ya supera el fallo original de creacion de cluster, crea el laboratorio, carga imagenes y aplica manifests sobre `kind`; queda pendiente dejar otra vez verde el smoke completo de la Web UI para considerar estable este carril opcional.
+- [x] El flujo limpio `setup -> build -> start` ya supera el fallo original de creacion de cluster, crea el laboratorio, carga imagenes y aplica manifests sobre `kind`; el smoke validado vuelve a quedar verde para Web UI/API, MQTT TCP y MQTT WebSocket (`5/5 OK`).
+- [x] El laboratorio ya traduce tambien el worker `bhm-alert-delivery` a `Deployment` separado en `k8s/base/alert-delivery.yaml`, alineando Kubernetes con el baseline Compose-first del outbox de alertas.
+- [x] El inventario de portabilidad Compose -> Kubernetes ya quedó materializado en `k8s/PORTABILITY_INVENTORY.md`, con mapping de servicios, dependencias de red, secretos, almacenamiento y gaps transicionales visibles.
+- [x] El nuevo `Deployment/bhm-alert-delivery` ya se aplico tambien sobre el laboratorio `kind` activo y completo `rollout` verde en `bhm-lab`, confirmando que este slice de portabilidad no queda solo como manifiesto estatico.
+- [x] El laboratorio ya puede resolverse con tags de imagen explicitos sin editar YAML a mano: `deploy.ps1` y `bootstrap-kind.ps1` aceptan `-ImageTag`, y `k8s/base/kustomization.yaml` fija los nombres de imagen para que `kind` use el mismo artefacto construido y cargado.
+- [x] La evolucion del reconciliador ya quedó verificada a nivel técnico: hoy permanece sidecar broker-owned por el coupling real a `/var/lib/mosquitto` y `/etc/mosquitto`, pero el daemon actual ya expone semantica reusable de control loop y ejecucion one-shot (`--once`) que habilita un paso posterior a `Job` o controlador.
+- [x] `bhm-alert-delivery` ya suma hardening base de laboratorio con `startupProbe`, readiness funcional contra PostgreSQL y politicas minimas de recursos, reduciendo el gap entre manifiesto de laboratorio y workload portable.
 
-### Plan de acción recomendado
+### Siguientes focos recomendados tras el cierre de Fase 8
 
-1. Cerrar primero el incidente DynSec en el baseline Compose-first. Si el mismo JSON exportado derriba el broker, todavía hay un problema funcional en el artifact o en la secuencia de reload, y mover el caso a un laboratorio Kubernetes solo añadiría otra variable.
-2. Convertir ese incidente en una regresión reproducible automática. El siguiente corte debe dejar un test o smoke dirigido que importe un export real, verifique que `dynamic-security.json` queda íntegro y que Mosquitto vuelve a `healthy`.
-3. Una vez estabilizado ese flujo, abrir un carril paralelo de laboratorio con `kind` sobre Podman. Ese carril debe validar traducción de arquitectura, no reemplazar Compose ni bloquear Fase 4-7.
-4. En ese laboratorio, desplegar primero la plataforma sin exponer todavía toda la complejidad broker-facing. La prioridad es comprobar el mapping de servicios, secretos, storage y healthchecks.
-5. Solo después incorporar Mosquitto y su reconciliación como caso controlado. El criterio no es "que arranque", sino poder demostrar rollback, persistencia y límites claros de ownership compatibles con un futuro operador/control loop.
-6. Si el laboratorio confirma la portabilidad, registrar sus hallazgos como entregables de Fase 8. Si no la confirma, el resultado útil sigue siendo el inventario de gaps reales para Kubernetes sin contaminar el baseline Compose-first.
+1. Mantener `kind` como carril de regresión y portabilidad del baseline ya cerrado, no como sustituto del flujo Compose-first para desarrollo diario.
+2. Endurecer la operacion del laboratorio donde aun hay deuda visible: secret splitting por dominio, estrategia de Ingress/publicacion real, registro de imagenes fuera del entorno local y menor dependencia de `kubectl port-forward`.
+3. Conservar la frontera broker-owned del reconciliador y usar el modo `--once` como seam de pruebas, evitando adelantar un operador remoto mientras la escritura real siga dependiendo del filesystem broker-local.
+4. Usar el baseline de Kubernetes para detectar regresiones de empaquetado, bootstrap, readiness y networking interno antes de introducir nuevas capacidades funcionales sobre la plataforma.
 
 ### Verificaciones
 
-- [ ] Ninguna decisión crítica de Compose bloquea la evolución a Kubernetes.
-- [ ] Existe inventario de objetos y capacidades requeridas para la migración posterior.
-- [ ] La estrategia de aplicación de cambios al broker tiene traducción razonable a Kubernetes.
+- [x] Ninguna decisión crítica de Compose bloquea la evolución a Kubernetes en el baseline actual. Los gaps que quedan son transicionales y están explícitos en `k8s/PORTABILITY_INVENTORY.md`.
+- [x] Existe inventario de objetos y capacidades requeridas para la migración posterior.
+- [x] La estrategia de aplicación de cambios al broker tiene traducción razonable a Kubernetes. El baseline actual la expresa mediante `StatefulSet` broker-owned, sidecars y `Deployment` auxiliares donde no se requiere filesystem broker-local.
+- [x] El laboratorio puede reusar artefactos de imagen versionados de forma coherente entre build, carga a `kind` y apply de manifests, sin reintroducir drift por `latest` oculto.
+- [x] La evolución futura del reconciliador a `Job` o controlador ya tiene una frontera técnica explícita y verificable, aunque el writer broker-local siga dentro del pod broker-owned.
 
 ### Tests
 
-- [ ] Revisión técnica de portabilidad Compose -> Kubernetes.
-- [ ] Validación documental del mapping de componentes a objetos de Kubernetes.
+- [x] Revisión técnica de portabilidad Compose -> Kubernetes. Queda recogida en `k8s/PORTABILITY_INVENTORY.md` y en los manifests ya materializados del laboratorio.
+- [x] Validación documental del mapping de componentes a objetos de Kubernetes.
+- [x] Validación de render del laboratorio con tags configurables mediante `kubectl kustomize k8s/base` y apply del `kind` activo usando el mismo tag de build.
+- [x] Validación operativa del reconciliador en modo one-shot dentro del contenedor `reconciler`, comprobando que el loop actual también sirve como seam de reconciliación puntual.
+- [x] Validación de rollout del worker `bhm-alert-delivery` tras endurecer probes y recursos en el laboratorio `kind` activo.
 
 ### Criterio de salida
 
-- [ ] El sistema queda listo para abordar la migración de plataforma cuando corresponda.
+- [x] El sistema queda sensiblemente más preparado para abordar la migración de plataforma cuando corresponda. El laboratorio ya cubre `platform`, `postgres`, `mosquitto`, sidecars broker-owned y `bhm-alert-delivery`, la evolución del reconciliador quedó verificada con frontera técnica explícita y el carril de empaquetado ya soporta tags de imagen configurables para validaciones repetibles.
 
 ---
 
 ## Fase 9 - Implementación posterior en Kubernetes
 
-**Objetivo**: Ejecutar más adelante la migración de despliegue a Kubernetes junto con la imagen del producto de transformación de datos.
+**Objetivo**: Materializar el primer baseline Kubernetes ejecutable de la arquitectura objetivo, incorporando el core BHM y el workload externo desacoplado sin romper los límites de ownership definidos en fases anteriores.
 
 ### Actividades previstas
 
-- [ ] Definir la topología final en Kubernetes.
-- [ ] Integrar la imagen del producto de transformación de datos en la arquitectura objetivo.
-- [ ] Implementar manifests, charts o la estrategia de despliegue elegida.
-- [ ] Adaptar secretos, almacenamiento persistente y networking al clúster objetivo.
-- [ ] Validar la estrategia de reconciliación del broker en entorno Kubernetes.
+- [x] Definir la topología final en Kubernetes. La topología mínima ya quedó fijada en `k8s/FINAL_TOPOLOGY.md`, incorporando `water-plant-simulator` como workload externo sin mezclar ownership con `bunkerm-platform` ni con `mosquitto`.
+- [x] Integrar la imagen del producto de transformación de datos en la arquitectura objetivo. El primer carril ejecutable ya usa `water-plant-simulator` como `Deployment` externo en `k8s/base/water-plant-simulator.yaml`, con imagen local versionable y contrato exclusivamente MQTT.
+- [x] Implementar manifests, charts o la estrategia de despliegue elegida. El baseline `k8s/base` ya incorpora el manifiesto del simulador, su `ConfigMap` de configuración y el flujo de empaquetado/carga de imagen para `kind`.
+- [x] Adaptar secretos, almacenamiento persistente y networking al clúster objetivo. El simulador ya consume credenciales MQTT vía `Secret`, configuración vía `ConfigMap`, `emptyDir` para logs/estado y DNS interno hacia `mosquitto:1900`.
+- [x] Validar la estrategia de reconciliación del broker en entorno Kubernetes. La convivencia con el workload externo mantiene el reconciliador broker-owned como sidecar y se revalidó con ejecución `--once --scope all` sobre el clúster refrescado.
 
 ### Verificaciones
 
-- [ ] La migración a Kubernetes se aborda con la arquitectura ya saneada, no como parche sobre el modelo anterior.
+- [x] La migración a Kubernetes se aborda con la arquitectura ya saneada, no como parche sobre el modelo anterior. El workload externo entra por MQTT y configuración propia, sin shared volumes ni regreso a escrituras cruzadas sobre el broker.
 
 ### Tests
 
-- [ ] Quedan fuera del alcance inmediato de este plan y se detallarán en una hoja específica cuando empiece esa etapa.
+- [x] Tests unitarios del healthcheck del simulador en `water-plant-simulator/tests/test_healthcheck.py`.
+- [x] Validación de render `kubectl kustomize k8s/base` con la topología final ya incluyendo el simulador.
+- [x] Build y despliegue real del laboratorio con tag explícito (`phase9-lab`), incluyendo `water-plant-simulator` como tercera imagen local cargada en `kind`.
+- [x] Smoke del runtime `kind` tras recreación completa del clúster.
+- [x] Validación de `rollout` de `deployment/water-plant-simulator` y comprobación de probes sobre archivos de estado/heartbeat del simulador.
+- [x] Validación de logs del simulador confirmando conexión al broker MQTT interno del laboratorio.
+
+### Evidencia reciente
+
+- [x] El laboratorio final quedó ejecutando imágenes explícitas `phase9-lab`: `bunkerm-platform`, `bhm-alert-delivery` y los sidecars broker-owned con `localhost/bunkermtest-bunkerm:phase9-lab`, `mosquitto` con `localhost/bunkermtest-mosquitto:phase9-lab` y el workload externo con `localhost/water-plant-simulator:phase9-lab`.
+- [x] `kubectl get pods -n bhm-lab` confirmó `postgres`, `mosquitto`, `bunkerm-platform`, `bhm-alert-delivery` y `water-plant-simulator` en `Running`, con `water-plant-simulator 1/1` y `mosquitto 3/3`.
+- [x] Los logs del simulador confirmaron conexión real al broker interno del clúster: `Conectando a broker MQTT: mosquitto:1900...` seguido de `[OK] Conectado al broker MQTT: mosquitto:1900`, más arranque de `11` sensores, `4` actuadores y suscripciones a topics de comando.
+- [x] La reconciliación broker-facing volvió a validarse en el entorno final con `kubectl exec ... services.broker_reconcile_daemon --once --scope all`, cerrando con `RECONCILE_ONCE_OK`.
+- [x] Durante esta validación apareció inestabilidad del carril auxiliar de `kubectl port-forward` para exposición host-managed; no bloqueó el cierre de Fase 9 porque la verificación final se completó directamente sobre Kubernetes (`rollout`, `logs`, `exec`, healthchecks y estado de pods) y no sobre el helper de publicación local.
 
 ### Criterio de salida
 
-- [ ] Fase diferida. No bloquea la ejecución del plan actual.
+- [x] Fase 9 queda cerrada para el alcance actual del proyecto: el despliegue objetivo en Kubernetes ya incorpora el core BHM y un workload externo desacoplado, con estrategia de empaquetado reproducible, networking/secretos adaptados y validación runtime sobre `kind`.
 
 ---
 
@@ -968,22 +1014,22 @@ Estado actual del carril opcional:
 
 ### Observabilidad y seguridad
 
-- [ ] Observabilidad sin `tail -f` acoplado.
-- [ ] Reporting técnico separado del reporting de negocio.
-- [ ] Seguridad y secretos revisados.
-- [ ] Preparación para OAuth/OIDC documentada.
+- [x] Observabilidad sin `tail -f` acoplado.
+- [x] Reporting técnico separado del reporting de negocio.
+- [x] Seguridad y secretos revisados.
+- [x] Preparación para OAuth/OIDC documentada.
 
 ### Calidad y resiliencia
 
 - [x] Smoke tests definidos.
 - [x] Tests de integración por fase definidos.
-- [ ] Tests de carga y resiliencia ejecutados.
+- [x] Tests de carga y resiliencia ejecutados.
 - [x] Estrategia de rollback definida por capability.
 
 ### Evolución futura
 
-- [ ] Portabilidad a Kubernetes revisada.
-- [ ] Consideraciones para la imagen del producto de transformación de datos documentadas.
+- [x] Portabilidad a Kubernetes revisada. Ya existe inventario Compose -> Kubernetes, traducción real del worker de alert delivery, lineamiento de empaquetado con tags explícitos y verificación técnica de la evolución del reconciliador.
+- [x] Consideraciones para la imagen del producto de transformación de datos documentadas.
 
 ---
 

@@ -40,19 +40,55 @@ def get_broker_log_source_status() -> Dict[str, Any]:
     }
 
 
-def read_broker_logs(limit: int | None = None) -> Dict[str, Any]:
+def read_broker_logs(limit: int | None = None, offset: int | None = None) -> Dict[str, Any]:
     source = get_broker_log_source_status()
     log_path = source["path"]
     if not source["enabled"]:
-        return {"logs": [], "path": log_path, "error": "Log reading disabled", "source": source}
+        return {"logs": [], "path": log_path, "error": "Log reading disabled", "source": source, "offset": offset, "next_offset": offset or 0, "has_more": False, "rewound": False}
     if not source["available"]:
-        return {"logs": [], "path": log_path, "error": "Log file not found", "source": source}
+        return {"logs": [], "path": log_path, "error": "Log file not found", "source": source, "offset": offset, "next_offset": offset or 0, "has_more": False, "rewound": False}
 
     max_lines = max(1, min(limit or _BROKER_LOG_MAX_LINES, 5000))
+    if offset is None:
+        with open(log_path, "r", errors="replace") as fh:
+            lines = fh.readlines()
+            next_offset = fh.tell()
+        tail = [line.rstrip("\n") for line in lines[-max_lines:]]
+        return {
+            "logs": tail,
+            "path": log_path,
+            "source": source,
+            "offset": None,
+            "next_offset": next_offset,
+            "has_more": False,
+            "rewound": False,
+        }
+
+    requested_offset = max(0, int(offset))
+    file_size = os.path.getsize(log_path)
+    start_offset = requested_offset if requested_offset <= file_size else 0
+    rewound = start_offset != requested_offset
+
     with open(log_path, "r", errors="replace") as fh:
-        lines = fh.readlines()
-    tail = [line.rstrip("\n") for line in lines[-max_lines:]]
-    return {"logs": tail, "path": log_path, "source": source}
+        fh.seek(start_offset)
+        lines: list[str] = []
+        while len(lines) < max_lines:
+            line = fh.readline()
+            if not line:
+                break
+            lines.append(line.rstrip("\n"))
+        next_offset = fh.tell()
+
+    has_more = next_offset < os.path.getsize(log_path)
+    return {
+        "logs": lines,
+        "path": log_path,
+        "source": source,
+        "offset": start_offset,
+        "next_offset": next_offset,
+        "has_more": has_more,
+        "rewound": rewound,
+    }
 
 
 def get_broker_resource_source_status() -> Dict[str, Any]:

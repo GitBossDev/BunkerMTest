@@ -30,7 +30,7 @@ class Programa
     static string host = "";
     static string user = "";
     static string pass = "";
-    static int brokerPort = 1900;
+    static int brokerPort = 21900;
     static int clients = 0;
     static int clients_t = 0;
     static int timeunit = 0;
@@ -42,28 +42,98 @@ class Programa
     static int totalDatosEnviadosSubs = 0;
     static bool retain;
 
+    static bool useSharedCredentials = false;
+    static string clientPassword = "123456";
+
+    static string GetEnvOrDefault(string name, string defaultValue)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        return string.IsNullOrWhiteSpace(value) ? defaultValue : value;
+    }
+
+    static int GetRequiredIntEnv(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value) || !int.TryParse(value, out var parsed))
+        {
+            throw new InvalidOperationException($"La variable de entorno {name} es obligatoria y debe ser un entero válido.");
+        }
+
+        return parsed;
+    }
+
+    static bool GetRequiredBoolEnv(string name)
+    {
+        var value = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(value) || !bool.TryParse(value, out var parsed))
+        {
+            throw new InvalidOperationException($"La variable de entorno {name} es obligatoria y debe ser true o false.");
+        }
+
+        return parsed;
+    }
+
+    static bool ResolveSharedCredentialMode()
+    {
+        var authMode = GetEnvOrDefault("MQTT_AUTH_MODE", "per-client").Trim().ToLowerInvariant();
+        return authMode switch
+        {
+            "shared" => true,
+            "per-client" => false,
+            _ => throw new InvalidOperationException("La variable MQTT_AUTH_MODE debe ser 'per-client' o 'shared'."),
+        };
+    }
+
     static async Task Main(string[] args)
     {
 
         // Fallback a variables de entorno si CLI no se pasó
-        host = string.IsNullOrEmpty(host) ? Environment.GetEnvironmentVariable("MQTT_HOST") : host;
-        user = string.IsNullOrEmpty(user) ? Environment.GetEnvironmentVariable("MQTT_USER") : user;
-        pass = string.IsNullOrEmpty(pass) ? Environment.GetEnvironmentVariable("MQTT_PASS") : pass;
+        host = string.IsNullOrEmpty(host) ? GetEnvOrDefault("MQTT_HOST", "localhost") : host;
+        user = string.IsNullOrEmpty(user) ? GetEnvOrDefault("MQTT_USER", string.Empty) : user;
+        pass = string.IsNullOrEmpty(pass) ? GetEnvOrDefault("MQTT_PASS", string.Empty) : pass;
+        useSharedCredentials = ResolveSharedCredentialMode();
+        clientPassword = GetEnvOrDefault("MQTT_CLIENT_PASSWORD", "123456");
         var envPort = Environment.GetEnvironmentVariable("MQTT_PORT");
         if (!string.IsNullOrWhiteSpace(envPort) && int.TryParse(envPort, out var parsedPort) && parsedPort > 0)
         {
             brokerPort = parsedPort;
         }
-        clients = clients == 0 ? int.Parse(Environment.GetEnvironmentVariable("CLIENTS")) : clients;
-        timeunit = timeunit == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIMEUNIT")) : timeunit;
-        time = time == 0 ? int.Parse(Environment.GetEnvironmentVariable("TIME")) : time;
-        msgs = msgs == 0 ? int.Parse(Environment.GetEnvironmentVariable("MSGS")) : msgs;
-        qos = qos == 0 ? int.Parse(Environment.GetEnvironmentVariable("QOS")) : qos;
-        retain = bool.Parse(Environment.GetEnvironmentVariable("RETAIN"));
+        clients = clients == 0 ? GetRequiredIntEnv("CLIENTS") : clients;
+        timeunit = timeunit == 0 ? GetRequiredIntEnv("TIMEUNIT") : timeunit;
+        time = time == 0 ? GetRequiredIntEnv("TIME") : time;
+        msgs = msgs == 0 ? GetRequiredIntEnv("MSGS") : msgs;
+        qos = qos == 0 ? GetRequiredIntEnv("QOS") : qos;
+        retain = GetRequiredBoolEnv("RETAIN");
+
+        var runningInContainer = string.Equals(
+            Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"),
+            "true",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (runningInContainer && string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine("[ADVERTENCIA] MQTT_HOST=localhost dentro de un contenedor apunta al contenedor mismo, no al broker del host o de kind.");
+            Console.WriteLine("[ADVERTENCIA] Para podman run --network kind use MQTT_HOST=bhm-lab-control-plane y MQTT_PORT=31900.");
+        }
+
+        if (useSharedCredentials)
+        {
+            if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(pass))
+            {
+                throw new InvalidOperationException("MQTT_USER y MQTT_PASS son obligatorios cuando MQTT_AUTH_MODE=shared.");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(user) || !string.IsNullOrWhiteSpace(pass))
+        {
+            Console.WriteLine("[INFO] MQTT_USER/MQTT_PASS definidos pero ignorados porque MQTT_AUTH_MODE=per-client.");
+        }
 
         clients_t = clients;
 
-        Console.WriteLine($"Conectando a {host}:{brokerPort} con {user}");
+        string authSummary = useSharedCredentials
+            ? $"usuario compartido '{user}'"
+            : $"usuarios DynSec por cliente (1..{clients_t})";
+        Console.WriteLine($"Conectando a {host}:{brokerPort} usando {authSummary}");
 
         Console.WriteLine("==============================================");
         Console.WriteLine("  GREENHOUSE MQTT STRESSER - FASE 1");
@@ -114,31 +184,31 @@ class Programa
         Console.WriteLine($"\nTotal mensajes que se han intentado publicar: {contadorEnvios} ({porcentaje_pubs}%).\nTotal suscripciones que se han intentado realizar: {contadorSuscripciones} ({porcentaje_subs}%).");
         Console.WriteLine($"\nTotal de relaciones simuladas: {contadorEnvios + contadorSuscripciones}");
         Console.WriteLine($"\nErrores en alguna de las relaciones debido a la falta de autorización: {cuenta_errores}");
-        int c = 0;
-        while (c == 0)
-        {
-
-        }
     }
 
     static async Task MyFunctionAsync(int tiempo)
     {
-        MqttClientHelper mqttHelper = await ComprobadorDeConexiones(); //Comprueba la conexion con la cuenta del cliente y espera que cada task termine
-
-        string[] id_partes = mqttHelper.ClientId.Split('-');
-        int id_sensor = int.Parse(id_partes[^1]) + 100000000;
-
-
-        await mqttHelper.PublishAsync(
-        topic: $"lab/device/{id_sensor}/Estatus_conexion",
-        payload: "Conectado",
-        qos: MqttQualityOfServiceLevel.AtLeastOnce,
-        retain: retain
-        );
-
-        //Intenta diversas opciones para el cliente.
+        MqttClientHelper? mqttHelper = null;
         try
         {
+            mqttHelper = await ComprobadorDeConexiones(); //Comprueba la conexion con la cuenta del cliente y espera que cada task termine
+            if (mqttHelper == null)
+            {
+                Interlocked.Increment(ref cuenta_errores);
+                return;
+            }
+
+            string[] id_partes = mqttHelper.ClientId.Split('-');
+            int id_sensor = int.Parse(id_partes[^1]) + 100000000;
+
+            await mqttHelper.PublishAsync(
+                topic: $"lab/device/{id_sensor}/Estatus_conexion",
+                payload: "Conectado",
+                qos: MqttQualityOfServiceLevel.AtLeastOnce,
+                retain: retain
+            );
+
+            //Intenta diversas opciones para el cliente.
             int messageCount = msgs;
 
             var sensores = new[] { "CO2", "Humedad", "Temperatura" };
@@ -244,8 +314,17 @@ class Programa
         }
         finally
         {
-            // DESCONEXIÓN LIMPIA:
-            //await mqttHelper.DisconnectAsync();
+            if (mqttHelper != null)
+            {
+                try
+                {
+                    await mqttHelper.DisconnectAsync();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[MQTT] Error al desconectar {mqttHelper.ClientId}: {ex.Message}");
+                }
+            }
         }
 
     }
@@ -263,14 +342,22 @@ class Programa
             BrokerHost = host,
             BrokerPort = brokerPort,
             ClientId = $"greenhouse-publisher-{id_cliente}",
-            Username = id_cliente.ToString(),
-            Password = "123456",
+            Username = useSharedCredentials ? user : id_cliente.ToString(),
+            Password = useSharedCredentials ? pass : clientPassword,
             KeepAliveSeconds = 3,
         };
 
         // Crear helper MQTT y conectar al broker
         MqttClientHelper mqttHelper = new(settings);
-        await mqttHelper.ConnectAsync(id_cliente);
+        try
+        {
+            await mqttHelper.ConnectAsync(id_cliente);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MQTT] Conexion fallida para {settings.ClientId}: {ex.Message}");
+            return null;
+        }
 
         if (!mqttHelper.IsConnected)
         {

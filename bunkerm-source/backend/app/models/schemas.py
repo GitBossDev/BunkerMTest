@@ -143,6 +143,76 @@ class PublishRequest(BaseModel):
     retain: bool = False
 
 
+class NotificationChannelUpsert(BaseModel):
+    id: Optional[int] = None
+    channelKey: str = Field(..., min_length=1, max_length=64)
+    channelType: str = Field(..., min_length=1, max_length=32)
+    displayName: str = Field(..., min_length=1, max_length=128)
+    enabled: bool = True
+    config: Dict[str, Any] = Field(default_factory=dict)
+    secretRef: Optional[str] = Field(default=None, max_length=256)
+
+    @field_validator("channelKey")
+    @classmethod
+    def channel_key_safe(cls, v: str) -> str:
+        if not _re.fullmatch(r"[A-Za-z0-9_.\-]+", v):
+            raise ValueError(
+                "Channel key may only contain letters, numbers, hyphens, underscores, and dots"
+            )
+        return v
+
+    @field_validator("channelType")
+    @classmethod
+    def channel_type_supported(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in {"email", "webhook"}:
+            raise ValueError("Channel type must be 'email' or 'webhook'")
+        return normalized
+
+
+class IPWhitelistEntry(BaseModel):
+    id: str = Field(..., min_length=1, max_length=64)
+    cidr: str = Field(..., min_length=1, max_length=64)
+    scope: str = Field(..., min_length=1, max_length=32)
+    description: str = Field(default="", max_length=256)
+    enabled: bool = True
+
+    @field_validator("id")
+    @classmethod
+    def whitelist_entry_id_safe(cls, v: str) -> str:
+        if not _re.fullmatch(r"[A-Za-z0-9_.\-]+", v):
+            raise ValueError(
+                "Whitelist entry id may only contain letters, numbers, hyphens, underscores, and dots"
+            )
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def whitelist_scope_supported(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in {"api_admin", "mqtt_clients"}:
+            raise ValueError("Whitelist scope must be 'api_admin' or 'mqtt_clients'")
+        return normalized
+
+
+class IPWhitelistPolicyUpsert(BaseModel):
+    mode: str = Field(default="disabled", min_length=1, max_length=16)
+    trustedProxies: List[str] = Field(default_factory=list)
+    defaultAction: Dict[str, str] = Field(
+        default_factory=lambda: {"api_admin": "allow", "mqtt_clients": "allow"}
+    )
+    entries: List[IPWhitelistEntry] = Field(default_factory=list)
+    lastUpdatedBy: Optional[Dict[str, Any]] = None
+
+    @field_validator("mode")
+    @classmethod
+    def whitelist_mode_supported(cls, v: str) -> str:
+        normalized = v.strip().lower()
+        if normalized not in {"disabled", "audit", "enforce"}:
+            raise ValueError("Whitelist mode must be 'disabled', 'audit' or 'enforce'")
+        return normalized
+
+
 # ---------------------------------------------------------------------------
 # Config — Mosquitto listeners y TLS
 # ---------------------------------------------------------------------------
