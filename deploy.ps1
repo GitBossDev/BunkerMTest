@@ -9,6 +9,9 @@ param(
     [string]$Action = 'setup',
 
     [Parameter(Mandatory=$false)]
+    [string]$ImageTag = 'latest',
+
+    [Parameter(Mandatory=$false)]
     [ValidateSet('kind', 'compose', 'both')]
     [string]$Runtime = 'kind',
     

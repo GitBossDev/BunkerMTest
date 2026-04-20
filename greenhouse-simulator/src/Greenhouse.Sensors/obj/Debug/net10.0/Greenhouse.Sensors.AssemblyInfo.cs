@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Greenhouse.Sensors")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6a3088f076c75c77060f63705b793a9bcffa9c69")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+80aa20f4bd73b29fa81cf6f2cfc81c235bba882f")]
 [assembly: System.Reflection.AssemblyProductAttribute("Greenhouse.Sensors")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Greenhouse.Sensors")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
