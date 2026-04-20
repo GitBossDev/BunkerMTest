@@ -259,6 +259,64 @@ async def test_topic_history_returns_persisted_messages(client, monkeypatch):
     assert body["history"][0]["value"] == "Desconectado"
 
 
+async def test_topics_prefers_persisted_storage(client, monkeypatch):
+    """El endpoint /topics debe priorizar datos persistidos en base de datos."""
+
+    persisted_topics = [
+        {
+            "topic": "plant/line1/temp",
+            "value": "22.5",
+            "timestamp": "2026-04-20T10:00:00Z",
+            "count": 7,
+            "retained": False,
+            "qos": 1,
+        }
+    ]
+
+    monkeypatch.setattr(monitor_router.topic_history_storage, "get_latest_topics", lambda limit=5000: persisted_topics)
+    monkeypatch.setattr(monitor_svc.topic_store, "get_all", lambda: [{"topic": "volatile/topic"}])
+
+    resp = await client.get("/api/v1/monitor/topics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topics"] == persisted_topics
+
+
+async def test_topics_fallback_to_memory_when_persistence_is_empty(client, monkeypatch):
+    """Si la persistencia no devuelve tópicos, el endpoint cae al store en memoria."""
+
+    memory_topics = [
+        {
+            "topic": "runtime/topic",
+            "value": "ok",
+            "timestamp": "2026-04-20T10:01:00Z",
+            "count": 1,
+            "retained": False,
+            "qos": 0,
+        }
+    ]
+
+    monkeypatch.setattr(monitor_router.topic_history_storage, "get_latest_topics", lambda limit=5000: [])
+    monkeypatch.setattr(monitor_svc.topic_store, "get_all", lambda: memory_topics)
+
+    resp = await client.get("/api/v1/monitor/topics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topics"] == memory_topics
+
+
+async def test_topics_db_source_does_not_fallback_to_memory(client, monkeypatch):
+    """Con source=db, el endpoint no debe usar fallback en memoria."""
+
+    monkeypatch.setattr(monitor_router.topic_history_storage, "get_latest_topics", lambda limit=5000: [])
+    monkeypatch.setattr(monitor_svc.topic_store, "get_all", lambda: [{"topic": "solo/memoria"}])
+
+    resp = await client.get("/api/v1/monitor/topics", params={"source": "db"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topics"] == []
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/health  (endpoint global del servidor unificado)
 # ---------------------------------------------------------------------------

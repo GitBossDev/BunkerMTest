@@ -459,7 +459,8 @@ class TopicStore:
                 event_ts=event_ts,
             )
         except Exception as exc:
-            logger.warning("Topic history storage unavailable for %s: %s", topic, exc)
+            # Never block live MQTT topic rendering if history persistence fails.
+            logger.warning("Topic history persistence failed for topic %s: %s", topic, exc)
 
     def get_all(self) -> list:
         with self._lock:
