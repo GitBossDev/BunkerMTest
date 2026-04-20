@@ -156,6 +156,131 @@ function Get-KustomizeBootstrapSecretSeedRequirements {
     )
 }
 
+function Get-EnvValueFromFile {
+    param(
+        [string]$EnvPath,
+        [string]$Key,
+        [string]$DefaultValue = ''
+    )
+
+    if (-not (Test-Path $EnvPath)) {
+        return $DefaultValue
+    }
+
+    foreach ($rawLine in Get-Content $EnvPath) {
+        $line = $rawLine.Trim()
+        if (-not $line -or $line.StartsWith('#')) {
+            continue
+        }
+
+        $parts = $line.Split('=', 2)
+        if ($parts.Count -ne 2) {
+            continue
+        }
+
+        if ($parts[0].Trim() -eq $Key) {
+            return $parts[1]
+        }
+    }
+
+    return $DefaultValue
+}
+
+function New-SelfSignedTlsSeedFiles {
+    param(
+        [string]$SecretsDirectory,
+        [string]$CaPath,
+        [string]$ServerCertPath,
+        [string]$ServerKeyPath
+    )
+
+    $opensslCommand = Get-Command openssl -ErrorAction SilentlyContinue
+    if (-not $opensslCommand) {
+        return $false
+    }
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $opensslCommand.Source req -x509 -nodes -newkey rsa:2048 -sha256 -days 3650 -subj '/CN=bhm-mosquitto-local' -addext 'subjectAltName=DNS:localhost,DNS:mosquitto,IP:127.0.0.1' -keyout $ServerKeyPath -out $ServerCertPath 2>&1 | Out-Null
+    $opensslExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($opensslExitCode -ne 0) {
+        return $false
+    }
+
+    if (-not (Test-Path $CaPath)) {
+        Copy-Item -Path $ServerCertPath -Destination $CaPath -Force
+    }
+
+    return $true
+}
+
+function Ensure-KustomizeBootstrapSeedFiles {
+    param(
+        [string]$BaseDirectory,
+        [string]$EnvFile
+    )
+
+    $secretsDirectory = Join-Path $BaseDirectory 'secrets'
+    New-Item -ItemType Directory -Path $secretsDirectory -Force | Out-Null
+
+    $passwdPath = Join-Path $secretsDirectory 'mosquitto_passwd'
+    $caPath = Join-Path $secretsDirectory 'ca.crt'
+    $serverCertPath = Join-Path $secretsDirectory 'server.crt'
+    $serverKeyPath = Join-Path $secretsDirectory 'server.key'
+
+    if (-not (Test-Path $passwdPath)) {
+        $mqttUsername = Get-EnvValueFromFile -EnvPath $EnvFile -Key 'MQTT_USERNAME' -DefaultValue 'admin'
+        $mqttPassword = Get-EnvValueFromFile -EnvPath $EnvFile -Key 'MQTT_PASSWORD'
+        $passwdSeedCreated = $false
+
+        if ($mqttPassword) {
+            $opensslCommand = Get-Command openssl -ErrorAction SilentlyContinue
+            if ($opensslCommand) {
+                $savedPref = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                $hashedPassword = (& $opensslCommand.Source passwd -6 $mqttPassword 2>&1 | Select-Object -First 1)
+                $hashExitCode = $LASTEXITCODE
+                $ErrorActionPreference = $savedPref
+                if ($hashExitCode -eq 0 -and $hashedPassword) {
+                    Set-Content -Path $passwdPath -Value "$mqttUsername`:$hashedPassword" -Encoding ASCII
+                    $passwdSeedCreated = $true
+                }
+            }
+        }
+
+        if (-not $passwdSeedCreated) {
+            # Empty seed file keeps bootstrap deterministic when a hasher is unavailable.
+            Set-Content -Path $passwdPath -Value '' -Encoding ASCII
+            Write-Host '[WARN] No se pudo generar hash para mosquitto_passwd automaticamente; se usara un seed vacio.' -ForegroundColor Yellow
+        }
+    }
+
+    $tlsMissing = @($caPath, $serverCertPath, $serverKeyPath | Where-Object { -not (Test-Path $_) })
+    if ($tlsMissing.Count -gt 0) {
+        $tlsGenerated = New-SelfSignedTlsSeedFiles `
+            -SecretsDirectory $secretsDirectory `
+            -CaPath $caPath `
+            -ServerCertPath $serverCertPath `
+            -ServerKeyPath $serverKeyPath
+
+        if (-not $tlsGenerated) {
+            if (-not (Test-Path $serverKeyPath)) {
+                Set-Content -Path $serverKeyPath -Value '-----BEGIN PRIVATE KEY-----`n-----END PRIVATE KEY-----' -Encoding ASCII
+            }
+            if (-not (Test-Path $serverCertPath)) {
+                Set-Content -Path $serverCertPath -Value '-----BEGIN CERTIFICATE-----`n-----END CERTIFICATE-----' -Encoding ASCII
+            }
+            if (-not (Test-Path $caPath)) {
+                Copy-Item -Path $serverCertPath -Destination $caPath -Force
+            }
+
+            Write-Host '[WARN] OpenSSL no disponible para generar certificados de bootstrap; se usaran placeholders de laboratorio.' -ForegroundColor Yellow
+        }
+    }
+}
+
 function Assert-KustomizeBootstrapSeedFiles {
     param(
         [string]$BaseDirectory
@@ -488,7 +613,11 @@ try {
         -MqttWsHostPort $MqttWsHostPort
     $resolvedKustomizeBase = New-KustomizeBaseWithFrontendUrl `
         -BaseDirectory (Join-Path (Split-Path $PSScriptRoot -Parent) 'base') `
-        -FrontendUrl $frontendUrl
+        -FrontendUrl $frontendUrl `
+        -BhmImage $BhmImage `
+        -MosquittoImage $MosquittoImage `
+        -WaterPlantSimulatorImage $WaterPlantSimulatorImage
+    Ensure-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase -EnvFile $EnvFile
     Assert-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase
 
     $clusterExists = & $kindExecutable get clusters | Where-Object { $_ -eq $ClusterName }
