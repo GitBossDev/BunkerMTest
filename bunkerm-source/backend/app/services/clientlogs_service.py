@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 _AUTO_CLIENT_RE = re.compile(
     r"^auto-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
 )
+_GREENHOUSE_CLIENT_RE = re.compile(r"^greenhouse-(?:publisher|subscriber)-(\d+)$")
 
 _MOSQUITTO_LOG_KEYWORDS = frozenset([
     "New", "Sending", "Received", "Client", "Warning", "Config",
@@ -115,6 +116,7 @@ class MQTTMonitor:
         self._last_connection_info: Dict[str, dict] = {}
         self._last_publish_ts: Dict[str, float] = {}
         self._client_usernames: Dict[str, str] = {}
+        self._pending_subscribe_client: Optional[Tuple[str, str]] = None
 
     # ── helpers ──────────────────────────────────────────────────────────────
 
@@ -124,8 +126,35 @@ class MQTTMonitor:
             ev = self.connected_clients[client_id]
             return ev.username, ev.protocol_level, ev.ip_address, ev.port, ev.clean_session, ev.keep_alive
         if client_id in self._client_usernames:
-            return self._client_usernames[client_id], "MQTT vunknown", "unknown", 0, False, 0
+            username = self._client_usernames[client_id]
+            last_conn = self._last_connection_info.get(username, {})
+            return (
+                username,
+                "MQTT vunknown",
+                last_conn.get("ip_address", "unknown"),
+                last_conn.get("port", 0),
+                False,
+                0,
+            )
+        inferred_username = self._infer_username_from_client_id(client_id)
+        if inferred_username:
+            self._client_usernames[client_id] = inferred_username
+            last_conn = self._last_connection_info.get(inferred_username, {})
+            return (
+                inferred_username,
+                "MQTT vunknown",
+                last_conn.get("ip_address", "unknown"),
+                last_conn.get("port", 0),
+                False,
+                0,
+            )
         return "unknown", "MQTT vunknown", "unknown", 0, False, 0
+
+    def _infer_username_from_client_id(self, client_id: str) -> Optional[str]:
+        match = _GREENHOUSE_CLIENT_RE.match(client_id)
+        if not match:
+            return None
+        return str(int(match.group(1)))
 
     def _is_admin(self, username: str) -> bool:
         return username == os.getenv("MOSQUITTO_ADMIN_USERNAME", settings.mqtt_username)
@@ -267,21 +296,44 @@ class MQTTMonitor:
         )
 
     def parse_subscription_log(self, log_line: str) -> Optional[MQTTEvent]:
+        header_match = re.match(_TS_CAPTURE + r": Received SUBSCRIBE from (\S+)$", log_line)
+        if header_match:
+            ts_str, client_id = header_match.groups()
+            self._pending_subscribe_client = (ts_str, client_id)
+            return None
+
+        detail_match = re.match(_TS_CAPTURE + r":\s+(.+) \(QoS (\d)\)$", log_line)
+        if detail_match and self._pending_subscribe_client is not None:
+            detail_ts, topic, qos_str = detail_match.groups()
+            header_ts, client_id = self._pending_subscribe_client
+            if detail_ts == header_ts:
+                return self._record_subscribe_event(header_ts, client_id, qos_str, topic)
+
         if ": " not in log_line:
+            self._pending_subscribe_client = None
             return None
         ts_str, content = log_line.split(": ", 1)
         if not _TS_RE.match(ts_str):
+            self._pending_subscribe_client = None
             return None
         parts = content.split()
         if len(parts) != 3:
+            if not content.startswith("Received SUBSCRIBE from "):
+                self._pending_subscribe_client = None
             return None
         client_id, qos_str, topic = parts
         if qos_str not in ("0", "1", "2"):
+            self._pending_subscribe_client = None
             return None
         if client_id in _MOSQUITTO_LOG_KEYWORDS:
+            self._pending_subscribe_client = None
             return None
+        return self._record_subscribe_event(ts_str, client_id, qos_str, topic)
+
+    def _record_subscribe_event(self, ts_str: str, client_id: str, qos_str: str, topic: str) -> Optional[MQTTEvent]:
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
+            self._pending_subscribe_client = None
             return None
         event_ts = _ts_to_epoch(ts_str)
         event = MQTTEvent(
@@ -303,6 +355,7 @@ class MQTTMonitor:
         self._subscription_counts[topic] = self._subscription_counts.get(topic, 0) + 1
         self._last_seen[client_id] = event_ts
         self._subscriber_clients_seen[self._activity_client_key(client_id, username)] = event_ts
+        self._pending_subscribe_client = None
         return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -354,7 +407,6 @@ class MQTTMonitor:
             or ": Denied PUBLISH from " in line
             or ": Sending SUBACK to "  in line
             or ": Sending PUBACK to "  in line
-            or ": Received SUBSCRIBE from " in line
             or ": Received PINGREQ from "  in line
             or ": Sending PINGRESP to "   in line
         ):

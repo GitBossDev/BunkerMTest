@@ -59,10 +59,14 @@ $script:CE = "docker"    # Container Engine: docker o podman
 $script:CCE = "docker-compose"  # Compose Engine: docker-compose, docker compose, o podman compose
 $script:KindExecutable = $null
 $script:KubectlExecutable = $null
+$script:ImageTag = 'latest'
 $script:BhmPlatformImageName = 'bunkermtest-bunkerm'
 $script:MosquittoImageName = 'bunkermtest-mosquitto'
 $script:GreenhouseSimulatorImageName = 'greenhouse-simulator'
-$script:KindImages = @("$($script:BhmPlatformImageName):$ImageTag", "$($script:MosquittoImageName):$ImageTag")
+$script:KindImages = @(
+    "$($script:BhmPlatformImageName):$($script:ImageTag)",
+    "$($script:MosquittoImageName):$($script:ImageTag)"
+)
 $script:KindWebBaseUrl = "http://localhost:$KindWebHostPort"
 $script:KindKubectlContext = "kind-$KindClusterName"
 $script:KindPortForwardDir = Join-Path $PSScriptRoot 'tmp\kind-port-forward'

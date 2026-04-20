@@ -57,9 +57,17 @@ def _connected_non_admin_events() -> Dict[str, MQTTEvent]:
 
 
 def build_activity_summary(window_seconds: int = 600) -> Dict[str, int]:
-    """Count currently connected non-admin clients with effective subscribe/publish capability."""
-    active_clients = _connected_non_admin_events()
+    """Count active non-admin clients with effective subscribe/publish capability."""
+    active_clients = {
+        client_id: event
+        for client_id, event in _active_client_events(window_seconds=window_seconds).items()
+        if not mqtt_monitor._is_admin(event.username)
+    }
     capability_map = _build_client_capability_map()
+    raw_activity = mqtt_monitor.get_activity_summary(window_seconds=window_seconds)
+
+    if not capability_map:
+        return raw_activity
 
     subscribed_clients = 0
     publisher_clients = 0
@@ -75,6 +83,11 @@ def build_activity_summary(window_seconds: int = 600) -> Dict[str, int]:
             subscribed_clients += 1
         if caps["publish"]:
             publisher_clients += 1
+
+    if subscribed_clients == 0 and raw_activity["subscribed_clients"] > 0:
+        subscribed_clients = raw_activity["subscribed_clients"]
+    if publisher_clients == 0 and raw_activity["publisher_clients"] > 0:
+        publisher_clients = raw_activity["publisher_clients"]
 
     return {
         "subscribed_clients": subscribed_clients,
