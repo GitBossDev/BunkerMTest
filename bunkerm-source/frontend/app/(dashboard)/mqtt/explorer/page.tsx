@@ -417,7 +417,7 @@ export default function MqttExplorerPage() {
   const fetchTopics = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
     try {
-      const data = await monitorApi.getTopics()
+      const data = await monitorApi.getTopics('db')
       setTopics(data.topics ?? [])
     } catch {
       toast.error('Failed to fetch MQTT topics')
@@ -518,7 +518,7 @@ export default function MqttExplorerPage() {
         </Badge>
       </div>
 
-      {/* Topic tree */}
+      {/* Topic tree usando React*/}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">Topic Tree</CardTitle>

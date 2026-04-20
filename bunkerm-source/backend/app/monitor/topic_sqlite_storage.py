@@ -242,6 +242,53 @@ class SQLiteTopicHistoryStorage:
             "total": int(total_row["total"] if total_row else 0),
         }
 
+    def get_latest_topics(self, limit: int = 5000) -> list[dict[str, Any]]:
+        clamped_limit = max(1, min(limit, 10000))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT tr.topic,
+                       tr.last_seen_at,
+                       latest.payload_text,
+                       latest.event_ts,
+                       latest.qos,
+                       latest.retained,
+                       COALESCE(stats.message_count, 0) AS message_count
+                FROM topic_registry tr
+                LEFT JOIN (
+                    SELECT tme.topic_id, tme.payload_text, tme.event_ts, tme.qos, tme.retained
+                    FROM topic_message_events tme
+                    JOIN (
+                        SELECT topic_id, MAX(id) AS latest_id
+                        FROM topic_message_events
+                        GROUP BY topic_id
+                    ) latest_idx
+                      ON latest_idx.topic_id = tme.topic_id AND latest_idx.latest_id = tme.id
+                ) latest ON latest.topic_id = tr.id
+                LEFT JOIN (
+                    SELECT topic_id, COUNT(*) AS message_count
+                    FROM topic_message_events
+                    GROUP BY topic_id
+                ) stats ON stats.topic_id = tr.id
+                WHERE tr.kind = 'user'
+                ORDER BY tr.topic ASC
+                LIMIT ?
+                """,
+                (clamped_limit,),
+            ).fetchall()
+
+        return [
+            {
+                "topic": row["topic"],
+                "value": row["payload_text"] or "",
+                "timestamp": row["event_ts"] or row["last_seen_at"] or "",
+                "count": int(row["message_count"] or 0),
+                "retained": bool(row["retained"]) if row["retained"] is not None else False,
+                "qos": int(row["qos"] or 0),
+            }
+            for row in rows
+        ]
+
     def get_top_published(self, limit: int = 15, period: str = "7d") -> Dict[str, Any]:
         minutes = PERIODS.get(period, PERIODS["7d"])
         cutoff = _iso_utc(_utc_now() - timedelta(minutes=minutes))

@@ -310,7 +310,8 @@ export const monitorApi = {
     mosquitto_cpu_limit_cores?: number | null
     resource_timestamp?: string | null
   }>(buildUrl(MONITOR_API_URL, '/stats/resources')),
-  getTopics: () => request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, '/topics')),
+  getTopics: (source: 'auto' | 'db' = 'auto') =>
+    request<{ topics: MqttTopic[] }>(buildUrl(MONITOR_API_URL, `/topics?source=${source}`)),
   getTopicHistory: (topic: string, limit = 120) =>
     request<{ topic: string; history: import('@/types').MqttTopicHistoryMessage[]; total: number }>(
       buildUrl(MONITOR_API_URL, `/topics/${encodeURIComponent(topic)}/history?limit=${limit}`)

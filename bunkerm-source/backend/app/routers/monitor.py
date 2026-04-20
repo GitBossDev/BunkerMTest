@@ -229,7 +229,18 @@ async def get_qos_stats(api_key: str = Security(get_api_key)):
 # ---------------------------------------------------------------------------
 
 @router.get("/topics")
-async def get_topics(api_key: str = Security(get_api_key)):
+async def get_topics(source: str = "auto", api_key: str = Security(get_api_key)):
+    # source=db fuerza la lectura desde PostgreSQL para no depender de memoria.
+    try:
+        topics = topic_history_storage.get_latest_topics(limit=5000)
+        if source == "db":
+            return {"topics": topics}
+        if topics:
+            return {"topics": topics}
+    except Exception as exc:
+        logger.warning("No se pudo leer topic_registry/topic_message_events: %s", exc)
+        if source == "db":
+            return {"topics": []}
     return {"topics": topic_store.get_all()}
 
 

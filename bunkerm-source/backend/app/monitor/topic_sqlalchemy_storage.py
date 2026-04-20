@@ -182,6 +182,49 @@ class SQLAlchemyTopicHistoryStorage:
             "total": int(total or 0),
         }
 
+    def get_latest_topics(self, limit: int = 5000) -> list[dict[str, Any]]:
+        clamped_limit = max(1, min(limit, 10000))
+        latest_events_subq = (
+            select(
+                TopicMessageEvent.topic_id.label("topic_id"),
+                func.max(TopicMessageEvent.id).label("latest_event_id"),
+                func.count(TopicMessageEvent.id).label("message_count"),
+            )
+            .group_by(TopicMessageEvent.topic_id)
+            .subquery()
+        )
+
+        with self._session_factory() as session:
+            rows = session.execute(
+                select(
+                    TopicRegistry.topic,
+                    TopicRegistry.last_seen_at,
+                    TopicMessageEvent.payload_text,
+                    TopicMessageEvent.event_ts,
+                    TopicMessageEvent.qos,
+                    TopicMessageEvent.retained,
+                    latest_events_subq.c.message_count,
+                )
+                .select_from(TopicRegistry)
+                .outerjoin(latest_events_subq, latest_events_subq.c.topic_id == TopicRegistry.id)
+                .outerjoin(TopicMessageEvent, TopicMessageEvent.id == latest_events_subq.c.latest_event_id)
+                .where(TopicRegistry.kind == "user")
+                .order_by(TopicRegistry.topic.asc())
+                .limit(clamped_limit)
+            ).all()
+
+        return [
+            {
+                "topic": row.topic,
+                "value": row.payload_text or "",
+                "timestamp": iso_utc(row.event_ts or row.last_seen_at) or "",
+                "count": int(row.message_count or 0),
+                "retained": bool(row.retained) if row.retained is not None else False,
+                "qos": int(row.qos or 0),
+            }
+            for row in rows
+        ]
+
     def get_top_published(self, limit: int = 15, period: str = "7d") -> Dict[str, Any]:
         minutes = PERIODS.get(period, PERIODS["7d"])
         cutoff = normalize_datetime(utc_now() - timedelta(minutes=minutes))
