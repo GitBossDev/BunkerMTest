@@ -10,6 +10,9 @@ spec:
     - name: mqtt
       port: 1900
       targetPort: mqtt
+    - name: mqtt-system
+      port: 1901
+      targetPort: mqtt-system
     - name: websocket
       port: 9001
       targetPort: websocket
@@ -53,8 +56,8 @@ spec:
       terminationGracePeriodSeconds: 30
       initContainers:
         - name: broker-secrets-bootstrap
-          image: docker.io/library/busybox:1.36
-          imagePullPolicy: IfNotPresent
+          image: localhost/bunkermtest-mosquitto:latest
+          imagePullPolicy: Never
           command:
             - /bin/sh
             - -c
@@ -98,6 +101,8 @@ spec:
           ports:
             - name: mqtt
               containerPort: 1900
+            - name: mqtt-system
+              containerPort: 1901
             - name: websocket
               containerPort: 9001
           volumeMounts:

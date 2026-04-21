@@ -58,6 +58,26 @@ async def test_stats_with_valid_params(client):
     assert "publisher_clients" in body
 
 
+async def test_stats_marks_broker_reachable_while_monitor_reconnects(client, monkeypatch):
+    """Si el monitor pierde su sesion MQTT pero el socket del broker sigue vivo, la API no debe marcar al broker como caido."""
+    original_connected = monitor_svc.mqtt_stats._is_connected
+
+    monkeypatch.setattr(monitor_svc, "is_broker_reachable", lambda force_refresh=False: True)
+    monitor_svc.mqtt_stats._is_connected = False
+
+    try:
+        params = {"nonce": str(uuid.uuid4()), "timestamp": time.time()}
+        resp = await client.get("/api/v1/monitor/stats", params=params)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["mqtt_connected"] is False
+        assert body["broker_reachable"] is True
+        assert body["monitor_reconnecting"] is True
+        assert "reconnecting" in body["connection_error"].lower()
+    finally:
+        monitor_svc.mqtt_stats._is_connected = original_connected
+
+
 async def test_stats_sanitizes_disconnected_counter(client, monkeypatch):
     """Disconnected debe derivarse desde total-connected si el contador raw se corrompe."""
     original = {
@@ -75,18 +95,19 @@ async def test_stats_sanitizes_disconnected_counter(client, monkeypatch):
     monitor_svc.mqtt_stats.clients_maximum = 11
     monitor_svc.mqtt_stats.clients_disconnected = 4294967293
     monitor_svc.mqtt_stats.clients_expired = 2
-    monitor_svc.mqtt_stats.subscriptions = 2
+    monitor_svc.mqtt_stats.subscriptions = 7
 
     try:
         params = {"nonce": str(uuid.uuid4()), "timestamp": time.time()}
         resp = await client.get("/api/v1/monitor/stats", params=params)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["total_connected_clients"] == 5
-        assert body["clients_total"] == 10
-        assert body["clients_maximum"] == 10
+        assert body["total_connected_clients"] == 6
+        assert body["clients_total"] == 11
+        assert body["clients_maximum"] == 11
         assert body["clients_disconnected"] == 5
         assert body["clients_expired"] == 2
+        assert body["total_subscriptions"] == 7
         assert body["client_max_connections"] == 10000
     finally:
         monitor_svc.mqtt_stats.connected_clients = original["connected_clients"]
@@ -95,6 +116,59 @@ async def test_stats_sanitizes_disconnected_counter(client, monkeypatch):
         monitor_svc.mqtt_stats.clients_disconnected = original["clients_disconnected"]
         monitor_svc.mqtt_stats.clients_expired = original["clients_expired"]
         monitor_svc.mqtt_stats.subscriptions = original["subscriptions"]
+
+
+async def test_stats_never_reports_max_below_connected(client):
+    """Aunque el broker devuelva un maximo corrupto, la API no debe mostrar max concurrent por debajo de connected."""
+    original = {
+        "connected_clients": monitor_svc.mqtt_stats.connected_clients,
+        "clients_total": monitor_svc.mqtt_stats.clients_total,
+        "clients_maximum": monitor_svc.mqtt_stats.clients_maximum,
+    }
+
+    monitor_svc.mqtt_stats.connected_clients = 3
+    monitor_svc.mqtt_stats.clients_total = 3
+    monitor_svc.mqtt_stats.clients_maximum = 2
+
+    try:
+        params = {"nonce": str(uuid.uuid4()), "timestamp": time.time()}
+        resp = await client.get("/api/v1/monitor/stats", params=params)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_connected_clients"] == 3
+        assert body["clients_total"] == 3
+        assert body["clients_maximum"] == 3
+        assert body["clients_disconnected"] == 0
+    finally:
+        monitor_svc.mqtt_stats.connected_clients = original["connected_clients"]
+        monitor_svc.mqtt_stats.clients_total = original["clients_total"]
+        monitor_svc.mqtt_stats.clients_maximum = original["clients_maximum"]
+
+
+async def test_stats_counts_single_internal_admin_connection_naturally(client):
+    """Con un solo cliente interno admin, la API no debe aplicar descuentos artificiales sobre el conteo del broker."""
+    original = {
+        "connected_clients": monitor_svc.mqtt_stats.connected_clients,
+        "clients_total": monitor_svc.mqtt_stats.clients_total,
+        "clients_maximum": monitor_svc.mqtt_stats.clients_maximum,
+    }
+
+    monitor_svc.mqtt_stats.connected_clients = 500
+    monitor_svc.mqtt_stats.clients_total = 500
+    monitor_svc.mqtt_stats.clients_maximum = 500
+
+    try:
+        params = {"nonce": str(uuid.uuid4()), "timestamp": time.time()}
+        resp = await client.get("/api/v1/monitor/stats", params=params)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_connected_clients"] == 500
+        assert body["clients_total"] == 500
+        assert body["clients_maximum"] == 500
+    finally:
+        monitor_svc.mqtt_stats.connected_clients = original["connected_clients"]
+        monitor_svc.mqtt_stats.clients_total = original["clients_total"]
+        monitor_svc.mqtt_stats.clients_maximum = original["clients_maximum"]
 
 
 async def test_stats_requires_auth(raw_client):

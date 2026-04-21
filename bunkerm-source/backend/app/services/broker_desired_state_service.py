@@ -62,6 +62,25 @@ _OBSERVED_DYNSEC_CACHE: Dict[str, Any] = {
     "index": None,
     "capability_map": None,
 }
+_MANAGED_MOSQUITTO_CONFIG_DEFAULTS: Dict[str, Any] = {
+    "plugin": "/usr/lib/mosquitto_dynamic_security.so",
+    "plugin_opt_config_file": "/var/lib/mosquitto/dynamic-security.json",
+    "include_dir": "/etc/mosquitto/conf.d",
+    "connection_messages": "true",
+    "persistence": "true",
+    "persistence_location": "/var/lib/mosquitto",
+    "persistence_file": "mosquitto.db",
+    "autosave_interval": "300",
+    "log_timestamp": "true",
+    "log_timestamp_format": "%Y-%m-%dT%H:%M:%S",
+}
+_MANAGED_MOSQUITTO_INTERNAL_LISTENER: Dict[str, Any] = {
+    "port": 1901,
+    "bind_address": "",
+    "per_listener_settings": False,
+    "max_connections": 16,
+    "protocol": None,
+}
 
 
 def _utcnow() -> datetime:
@@ -225,14 +244,20 @@ def _build_capability_map_from_snapshot(data: Dict[str, Any]) -> Dict[str, Dict[
         for group_name in client_groups:
             effective_roles.update(group_roles.get(group_name, set()))
 
-        can_publish = default_publish
-        can_subscribe = default_subscribe
+        can_publish = False
+        can_subscribe = False
+        has_explicit_role_caps = False
         for role_name in effective_roles:
             caps = role_caps.get(role_name)
             if not caps:
                 continue
+            has_explicit_role_caps = True
             can_publish = can_publish or caps["publish"]
             can_subscribe = can_subscribe or caps["subscribe"]
+
+        if not has_explicit_role_caps:
+            can_publish = default_publish
+            can_subscribe = default_subscribe
 
         capability_map[username] = {
             "publish": can_publish,
@@ -554,6 +579,69 @@ def _normalize_listener_entries(raw_listeners: List[Any]) -> List[Dict[str, Any]
     return sorted(entries, key=lambda item: (item["port"], item["bind_address"], item["protocol"] or ""))
 
 
+def _listener_identity(listener: Dict[str, Any]) -> tuple[int, str, str]:
+    return (
+        int(listener.get("port", 0)),
+        str(listener.get("bind_address") or ""),
+        str(listener.get("protocol") or ""),
+    )
+
+
+def _merge_mosquitto_config_defaults(config_data: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(_MANAGED_MOSQUITTO_CONFIG_DEFAULTS)
+    merged.update(config_data)
+    return {key: merged[key] for key in sorted(merged.keys())}
+
+
+def _merge_listener_payload(
+    current_listeners: List[Dict[str, Any]],
+    requested_listeners: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    merged: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+
+    for listener in current_listeners:
+        merged[_listener_identity(listener)] = dict(listener)
+
+    for listener in requested_listeners:
+        merged[_listener_identity(listener)] = dict(listener)
+
+    managed_listener = dict(_MANAGED_MOSQUITTO_INTERNAL_LISTENER)
+    merged[_listener_identity(managed_listener)] = managed_listener
+
+    return sorted(
+        merged.values(),
+        key=lambda item: (item["port"], item["bind_address"], item["protocol"] or ""),
+    )
+
+
+def merge_mosquitto_config_payload(
+    current_payload: Dict[str, Any] | None,
+    requested_payload: Dict[str, Any] | None,
+) -> Dict[str, Any]:
+    current = current_payload or {}
+    requested = requested_payload or {}
+
+    current_config = current.get("config") if isinstance(current.get("config"), dict) else {}
+    requested_config = requested.get("config") if isinstance(requested.get("config"), dict) else {}
+    merged_config = dict(current_config)
+    merged_config.update(requested_config)
+
+    current_listeners = _normalize_listener_entries(current.get("listeners", []))
+    requested_listeners = _normalize_listener_entries(requested.get("listeners", []))
+
+    merged_tls = requested.get("tls") if "tls" in requested else current.get("tls")
+    merged_max_inflight = requested.get("max_inflight_messages") if "max_inflight_messages" in requested else current.get("max_inflight_messages")
+    merged_max_queued = requested.get("max_queued_messages") if "max_queued_messages" in requested else current.get("max_queued_messages")
+
+    return {
+        "config": _merge_mosquitto_config_defaults(merged_config),
+        "listeners": _merge_listener_payload(current_listeners, requested_listeners),
+        "max_inflight_messages": merged_max_inflight,
+        "max_queued_messages": merged_max_queued,
+        "tls": merged_tls,
+    }
+
+
 def _normalize_tls_payload(raw_tls: Dict[str, Any] | None) -> Dict[str, Any] | None:
     if not raw_tls or not raw_tls.get("enabled"):
         return None
@@ -628,12 +716,12 @@ def _extract_tls_from_content(content: str) -> Dict[str, Any] | None:
 
 
 def normalize_mosquitto_config_payload(payload: Dict[str, Any] | None) -> Dict[str, Any]:
-    source = payload or {}
+    source = merge_mosquitto_config_payload(None, payload)
     config_data = source.get("config")
     if not isinstance(config_data, dict):
         raise ValueError("Mosquitto desired state requires a config object")
 
-    normalized_config = {key: config_data[key] for key in sorted(config_data.keys())}
+    normalized_config = _merge_mosquitto_config_defaults(config_data)
     listeners = _normalize_listener_entries(source.get("listeners", []))
     tls = _normalize_tls_payload(source.get("tls"))
     max_inflight = source.get("max_inflight_messages")

@@ -93,6 +93,8 @@ export interface MonitorStats {
     counts: number[]
   }
   mqtt_connected?: boolean
+  broker_reachable?: boolean
+  monitor_reconnecting?: boolean
   connection_error?: string
   // Extended client info
   clients_total?: number

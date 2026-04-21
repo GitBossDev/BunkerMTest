@@ -107,6 +107,10 @@ per_listener_settings false
 max_connections 10000
 allow_anonymous false
 
+# Internal system listener for BHM monitor/control plane
+listener 1901
+max_connections 16
+
 # WebSocket listener
 listener 9001
 protocol websockets

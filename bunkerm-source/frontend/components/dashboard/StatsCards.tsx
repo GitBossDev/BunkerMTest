@@ -26,12 +26,12 @@ export function StatsCards({ stats }: StatsCardsProps) {
           <InfoTooltip side="bottom" content={
             <>
               <p className="font-semibold text-foreground mb-1">MQTT Clients</p>
-              <TipRow label="Connected" text="Clients with an active TCP connection to the broker right now." />
+              <TipRow label="Connected" text="Clients with an active TCP connection to the broker right now, exactly as counted by the broker." />
               <TipRow label="Disconnected" text="Clients with a persistent session saved in the broker but no active connection at this moment." />
               <TipRow label="Active sessions" text="Connected + Disconnected (shown above). Disconnected clients retain a persistent session in the broker and receive queued QoS 1/2 messages upon reconnect." />
               <TipRow label="Max concurrent" text="Historical peak of simultaneously connected clients since the last broker restart." />
-              <TipRow label="Subscribed clients" text="Connected non-admin clients whose effective DynSec permissions allow subscribing right now. The admin/internal clients are intentionally excluded from this workload counter." />
-              <TipRow label="Publisher clients" text="Connected non-admin clients whose effective DynSec permissions allow publishing right now. The admin/internal clients are intentionally excluded from this workload counter." />
+              <TipRow label="Subscribed clients" text="Connected clients whose effective DynSec permissions allow subscribing right now." />
+              <TipRow label="Publisher clients" text="Connected clients whose effective DynSec permissions allow publishing right now." />
             </>
           } />
         </div>

@@ -135,6 +135,8 @@ services:
       - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
+      - MOSQUITTO_INTERNAL_HOST=mosquitto
+      - MOSQUITTO_INTERNAL_PORT=1901
       # URLs
       - FRONTEND_URL=http://localhost:2000
       - ALLOWED_ORIGINS=*
@@ -217,6 +219,8 @@ services:
       - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
+      - MOSQUITTO_INTERNAL_HOST=mosquitto
+      - MOSQUITTO_INTERNAL_PORT=1901
       - FRONTEND_URL=http://localhost:2000
       - ALLOWED_ORIGINS=*
       - ALLOWED_HOSTS=*

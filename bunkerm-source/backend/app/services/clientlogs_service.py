@@ -34,6 +34,11 @@ _AUTO_CLIENT_RE = re.compile(
     r"^auto-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$"
 )
 _GREENHOUSE_CLIENT_RE = re.compile(r"^greenhouse-(?:publisher|subscriber)-(\d+)$")
+_PLATFORM_INTERNAL_CLIENT_IDS = frozenset({
+    "bunkerm-mqtt-monitor",
+    "bunkerm-publish-monitor",
+    "mqtt-monitor",
+})
 
 _MOSQUITTO_LOG_KEYWORDS = frozenset([
     "New", "Sending", "Received", "Client", "Warning", "Config",
@@ -161,6 +166,9 @@ class MQTTMonitor:
 
     def _is_internal_auto_client(self, client_id: str) -> bool:
         return bool(_AUTO_CLIENT_RE.match(client_id))
+
+    def _is_platform_internal_client(self, client_id: str) -> bool:
+        return client_id in _PLATFORM_INTERNAL_CLIENT_IDS
 
     def _activity_client_key(self, client_id: str, username: str) -> str:
         if username and username not in ("unknown", "(broker-observed)"):
@@ -332,9 +340,6 @@ class MQTTMonitor:
 
     def _record_subscribe_event(self, ts_str: str, client_id: str, qos_str: str, topic: str) -> Optional[MQTTEvent]:
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
-        if self._is_admin(username):
-            self._pending_subscribe_client = None
-            return None
         event_ts = _ts_to_epoch(ts_str)
         event = MQTTEvent(
             id=str(uuid.uuid4()),
@@ -371,8 +376,6 @@ class MQTTMonitor:
         if any(topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
             return None
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
-        if self._is_admin(username):
-            return None
         event_ts = _ts_to_epoch(ts)
         self._publisher_clients_seen[self._activity_client_key(client_id, username)] = event_ts
         key = topic
@@ -464,12 +467,13 @@ _source_status: Dict[str, Dict[str, object]] = {
         "replayCompleted": False,
     },
     "mqttPublish": {
-        "enabled": settings.broker_publish_monitor_enabled,
+        "enabled": False,
         "running": False,
-        "broker": settings.mqtt_broker,
-        "port": settings.mqtt_port,
-        "lastError": None,
+        "broker": settings.mosquitto_internal_host,
+        "port": settings.mosquitto_internal_port,
+        "lastError": "integrated_into_primary_mqtt_monitor",
         "lastEventAt": None,
+        "mode": "integrated-primary-monitor",
     },
 }
 
@@ -612,6 +616,14 @@ def monitor_mqtt_publishes() -> None:
     Se suscribe a '#' como administrador para capturar eventos Publish adicionales
     vía MQTT (complementa el parser de logs).
     """
+    _update_source_status(
+        "mqttPublish",
+        enabled=False,
+        running=False,
+        lastError="integrated_into_primary_mqtt_monitor",
+        mode="integrated-primary-monitor",
+    )
+    return
     try:
         import paho.mqtt.client as paho_mqtt
     except ImportError:

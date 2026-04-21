@@ -151,11 +151,17 @@ def save_alert_config(cfg: dict) -> None:
 
 
 _max_connections_cache: dict = {"value": 0, "ts": 0.0}
+_broker_reachability_cache: dict = {"value": False, "ts": 0.0}
 
 
 def invalidate_max_connections_cache() -> None:
     _max_connections_cache["value"] = 0
     _max_connections_cache["ts"] = 0.0
+
+
+def invalidate_broker_reachability_cache() -> None:
+    _broker_reachability_cache["value"] = False
+    _broker_reachability_cache["ts"] = 0.0
 
 
 def read_max_connections() -> int:
@@ -179,6 +185,75 @@ def read_max_connections() -> int:
     _max_connections_cache["value"] = limit
     _max_connections_cache["ts"] = now
     return limit
+
+
+def is_broker_reachable(force_refresh: bool = False) -> bool:
+    """Comprueba si el socket MQTT del broker responde, aunque el monitor siga reconectando."""
+    now = time.time()
+    if not force_refresh and now - _broker_reachability_cache["ts"] < 3.0:
+        return bool(_broker_reachability_cache["value"])
+
+    broker_host = os.getenv("MOSQUITTO_IP", settings.mqtt_broker)
+    broker_port_raw = os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port))
+
+    try:
+        broker_port = int(broker_port_raw)
+    except (TypeError, ValueError):
+        broker_port = 0
+
+    reachable = False
+    if broker_host and broker_port > 0:
+        try:
+            with socket.create_connection((broker_host, broker_port), timeout=1.0):
+                reachable = True
+        except OSError:
+            reachable = False
+
+    _broker_reachability_cache["value"] = reachable
+    _broker_reachability_cache["ts"] = now
+    return reachable
+
+
+def _get_monitor_broker_host() -> str:
+    return os.getenv("MOSQUITTO_INTERNAL_HOST", os.getenv("MOSQUITTO_IP", settings.mosquitto_internal_host or settings.mqtt_broker))
+
+
+def _get_monitor_broker_port() -> int:
+    raw_port = os.getenv("MOSQUITTO_INTERNAL_PORT", os.getenv("MOSQUITTO_PORT", str(settings.mosquitto_internal_port or settings.mqtt_port)))
+    try:
+        return int(raw_port)
+    except (TypeError, ValueError):
+        return int(settings.mosquitto_internal_port or settings.mqtt_port)
+
+
+def _get_monitor_broker_candidates() -> list[tuple[str, int]]:
+    candidates: list[tuple[str, int]] = []
+    internal_host = _get_monitor_broker_host()
+    internal_port = _get_monitor_broker_port()
+    public_host = os.getenv("MOSQUITTO_IP", settings.mqtt_broker)
+    try:
+        public_port = int(os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port)))
+    except (TypeError, ValueError):
+        public_port = int(settings.mqtt_port)
+
+    for host, port in ((internal_host, internal_port), (public_host, public_port)):
+        candidate = (str(host or ""), int(port or 0))
+        if not candidate[0] or candidate[1] <= 0 or candidate in candidates:
+            continue
+        candidates.append(candidate)
+
+    return candidates
+
+
+def _select_monitor_broker_endpoint() -> tuple[str, int]:
+    candidates = _get_monitor_broker_candidates()
+    for host, port in candidates:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                return host, port
+        except OSError:
+            continue
+    return candidates[0] if candidates else (settings.mqtt_broker, int(settings.mqtt_port))
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +627,9 @@ class _NullMonitorHistoryStorage:
     def get_runtime_state(self) -> Dict[str, int]:
         return {}
 
+    def get_latest_tick_snapshot(self) -> Dict[str, Any]:
+        return {}
+
     def add_tick_snapshot(self, snapshot: BrokerTickSnapshot) -> None:
         return None
 
@@ -617,6 +695,7 @@ class MQTTStats:
         for _ in range(15):
             self.messages_history.append(0)
             self.published_history.append(0)
+        self._restored_from_storage = False
 
     @property
     def data_storage(self):
@@ -629,7 +708,40 @@ class MQTTStats:
                 logger.warning("Monitor history storage unavailable, using in-memory fallback: %s", exc)
                 self._data_storage = _NullMonitorHistoryStorage()
             self.last_storage_update = self._load_last_tick_time(self._data_storage)
+            self._hydrate_from_storage_snapshot(self._data_storage)
         return self._data_storage
+
+    def _hydrate_from_storage_snapshot(self, data_storage) -> None:
+        if self._restored_from_storage:
+            return
+        try:
+            snapshot = data_storage.get_latest_tick_snapshot()
+        except Exception:
+            snapshot = {}
+        if not snapshot:
+            self._restored_from_storage = True
+            return
+
+        with self._lock:
+            self.connected_clients = max(self.connected_clients, int(snapshot.get("connected_clients", 0) or 0))
+            self.clients_disconnected = max(self.clients_disconnected, int(snapshot.get("disconnected_clients", 0) or 0))
+            self.clients_total = max(self.clients_total, int(snapshot.get("active_sessions", 0) or 0))
+            self.clients_maximum = max(self.clients_maximum, int(snapshot.get("current_max_concurrent", 0) or snapshot.get("max_concurrent", 0) or 0))
+            self.subscriptions = max(self.subscriptions, int(snapshot.get("total_subscriptions", 0) or 0))
+            self.retained_messages = max(self.retained_messages, int(snapshot.get("retained_messages", 0) or 0))
+            self.messages_inflight = max(self.messages_inflight, int(snapshot.get("messages_inflight", 0) or 0))
+            self.latency_ms = float(snapshot.get("latency_ms", self.latency_ms) or self.latency_ms)
+            self.bytes_received_15min = float(snapshot.get("bytes_received_rate", self.bytes_received_15min) or self.bytes_received_15min)
+            self.bytes_sent_15min = float(snapshot.get("bytes_sent_rate", self.bytes_sent_15min) or self.bytes_sent_15min)
+            self.load_bytes_rx_1min = float(snapshot.get("bytes_received_rate", self.load_bytes_rx_1min) or self.load_bytes_rx_1min)
+            self.load_bytes_tx_1min = float(snapshot.get("bytes_sent_rate", self.load_bytes_tx_1min) or self.load_bytes_tx_1min)
+            self.load_msg_rx_1min = max(self.load_msg_rx_1min, round(int(snapshot.get("messages_received_delta", 0) or 0) / 180.0, 2))
+            self.load_msg_tx_1min = max(self.load_msg_tx_1min, round(int(snapshot.get("messages_sent_delta", 0) or 0) / 180.0, 2))
+            self.broker_uptime = str(snapshot.get("broker_uptime") or self.broker_uptime)
+            self.messages_received_total = max(self.messages_received_total, int(snapshot.get("last_messages_received_total", 0) or 0))
+            self.messages_sent = max(self.messages_sent, int(snapshot.get("last_messages_sent_total", 0) or 0))
+            self.last_broker_sample_at = str(snapshot.get("ts") or self.last_broker_sample_at)
+        self._restored_from_storage = True
 
     def _load_last_tick_time(self, data_storage) -> datetime:
         try:
@@ -656,7 +768,7 @@ class MQTTStats:
             self.last_storage_update = now
             try:
                 client_counts = self._get_client_counters_locked()
-                actual_subscriptions = max(0, self.subscriptions - 2)
+                actual_subscriptions = max(0, self.subscriptions)
                 runtime_state = self.data_storage.get_runtime_state()
                 last_rx_total = int(runtime_state.get("last_messages_received_total", 0) or 0)
                 last_tx_total = int(runtime_state.get("last_messages_sent_total", 0) or 0)
@@ -700,12 +812,14 @@ class MQTTStats:
 
     def _get_client_counters_locked(self) -> Dict[str, int]:
         """Normaliza contadores de clientes para que el dashboard sea coherente."""
-        connected = max(0, self.connected_clients - 1)
-        total = max(0, self.clients_total - 1)
-        maximum = max(0, self.clients_maximum - 1)
+        connected = max(0, self.connected_clients)
+        total = max(0, self.clients_total)
+        maximum = max(0, self.clients_maximum)
 
         if total < connected:
             total = connected
+        if maximum < connected:
+            maximum = connected
 
         # `$SYS/broker/clients/disconnected` puede desbordarse bajo carga o tras
         # tormentas de reconexión. Derivarlo desde total-connected mantiene la UI
@@ -729,8 +843,9 @@ class MQTTStats:
         self.update_message_rates()
         self.update_storage()
         with self._lock:
+            monitor_connected = self._is_connected
             client_counts = self._get_client_counters_locked()
-            actual_subscriptions = max(0, self.subscriptions - 2)
+            actual_subscriptions = max(0, self.subscriptions)
             runtime_state = self.data_storage.get_runtime_state()
             pending_messages = max(0, int(self.messages_received_total) - int(runtime_state.get("last_messages_received_total", 0) or 0))
             total_messages = self.data_storage.get_total_message_count(days=7) + pending_messages
@@ -762,10 +877,15 @@ class MQTTStats:
                 "messages_stored": self.messages_stored,
                 "messages_store_bytes": self.messages_store_bytes,
                 "latency_ms": self.latency_ms,
-                "mqtt_connected": self._is_connected,
+                "mqtt_connected": monitor_connected,
                 "client_max_connections": read_max_connections(),
                 "last_broker_sample_at": self.last_broker_sample_at,
             }
+
+        broker_reachable = monitor_connected or is_broker_reachable(force_refresh=not monitor_connected)
+        stats["broker_reachable"] = broker_reachable
+        stats["monitor_reconnecting"] = broker_reachable and not monitor_connected
+
         try:
             alert_engine.evaluate(stats, topic_store.get_all())
         except Exception as exc:
@@ -871,8 +991,7 @@ def on_message(client, userdata, msg):
 
 def connect_mqtt():
     """Conecta al broker MQTT y devuelve el cliente paho configurado."""
-    broker_host = os.getenv("MOSQUITTO_IP", settings.mqtt_broker)
-    broker_port = int(os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port)))
+    broker_host, broker_port = _select_monitor_broker_endpoint()
     username    = os.getenv("MOSQUITTO_ADMIN_USERNAME", settings.mqtt_username)
     password    = os.getenv("MOSQUITTO_ADMIN_PASSWORD", settings.mqtt_password)
 
@@ -880,6 +999,7 @@ def connect_mqtt():
         if rc == 0:
             logger.info("Conectado al broker MQTT %s:%s", broker_host, broker_port)
             mqtt_stats._is_connected = True
+            invalidate_broker_reachability_cache()
             client.subscribe([("$SYS/broker/#", 0), ("#", 0)])
         else:
             mqtt_stats._is_connected = False
@@ -887,14 +1007,19 @@ def connect_mqtt():
 
     def on_disconnect(client, userdata, disconnect_flags, reason_code=None, properties=None):
         mqtt_stats._is_connected = False
+        invalidate_broker_reachability_cache()
         rc = reason_code if reason_code is not None else disconnect_flags
         if rc != 0:
             logger.warning("Desconexión inesperada del broker MQTT (rc=%s), reconectando…", rc)
 
     try:
-        client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-    except AttributeError:
-        client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
+        client = mqtt_client.Client(
+            callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+            client_id="bunkerm-mqtt-monitor",
+            protocol=mqtt_client.MQTTv5,
+        )
+    except (AttributeError, TypeError):
+        client = mqtt_client.Client(client_id="bunkerm-mqtt-monitor", protocol=mqtt_client.MQTTv5)
 
     client.username_pw_set(username, password)
     client.on_connect = on_connect
@@ -910,5 +1035,6 @@ def connect_mqtt():
     except Exception as exc:
         logger.error("Error inesperado preparando la conexión al broker: %s", exc)
         mqtt_stats._is_connected = False
+        invalidate_broker_reachability_cache()
 
     return client

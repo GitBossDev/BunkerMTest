@@ -45,15 +45,23 @@ async def get_mqtt_stats(request: Request, nonce: str, timestamp: float,
     try:
         stats = mqtt_stats.get_stats()
         stats.update(build_activity_summary(window_seconds=600))
-        stats["mqtt_connected"] = mqtt_stats._is_connected
-        if not mqtt_stats._is_connected:
+        stats["mqtt_connected"] = bool(stats.get("mqtt_connected", mqtt_stats._is_connected))
+        stats["broker_reachable"] = bool(stats.get("broker_reachable", stats["mqtt_connected"]))
+        stats["monitor_reconnecting"] = bool(
+            stats.get("monitor_reconnecting", stats["broker_reachable"] and not stats["mqtt_connected"])
+        )
+        if not stats["broker_reachable"]:
             broker = os.getenv("MOSQUITTO_IP", "127.0.0.1")
             port   = os.getenv("MOSQUITTO_PORT", "1900")
             stats["connection_error"] = f"MQTT broker connection failed on {broker}:{port}"
+        elif stats["monitor_reconnecting"]:
+            stats["connection_error"] = "MQTT monitor is reconnecting after broker restart or capacity pressure"
     except Exception as exc:
         logger.error("Error en get_stats: %s", exc)
         stats = {
             "mqtt_connected": False,
+            "broker_reachable": False,
+            "monitor_reconnecting": False,
             "connection_error": str(exc),
             "total_connected_clients": 0,
             "total_messages_received": "0",

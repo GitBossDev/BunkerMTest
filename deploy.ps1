@@ -66,6 +66,9 @@ $script:ImageTag = 'latest'
 $script:BhmPlatformImageName = 'bunkermtest-bunkerm'
 $script:MosquittoImageName = 'bunkermtest-mosquitto'
 $script:GreenhouseSimulatorImageName = 'greenhouse-simulator'
+$script:KindBaseImages = @(
+    'postgres:16-alpine'
+)
 $script:KindImages = @(
     "$($script:BhmPlatformImageName):$($script:ImageTag)",
     "$($script:MosquittoImageName):$($script:ImageTag)"
@@ -563,6 +566,30 @@ function Test-LocalImagePresent {
     return $imageExists
 }
 
+function Ensure-LocalImagePresent {
+    param(
+        [string]$ImageName,
+        [switch]$AllowPull
+    )
+
+    if (Test-LocalImagePresent -ImageName $ImageName) {
+        return $true
+    }
+
+    if (-not $AllowPull) {
+        return $false
+    }
+
+    Write-Info "Imagen base no encontrada en cache local: $ImageName. Intentando descargarla una vez..."
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $script:CE pull $ImageName 2>&1 | Out-Null
+    $pullExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    return ($pullExitCode -eq 0 -and (Test-LocalImagePresent -ImageName $ImageName))
+}
+
 function Get-ApiKey {
     if (-not (Test-Path '.env.dev')) {
         return ''
@@ -599,6 +626,67 @@ function Get-ListeningPortProcesses {
     return @($results | Sort-Object LocalPort, Pid -Unique)
 }
 
+function Get-ProcessCommandLine {
+    param(
+        [int]$ProcessId
+    )
+
+    if ($ProcessId -le 0) {
+        return ''
+    }
+
+    try {
+        $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop
+        if ($null -eq $processInfo -or $null -eq $processInfo.CommandLine) {
+            return ''
+        }
+        return [string]$processInfo.CommandLine
+    } catch {
+        return ''
+    }
+}
+
+function Stop-KindPortForwardListeners {
+    param(
+        [int[]]$Ports
+    )
+
+    $conflicts = @(Get-ListeningPortProcesses -Ports $Ports)
+    if (-not $conflicts.Count) {
+        return @()
+    }
+
+    $kindContext = "kind-$KindClusterName".ToLowerInvariant()
+    $pidsToStop = @{}
+
+    foreach ($conflict in $conflicts) {
+        $processName = "$($conflict.ProcessName)".ToLowerInvariant()
+        if ($processName -notlike 'kubectl*') {
+            continue
+        }
+
+        $commandLine = (Get-ProcessCommandLine -ProcessId ([int]$conflict.Pid)).ToLowerInvariant()
+        if (-not $commandLine.Contains('port-forward')) {
+            continue
+        }
+        if (-not $commandLine.Contains($kindContext)) {
+            continue
+        }
+
+        $pidsToStop[[string]([int]$conflict.Pid)] = [int]$conflict.Pid
+    }
+
+    foreach ($processIdToStop in $pidsToStop.Values) {
+        Stop-Process -Id $processIdToStop -Force -ErrorAction SilentlyContinue
+    }
+
+    if ($pidsToStop.Count -gt 0) {
+        Start-Sleep -Seconds 2
+    }
+
+    return @(Get-ListeningPortProcesses -Ports $Ports)
+}
+
 function Clear-KindHostPortConflicts {
     $ports = @($KindWebHostPort, $KindMqttHostPort, $KindMqttWsHostPort)
     $conflicts = @(Get-ListeningPortProcesses -Ports $ports)
@@ -632,6 +720,11 @@ function Clear-KindHostPortConflicts {
         }
         $remainingSummary = ($remainingConflicts | ForEach-Object { "$($_.ProcessName) pid=$($_.Pid) port=$($_.LocalPort)" }) -join '; '
         throw "Persisten listeners sobre los puertos kind tras reiniciar Podman: $remainingSummary"
+    }
+
+    $conflicts = @(Stop-KindPortForwardListeners -Ports $ports)
+    if (-not $conflicts.Count) {
+        return
     }
 
     $summary = ($conflicts | ForEach-Object { "$($_.ProcessName) pid=$($_.Pid) port=$($_.LocalPort)" }) -join '; '
@@ -1057,6 +1150,37 @@ function Wait-KubernetesRuntimeReady {
     }
 }
 
+function Set-KindWorkloadReplicas {
+    param(
+        [ValidateRange(0, 10)]
+        [int]$ReplicaCount
+    )
+
+    Ensure-KubernetesTooling
+
+    $workloads = @(
+        'statefulset/postgres',
+        'statefulset/mosquitto',
+        'deployment/bunkerm-platform',
+        'deployment/bhm-alert-delivery'
+    )
+
+    foreach ($workload in $workloads) {
+        & $script:KubectlExecutable get $workload -n $KindNamespace *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "No se encontro $workload en kind; se omite el escalado."
+            continue
+        }
+
+        Write-Info "Escalando $workload a $ReplicaCount replica(s)..."
+        & $script:KubectlExecutable scale $workload -n $KindNamespace --replicas=$ReplicaCount *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "No se pudo escalar $workload a $ReplicaCount replica(s)."
+            exit 1
+        }
+    }
+}
+
 function Invoke-StartKindRuntime {
     if (-not (Test-Path '.env.dev')) {
         Write-Error '.env.dev not found. Run setup first: .\deploy.ps1 -Action setup'
@@ -1070,10 +1194,15 @@ function Invoke-StartKindRuntime {
             exit 1
         }
     }
+    foreach ($imageName in $script:KindBaseImages) {
+        if (-not (Ensure-LocalImagePresent -ImageName $imageName -AllowPull)) {
+            Write-Error "No se encontro la imagen base $imageName y no se pudo dejar disponible en cache local. El laboratorio kind no debe depender de pulls en caliente para PostgreSQL."
+            exit 1
+        }
+    }
 
     if (Test-KindClusterExists) {
-        Write-Info "Recreando cluster kind '$KindClusterName' para evitar drift de secretos, imagenes y credenciales persistidas..."
-        Invoke-StopKindRuntime
+        Write-Info "Reutilizando cluster kind '$KindClusterName' para preservar PVC y estado del broker/PostgreSQL..."
         Write-Host ''
     }
 
@@ -1094,7 +1223,7 @@ function Invoke-StartKindRuntime {
         -MqttHostPort $KindMqttHostPort `
         -MqttWsHostPort $KindMqttWsHostPort `
         -LoadLocalImage `
-        -LocalImages $script:KindImages `
+        -LocalImages ($script:KindImages + $script:KindBaseImages) `
         -BhmImage "localhost/$($script:BhmPlatformImageName):$ImageTag" `
         -MosquittoImage "localhost/$($script:MosquittoImageName):$ImageTag" `
         -GreenhouseSimulatorImage "localhost/$($script:GreenhouseSimulatorImageName):$ImageTag"
@@ -1109,10 +1238,20 @@ function Invoke-StartKindRuntime {
 }
 
 function Invoke-StopKindRuntime {
+    param(
+        [switch]$DeleteCluster
+    )
+
     Ensure-KubernetesTooling
     Stop-KindPortForwards
     if (-not (Test-KindClusterExists)) {
         Write-Info "El cluster kind '$KindClusterName' no esta creado."
+        return
+    }
+
+    if (-not $DeleteCluster) {
+        Set-KindWorkloadReplicas -ReplicaCount 0
+        Write-Success "[OK] Workloads kind detenidos. Cluster '$KindClusterName' y PVC preservados."
         return
     }
 
@@ -1537,7 +1676,7 @@ function Invoke-Clean {
         }
 
         if (Test-KindRuntime) {
-            Invoke-StopKindRuntime
+            Invoke-StopKindRuntime -DeleteCluster
         }
         
         if (Test-ComposeRuntime) {

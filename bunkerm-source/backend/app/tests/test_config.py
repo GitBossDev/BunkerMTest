@@ -188,6 +188,53 @@ async def test_save_mosquitto_config_uses_desired_state_and_returns_control_plan
     assert "max_inflight_messages 20" in conf_path.read_text(encoding="utf-8")
 
 
+async def test_save_mosquitto_config_preserves_managed_internal_listener_and_required_defaults(client, monkeypatch, tmp_path):
+    """Guardar un cambio parcial no debe borrar el listener interno ni los bloques gestionados del broker."""
+    conf_path = tmp_path / "mosquitto.conf"
+    backup_dir = tmp_path / "backups"
+    conf_path.write_text(
+        mosquitto_config_module.DEFAULT_CONFIG,
+        encoding="utf-8",
+    )
+    backup_dir.mkdir()
+
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(desired_state_svc, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
+
+    payload = {
+        "config": {
+            "log_dest": "syslog",
+        },
+        "listeners": [
+            {
+                "port": 1900,
+                "bind_address": "",
+                "per_listener_settings": False,
+                "max_connections": 500,
+                "protocol": None,
+            }
+        ],
+        "max_inflight_messages": None,
+        "max_queued_messages": None,
+        "tls": None,
+    }
+
+    resp = await client.post("/api/v1/config/mosquitto-config", json=payload)
+
+    assert resp.status_code == 200
+    written = conf_path.read_text(encoding="utf-8")
+    assert "listener 1900" in written
+    assert "max_connections 500" in written
+    assert "listener 1901" in written
+    assert "max_connections 16" in written
+    assert "plugin /usr/lib/mosquitto_dynamic_security.so" in written
+    assert "persistence true" in written
+
+
 async def test_remove_listener_updates_control_plane_state(client, monkeypatch, tmp_path):
     """Eliminar listener genera nuevo desired state y reconcilia el archivo."""
     conf_path = tmp_path / "mosquitto.conf"
