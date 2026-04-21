@@ -945,6 +945,24 @@ function Wait-ComposeRuntimeReady {
     Write-Info 'Esperando readiness real del runtime Compose-first...'
 
     if (-not (Wait-ContainerHealthy -ContainerName 'bunkerm-platform' -TimeoutSeconds 180)) {
+        if ($PostgresRequired) {
+            $platformPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName 'bunkerm-platform'
+            $reconcilerPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName 'bunkerm-reconciler'
+
+            if (-not $platformPgCheck.Success -or -not $reconcilerPgCheck.Success) {
+                Write-Host ''
+                Write-Warning 'Se detecto un problema de conectividad a PostgreSQL desde los servicios Compose-first.'
+                Write-Host '  Esto suele ocurrir cuando .env.dev fue regenerado pero el volumen existente de PostgreSQL conserva credenciales antiguas.' -ForegroundColor Yellow
+                Write-Host "  bunkerm-platform: $($platformPgCheck.Output)" -ForegroundColor Yellow
+                Write-Host "  bunkerm-reconciler: $($reconcilerPgCheck.Output)" -ForegroundColor Yellow
+                Write-Host ''
+                Write-Host '  Opciones de recuperacion:' -ForegroundColor Yellow
+                Write-Host '  1. Restaurar en .env.dev las credenciales originales de PostgreSQL del volumen actual.' -ForegroundColor Yellow
+                Write-Host '  2. Si buscas un arranque realmente limpio y puedes perder los datos locales, ejecutar: .\deploy.ps1 -Action clean y luego .\deploy.ps1 -Action setup' -ForegroundColor Yellow
+                Write-Host ''
+            }
+        }
+
         Write-Error 'bunkerm-platform no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs'
         exit 1
     }

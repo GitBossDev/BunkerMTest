@@ -147,16 +147,36 @@ def validate_database_url_coherence(env_values: dict[str, str]) -> list[str]:
     return errors
 
 
-def validate_mosquitto_seed_coherence(repo_root: Path, env_values: dict[str, str]) -> list[str]:
+def validate_broker_resource_limits(env_values: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+
+    cpu_raw = (env_values.get("BROKER_CPU_LIMIT_CORES") or "").strip()
+    if cpu_raw:
+        try:
+            cpu_value = float(cpu_raw)
+            if cpu_value <= 0:
+                errors.append("BROKER_CPU_LIMIT_CORES must be greater than 0")
+        except ValueError:
+            errors.append("BROKER_CPU_LIMIT_CORES must be a numeric value such as 0.5, 1 or 2")
+
+    memory_raw = (env_values.get("BROKER_MEMORY_LIMIT") or "").strip().lower()
+    if memory_raw and not re.fullmatch(r"\d+(?:\.\d+)?(?:[kmgtp]i?b?|b)", memory_raw):
+        errors.append("BROKER_MEMORY_LIMIT must include a unit, for example 512m, 1g or 1536m")
+
+    return errors
+
+
+def validate_mosquitto_seed_coherence(repo_root: Path, env_values: dict[str, str]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
     warnings: list[str] = []
     mqtt_username = env_values.get("MQTT_USERNAME")
     mqtt_password = env_values.get("MQTT_PASSWORD")
     if not mqtt_username or not mqtt_password:
-        return warnings
+        return errors, warnings
 
     seed_path = repo_root / "bunkerm-source" / "backend" / "mosquitto" / "dynsec" / "dynamic-security.json"
     if not seed_path.exists():
-        return warnings
+        return errors, warnings
 
     try:
         seed = json.loads(read_text_with_fallbacks(seed_path))
@@ -191,9 +211,9 @@ def validate_mosquitto_seed_coherence(repo_root: Path, env_values: dict[str, str
                 "Mosquitto seed JSON does not match MQTT_PASSWORD from .env.dev; the entrypoint will synchronize credentials on container start"
             )
     except Exception as exc:
-        warnings.append(f"Could not validate Mosquitto seed JSON coherence: {exc}")
+        errors.append(f"Mosquitto seed JSON is invalid and will break a clean broker bootstrap: {exc}")
 
-    return warnings
+    return errors, warnings
 
 
 def parse_required_vars(compose_path: Path) -> list[str]:
@@ -257,7 +277,9 @@ def main() -> int:
     errors.extend(validate_required_values(required, env_values))
     errors.extend(validate_generated_secret_shapes(env_values))
     errors.extend(validate_database_url_coherence(env_values))
-    warnings = validate_mosquitto_seed_coherence(compose_path.parent, env_values)
+    errors.extend(validate_broker_resource_limits(env_values))
+    seed_errors, warnings = validate_mosquitto_seed_coherence(compose_path.parent, env_values)
+    errors.extend(seed_errors)
 
     if errors:
         print(f"[ERROR] Environment validation failed for {env_path}:\n")
