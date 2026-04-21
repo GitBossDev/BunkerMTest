@@ -13,7 +13,11 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Greenhouse.ClientCreator")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+<<<<<<< HEAD
 [assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8425668091ca3d2b24b829b20bb0efe2cb0fa03d")]
+=======
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+31c00f519c4fcf444672967097098b05a0810c29")]
+>>>>>>> 65ed3aeccc13e3235a255234af5a6c54abf60e11
 [assembly: System.Reflection.AssemblyProductAttribute("Greenhouse.ClientCreator")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Greenhouse.ClientCreator")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

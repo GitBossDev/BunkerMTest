@@ -14,8 +14,13 @@
 					"rolename": "admin"
 				}
 			],
+<<<<<<< HEAD
 			"password": "3bBDuS1iiKc3bJCwHClOqmqUTLkcmCUwddhxiegiDpv7KhZk3QO1MYBkGVKepn1XTBteEV+wVqTN1rKN8m5eAA==",
 			"salt": "jnF6uNW1qKFeOy/w",
+=======
+			"password": "OMUoSraEc8W6LxBs6C/IKT6AzRRdwWTH6yODd//ahPaMCt4Gi0C8NP+h99SNW4LPaUrOwYK37ZVOus4Tp6y1CA==",
+			"salt": "FZKdeH7OxIn5JvZA",
+>>>>>>> 65ed3aeccc13e3235a255234af5a6c54abf60e11
 			"iterations": 101
 		}
 	],

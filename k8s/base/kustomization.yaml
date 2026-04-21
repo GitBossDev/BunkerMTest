@@ -23,6 +23,8 @@ configMapGenerator:
       - MQTT_PORT=1900
       - MOSQUITTO_IP=mosquitto
       - MOSQUITTO_PORT=1900
+      - MOSQUITTO_INTERNAL_HOST=mosquitto-internal
+      - MOSQUITTO_INTERNAL_PORT=1901
       - FRONTEND_URL=http://localhost:22000
       - NEXTAUTH_URL=http://localhost:22000
       - NEXT_PUBLIC_API_URL=http://localhost:22000

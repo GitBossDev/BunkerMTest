@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # --- MQTT ---
     mqtt_broker: str = "127.0.0.1"
     mqtt_port: int = 1900
+    mosquitto_internal_host: str = "127.0.0.1"
+    mosquitto_internal_port: int = 1901
     mqtt_username: str = ""
     mqtt_password: str = ""
 

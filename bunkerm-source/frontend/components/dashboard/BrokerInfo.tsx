@@ -43,8 +43,9 @@ function fmtBytes(b: number | null): string {
 
 export function BrokerInfo({ stats, snapshotLabel }: BrokerInfoProps) {
   const connected = stats?.mqtt_connected ?? false
+  const brokerReachable = stats?.broker_reachable ?? connected
   const version   = parseVersion(stats?.broker_version)
-  const uptime    = connected ? parseUptime(stats?.broker_uptime) : 'Offline'
+  const uptime    = connected ? parseUptime(stats?.broker_uptime) : brokerReachable ? 'Reconnecting' : 'Offline'
 
   const [cpu, setCpu] = useState<number | null>(null)
   const [rss, setRss] = useState<number | null>(null)
@@ -81,8 +82,8 @@ export function BrokerInfo({ stats, snapshotLabel }: BrokerInfoProps) {
             </>
           } />
         </div>
-        <div className={`p-2 rounded-lg ${connected ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
-          {connected
+        <div className={`p-2 rounded-lg ${brokerReachable ? 'bg-green-500/10' : 'bg-red-500/10'}`}>
+          {brokerReachable
             ? <Wifi className="h-4 w-4 text-green-500" />
             : <WifiOff className="h-4 w-4 text-red-500" />
           }
@@ -95,7 +96,7 @@ export function BrokerInfo({ stats, snapshotLabel }: BrokerInfoProps) {
           <Stat icon={<Cpu className="h-3.5 w-3.5 text-slate-400" />}          label="CPU"   value={cpu !== null ? `${cpu.toFixed(1)} %` : '—'} />
           <Stat icon={<MemoryStick className="h-3.5 w-3.5 text-slate-400" />}  label="Heap"  value={fmtBytes(rss)} />
         </div>
-        {!connected && (
+        {!brokerReachable && (
           <p className="text-xs text-amber-700 mt-3">Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
         )}
       </CardContent>

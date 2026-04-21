@@ -108,6 +108,38 @@ class SQLAlchemyMonitorHistoryStorage:
             return None
         return row.ts.replace(tzinfo=timezone.utc) if row.ts.tzinfo is None else row.ts.astimezone(timezone.utc)
 
+    def get_latest_tick_snapshot(self) -> Dict[str, Any]:
+        with self._session_factory() as session:
+            tick = session.scalar(select(BrokerMetricTick).order_by(BrokerMetricTick.ts.desc()).limit(1))
+            runtime = session.get(BrokerRuntimeState, 1)
+
+        if tick is None:
+            return {}
+
+        return {
+            "ts": iso_utc(tick.ts),
+            "bytes_received_rate": float(tick.bytes_received_rate or 0.0),
+            "bytes_sent_rate": float(tick.bytes_sent_rate or 0.0),
+            "messages_received_delta": int(tick.messages_received_delta or 0),
+            "messages_sent_delta": int(tick.messages_sent_delta or 0),
+            "connected_clients": int(tick.connected_clients or 0),
+            "disconnected_clients": int(tick.disconnected_clients or 0),
+            "active_sessions": int(tick.active_sessions or 0),
+            "max_concurrent": int(tick.max_concurrent or 0),
+            "total_subscriptions": int(tick.total_subscriptions or 0),
+            "retained_messages": int(tick.retained_messages or 0),
+            "messages_inflight": int(tick.messages_inflight or 0),
+            "latency_ms": float(tick.latency_ms or -1.0),
+            "cpu_pct": tick.cpu_pct,
+            "memory_bytes": tick.memory_bytes,
+            "memory_pct": tick.memory_pct,
+            "broker_uptime": runtime.last_broker_uptime if runtime else None,
+            "last_messages_received_total": int(runtime.last_messages_received_total or 0) if runtime else 0,
+            "last_messages_sent_total": int(runtime.last_messages_sent_total or 0) if runtime else 0,
+            "current_max_concurrent": int(runtime.current_max_concurrent or 0) if runtime else int(tick.max_concurrent or 0),
+            "lifetime_max_concurrent": int(runtime.lifetime_max_concurrent or 0) if runtime else int(tick.max_concurrent or 0),
+        }
+
     def add_tick_snapshot(self, snapshot: BrokerTickSnapshot) -> None:
         tick_ts = normalize_datetime(snapshot.ts)
         day = tick_ts.date()

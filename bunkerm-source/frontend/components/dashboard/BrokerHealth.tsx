@@ -67,8 +67,10 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
   const txByte = stats?.load_bytes_tx_1min ?? 0
   const latency  = stats?.latency_ms ?? -1
   const connected = stats?.mqtt_connected ?? false
+  const brokerReachable = stats?.broker_reachable ?? connected
+  const monitorReconnecting = stats?.monitor_reconnecting ?? (brokerReachable && !connected)
   const version = parseVersion(stats?.broker_version)
-  const uptime = connected ? parseUptime(stats?.broker_uptime) : 'Offline'
+  const uptime = connected ? parseUptime(stats?.broker_uptime) : brokerReachable ? 'Reconnecting' : 'Offline'
 
   const [cpu, setCpu] = useState<number | null>(null)
   const [rss, setRss] = useState<number | null>(null)
@@ -109,18 +111,18 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
   }, [])
 
   const latencyLabel = latency < 0 ? '—' : `${Math.round(latency)} ms`
-  const cpuCombinedLabel = !connected
+  const cpuCombinedLabel = !brokerReachable
     ? '—'
     : cpu !== null
       ? (cpuLimitPct !== null ? `${cpu.toFixed(1)} % / 100%` : `${cpu.toFixed(1)} %`)
       : '—'
-  const ramCombinedLabel = !connected
+  const ramCombinedLabel = !brokerReachable
     ? '—'
     : rss !== null
       ? (memoryLimit !== null ? formatUsageOverLimit(formatMemory(rss), formatMemory(memoryLimit)) : formatMemory(rss))
       : '—'
-  const cpuGaugeValue = clampPercent(connected ? cpu : null)
-  const ramGaugeValue = clampPercent(connected ? memoryPct : null)
+  const cpuGaugeValue = clampPercent(brokerReachable ? cpu : null)
+  const ramGaugeValue = clampPercent(brokerReachable ? memoryPct : null)
 
   return (
     <Card className="h-full">
@@ -144,6 +146,9 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
           {isOffline && (
             <p className="text-xs text-amber-700 mt-1">Live rates paused. Last broker sample: {snapshotLabel ?? 'before disconnection'}.</p>
           )}
+          {monitorReconnecting && (
+            <p className="text-xs text-amber-700 mt-1">Broker reachable. Waiting for the MQTT observer to reconnect.</p>
+          )}
         </div>
         <div className="p-2 rounded-lg bg-emerald-500/10">
           <Activity className="h-4 w-4 text-emerald-500" />
@@ -158,7 +163,7 @@ export function BrokerHealth({ stats, isOffline = false, snapshotLabel }: Broker
           <GaugeMetric label="CPU Usage" value={cpuCombinedLabel} percent={cpuGaugeValue} accent="bg-emerald-500" />
           <GaugeMetric label="RAM Usage" value={ramCombinedLabel} percent={ramGaugeValue} accent="bg-sky-500" />
         </div>
-        {cpu === null && connected && (
+        {cpu === null && brokerReachable && (
           <p className="text-xs text-muted-foreground mt-3">
             Container resource stats are not available yet. If the broker restarts with the updated image, Broker Health will show CPU and RAM directly from cgroups.
           </p>

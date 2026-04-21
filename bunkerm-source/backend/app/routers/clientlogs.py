@@ -3,6 +3,7 @@ Router ClientLogs: eventos de conexión/desconexión y actividad de clientes MQT
 """
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from datetime import datetime, timezone
@@ -12,12 +13,40 @@ from fastapi import APIRouter, Security, status
 
 from clientlogs.activity_storage import client_activity_storage
 from core.auth import get_api_key
+from core.config import settings
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from monitor.topic_history_storage import topic_history_storage
 from services import broker_desired_state_service as desired_state_svc
 from services.clientlogs_service import mqtt_monitor, MQTTEvent, get_clientlogs_source_status
+from services.monitor_service import mqtt_stats
 
 router = APIRouter(prefix="/api/v1/clientlogs", tags=["clientlogs"])
+
+_SYNTHETIC_INTERNAL_MONITOR_CLIENT_ID = "bunkerm-mqtt-monitor"
+
+
+def _synthesize_internal_admin_event() -> MQTTEvent | None:
+    if not getattr(mqtt_stats, "_is_connected", False):
+        return None
+
+    admin_username = os.getenv("MOSQUITTO_ADMIN_USERNAME") or settings.mqtt_username or "admin"
+    last_conn = mqtt_monitor._last_connection_info.get(admin_username, {})
+    event_timestamp = last_conn.get("timestamp") or datetime.now(timezone.utc).isoformat()
+
+    return MQTTEvent(
+        id=str(uuid.uuid4()),
+        timestamp=event_timestamp,
+        event_type="Client Connection",
+        client_id=_SYNTHETIC_INTERNAL_MONITOR_CLIENT_ID,
+        details="Connected via internal broker monitor",
+        status="success",
+        protocol_level="MQTT v5.0",
+        clean_session=True,
+        keep_alive=60,
+        username=admin_username,
+        ip_address=last_conn.get("ip_address", "127.0.0.1"),
+        port=int(last_conn.get("port", 1901) or 1901),
+    )
 
 
 def _active_client_events(window_seconds: int = 600) -> Dict[str, MQTTEvent]:
@@ -45,20 +74,46 @@ def _active_client_events(window_seconds: int = 600) -> Dict[str, MQTTEvent]:
             ip_address=last_conn.get("ip_address", ip),
             port=last_conn.get("port", port),
         )
-    return result
 
+    connected_limit = max(
+        int(mqtt_stats.get_client_counters().get("connected", 0) or 0),
+        1 if getattr(mqtt_stats, "_is_connected", False) else 0,
+    )
+    synthetic_admin = None
+    if connected_limit > len(result):
+        admin_username = os.getenv("MOSQUITTO_ADMIN_USERNAME") or settings.mqtt_username or "admin"
+        has_admin_connection = any(event.username == admin_username for event in result.values())
+        if not has_admin_connection:
+            synthetic_admin = _synthesize_internal_admin_event()
+            if synthetic_admin is not None:
+                result[synthetic_admin.client_id] = synthetic_admin
 
-def _connected_non_admin_events() -> Dict[str, MQTTEvent]:
-    return {
-        client_id: event
-        for client_id, event in mqtt_monitor.connected_clients.items()
-        if not mqtt_monitor._is_admin(event.username)
+    if connected_limit <= 0 or len(result) <= connected_limit:
+        return result
+
+    anchored_client_ids = list(mqtt_monitor.connected_clients.keys())
+    trimmed: Dict[str, MQTTEvent] = {
+        client_id: result[client_id]
+        for client_id in anchored_client_ids
+        if client_id in result
     }
+    remaining_slots = max(0, connected_limit - len(trimmed))
+
+    inferred_client_ids = [
+        client_id for client_id in result.keys()
+        if client_id not in trimmed
+    ]
+    inferred_client_ids.sort(key=lambda client_id: mqtt_monitor._last_seen.get(client_id, 0.0), reverse=True)
+
+    for client_id in inferred_client_ids[:remaining_slots]:
+        trimmed[client_id] = result[client_id]
+
+    return trimmed
 
 
 def build_activity_summary(window_seconds: int = 600) -> Dict[str, int]:
-    """Count currently connected non-admin clients with effective subscribe/publish capability."""
-    active_clients = _connected_non_admin_events()
+    """Count active clients with effective subscribe/publish capability."""
+    active_clients = _active_client_events(window_seconds=window_seconds)
     capability_map = _build_client_capability_map()
 
     subscribed_clients = 0
@@ -70,10 +125,19 @@ def build_activity_summary(window_seconds: int = 600) -> Dict[str, int]:
         if not username or username in seen_usernames:
             continue
         seen_usernames.add(username)
-        caps = capability_map.get(username, {"publish": False, "subscribe": False})
-        if caps["subscribe"]:
+        activity_key = mqtt_monitor._activity_client_key(event.client_id, username)
+        caps = capability_map.get(username)
+
+        if caps is None:
+            if activity_key in mqtt_monitor._subscriber_clients_seen:
+                subscribed_clients += 1
+            if activity_key in mqtt_monitor._publisher_clients_seen:
+                publisher_clients += 1
+            continue
+
+        if caps.get("subscribe", False):
             subscribed_clients += 1
-        if caps["publish"]:
+        if caps.get("publish", False):
             publisher_clients += 1
 
     return {

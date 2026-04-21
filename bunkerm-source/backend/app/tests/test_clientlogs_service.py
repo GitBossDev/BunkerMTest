@@ -70,3 +70,15 @@ def test_read_broker_logs_supports_incremental_offsets(monkeypatch, tmp_path):
     rewound = broker_observability_svc.read_broker_logs(limit=10, offset=999999)
     assert rewound["logs"] == ["line-1", "line-2", "line-3", "line-4", "line-5"]
     assert rewound["rewound"] is True
+
+
+def test_platform_internal_monitor_is_visible_as_admin_connection():
+    """La conexion unica interna de BHM debe seguir visible como evidencia de que admin esta conectado al broker."""
+    monitor = clientlogs_svc.MQTTMonitor()
+
+    event = monitor.parse_connection_log(
+        "2026-04-21T10:00:00: New client connected from 127.0.0.1:1883 as bunkerm-mqtt-monitor (p5, c1, k60, u'admin')"
+    )
+
+    assert event is not None
+    assert monitor.connected_clients["bunkerm-mqtt-monitor"].username == "admin"

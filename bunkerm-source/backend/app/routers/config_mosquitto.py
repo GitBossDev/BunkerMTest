@@ -69,6 +69,12 @@ def _serialize_mosquitto_config(config: MosquittoConfig) -> dict:
     }
 
 
+def _build_merged_mosquitto_payload(config: MosquittoConfig) -> dict:
+    current = desired_state_svc.get_observed_mosquitto_config()
+    requested = _serialize_mosquitto_config(config)
+    return desired_state_svc.merge_mosquitto_config_payload(current, requested)
+
+
 def _ensure_reconcile_success(state, detail_prefix: str) -> None:
     if state.reconcile_status == "error":
         detail = state.last_error or "Unknown reconciliation error"
@@ -122,7 +128,7 @@ async def save_mosquitto_config(
 ):
     """Valida, hace backup y escribe la nueva configuración de Mosquitto."""
     try:
-        payload = _serialize_mosquitto_config(config)
+        payload = _build_merged_mosquitto_payload(config)
         listeners_list = payload["listeners"]
 
         # Validar puertos duplicados

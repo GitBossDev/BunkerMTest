@@ -14,7 +14,10 @@ import { Button } from '@/components/ui/button'
 import type { MonitorStats } from '@/types'
 
 function normalizeOfflineStats(stats: MonitorStats | null): MonitorStats | null {
-  if (!stats || stats.mqtt_connected) return stats
+  if (!stats) return stats
+
+  const brokerReachable = stats.broker_reachable ?? stats.mqtt_connected ?? false
+  if (brokerReachable) return stats
 
   return {
     ...stats,
@@ -63,7 +66,9 @@ export default function DashboardPage() {
     return () => clearInterval(interval)
   }, [fetchData])
 
-  const brokerConnected = stats?.mqtt_connected ?? false
+  const monitorConnected = stats?.mqtt_connected ?? false
+  const brokerConnected = stats?.broker_reachable ?? monitorConnected
+  const monitorReconnecting = stats?.monitor_reconnecting ?? (brokerConnected && !monitorConnected)
   const displayStats = normalizeOfflineStats(stats)
   const lastSnapshotLabel = formatSnapshotTime(stats?.last_broker_sample_at)
 
@@ -78,10 +83,12 @@ export default function DashboardPage() {
         <div className="flex items-center gap-3">
           {stats && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              {brokerConnected
-                ? <Wifi className="h-3 w-3 text-green-500" />
-                : <WifiOff className="h-3 w-3 text-destructive" />}
-              {brokerConnected ? 'Broker connected' : 'Broker offline'}
+              {brokerConnected && !monitorReconnecting && <Wifi className="h-3 w-3 text-green-500" />}
+              {monitorReconnecting && <RefreshCw className="h-3 w-3 animate-spin text-amber-600" />}
+              {!brokerConnected && <WifiOff className="h-3 w-3 text-destructive" />}
+              {brokerConnected && !monitorReconnecting && 'Broker connected'}
+              {monitorReconnecting && 'Broker reachable, monitor reconnecting'}
+              {!brokerConnected && 'Broker offline'}
             </div>
           )}
           {lastUpdated && (
@@ -95,6 +102,12 @@ export default function DashboardPage() {
           </Button>
         </div>
       </div>
+
+      {monitorReconnecting && stats && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Broker restarted successfully and is reachable, but the monitoring client is still re-subscribing. The dashboard keeps the latest broker snapshot instead of forcing an offline view. Last broker sample: {lastSnapshotLabel}.
+        </div>
+      )}
 
       {!brokerConnected && stats && (
         <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -117,10 +130,10 @@ export default function DashboardPage() {
         />
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-3 items-stretch">
           <div className="lg:col-span-1 h-full">
-            <QoSPanel stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+            <QoSPanel stats={displayStats} isOffline={!monitorConnected} snapshotLabel={lastSnapshotLabel} />
           </div>
           <div className="lg:col-span-2 h-full">
-            <MessagesChart isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+            <MessagesChart isOffline={!monitorConnected} snapshotLabel={lastSnapshotLabel} />
           </div>
         </div>
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-stretch">
@@ -136,10 +149,10 @@ export default function DashboardPage() {
         />
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-3 items-stretch">
           <div className="lg:col-span-1 h-full">
-            <BrokerHealth stats={displayStats} isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+            <BrokerHealth stats={displayStats} isOffline={!monitorConnected} snapshotLabel={lastSnapshotLabel} />
           </div>
           <div className="lg:col-span-2 h-full">
-            <BytesChart isOffline={!brokerConnected} snapshotLabel={lastSnapshotLabel} />
+            <BytesChart isOffline={!monitorConnected} snapshotLabel={lastSnapshotLabel} />
           </div>
         </div>
       </section>

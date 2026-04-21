@@ -96,15 +96,11 @@ async def lifespan(app: FastAPI):
 
     ping_task = asyncio.create_task(_latency_pinger())
 
-    # 4. Hilos de monitoreo de logs del broker y publicaciones MQTT
+    # 4. Hilo de monitoreo broker-owned de logs.
     log_thread = threading.Thread(
         target=_clientlogs_svc.monitor_mosquitto_logs, daemon=True, name="log-monitor"
     )
-    pub_thread = threading.Thread(
-        target=_clientlogs_svc.monitor_mqtt_publishes, daemon=True, name="pub-monitor"
-    )
     log_thread.start()
-    pub_thread.start()
     logger.info("Hilos de clientlogs iniciados")
 
     # 5. Smart-anomaly: inicialización de base de datos y tareas de fondo
