@@ -222,6 +222,44 @@ def test_record_user_publish_updates_monitor_state_from_broker_observer(monkeypa
         monitor_svc.mqtt_stats.last_broker_sample_at = original_sample
 
 
+def test_record_user_publish_prefers_retained_when_mirrored_publish_competes(monkeypatch):
+    """Si el mismo publish llega por dos orígenes, retained=true no debe perderse."""
+    original_total = monitor_svc.mqtt_stats.messages_received_total
+    original_sample = monitor_svc.mqtt_stats.last_broker_sample_at
+    observed_updates: list[tuple[str, bytes, bool, int]] = []
+
+    def fake_update(topic: str, payload: bytes, retained: bool = False, qos: int = 0, event_ts=None):
+        observed_updates.append((topic, payload, retained, qos))
+
+    monkeypatch.setattr(monitor_svc.topic_store, "update", fake_update)
+
+    try:
+        first = monitor_svc.record_user_publish(
+            "lab/device/100000112/Estatus_conexion",
+            b"Conectado",
+            retained=False,
+            qos=1,
+            source="broker-observed",
+        )
+        second = monitor_svc.record_user_publish(
+            "lab/device/100000112/Estatus_conexion",
+            b"Conectado",
+            retained=True,
+            qos=1,
+            source="api-publish",
+        )
+
+        assert first is True
+        assert second is True
+        assert observed_updates == [
+            ("lab/device/100000112/Estatus_conexion", b"Conectado", False, 1),
+            ("lab/device/100000112/Estatus_conexion", b"Conectado", True, 1),
+        ]
+    finally:
+        monitor_svc.mqtt_stats.messages_received_total = original_total
+        monitor_svc.mqtt_stats.last_broker_sample_at = original_sample
+
+
 async def test_topic_history_returns_persisted_messages(client, monkeypatch):
     """El endpoint de historial por tópico debe delegar en el storage persistido."""
 

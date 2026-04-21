@@ -373,12 +373,11 @@ Estado actual ya disponible para coordinación con B:
 
 ### Funcionalidades pendientes
 
-- [ ] Implementar o diseñar whitelist por IP.
+- [x] Implementar o diseñar whitelist por IP.
 - [ ] Refinar el histórico de actividades de clientes.
 - [ ] Refinar o ampliar historial para dashboard.
-- [ ] Refinar o ampliar historia de topics.
+- [x] Refinar o ampliar historia de topics.
 - [x] Implementar alertas por correo.
-- [ ] Implementar alertas por redes o webhooks.
 - [ ] Refinar histórico de logs de broker.
 - [ ] Refinar histórico de logs de clientes.
 - [x] Mejorar estilos y UI donde aplique.

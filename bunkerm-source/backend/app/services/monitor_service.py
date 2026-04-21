@@ -19,6 +19,10 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from paho.mqtt import client as mqtt_client
+try:
+    from paho.mqtt.subscribeoptions import SubscribeOptions
+except Exception:  # pragma: no cover - compatibility with older paho-mqtt
+    SubscribeOptions = None  # type: ignore[assignment]
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -38,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 _MIRRORED_PUBLISH_DEDUP_SECONDS = 2.0
 _mirrored_publish_lock = threading.Lock()
-_mirrored_publish_signatures: Dict[tuple[str, str, int, bool], tuple[float, str]] = {}
+_mirrored_publish_signatures: Dict[tuple[str, str, int], tuple[float, str, bool]] = {}
 
 # ---------------------------------------------------------------------------
 # Tópicos $SYS que el monitor procesa
@@ -441,12 +445,16 @@ class TopicStore:
         value = payload.decode("utf-8", errors="replace") if payload else ""
         with self._lock:
             prev = self._topics.get(topic, {})
+            prev_retained = bool(prev.get("retained", False))
+            effective_retained = bool(retained) or prev_retained
+            if retained and len(payload or b"") == 0:
+                effective_retained = False
             self._topics[topic] = {
                 "topic": topic,
                 "value": value,
                 "timestamp": event_ts.isoformat().replace("+00:00", "Z"),
                 "count": prev.get("count", 0) + 1,
-                "retained": retained,
+                "retained": effective_retained,
                 "qos": qos,
             }
         try:
@@ -455,7 +463,7 @@ class TopicStore:
                 payload_bytes=len(payload or b""),
                 payload_value=value,
                 qos=qos,
-                retained=retained,
+                retained=effective_retained,
                 event_ts=event_ts,
             )
         except Exception as exc:
@@ -472,16 +480,19 @@ def _should_skip_mirrored_publish(topic: str, payload: bytes, qos: int, retained
         topic,
         (payload or b"")[:256].hex(),
         max(0, min(2, int(qos))),
-        bool(retained),
     )
     now = time.monotonic()
     with _mirrored_publish_lock:
-        expired = [key for key, (seen_at, _) in _mirrored_publish_signatures.items() if now - seen_at > _MIRRORED_PUBLISH_DEDUP_SECONDS]
+        expired = [key for key, (seen_at, _, _) in _mirrored_publish_signatures.items() if now - seen_at > _MIRRORED_PUBLISH_DEDUP_SECONDS]
         for key in expired:
             _mirrored_publish_signatures.pop(key, None)
         previous = _mirrored_publish_signatures.get(signature)
-        _mirrored_publish_signatures[signature] = (now, source)
-    return previous is not None and previous[1] != source and now - previous[0] <= _MIRRORED_PUBLISH_DEDUP_SECONDS
+        _mirrored_publish_signatures[signature] = (now, source, bool(retained))
+    if previous is None or previous[1] == source or now - previous[0] > _MIRRORED_PUBLISH_DEDUP_SECONDS:
+        return False
+    if bool(retained) and not previous[2]:
+        return False
+    return True
 
 
 def record_user_publish(
@@ -879,8 +890,28 @@ def connect_mqtt():
     def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("Conectado al broker MQTT %s:%s", broker_host, broker_port)
+            logger.info("Monitor MQTT protocol=%s", getattr(client, "_protocol", "unknown"))
             mqtt_stats._is_connected = True
-            client.subscribe([("$SYS/broker/#", 0), ("#", 0)])
+            # Keep retained semantics from publishers on observed user topics.
+            client.subscribe("$SYS/broker/#", qos=0)
+            if SubscribeOptions is not None:
+                try:
+                    rap_options = SubscribeOptions(qos=0, retainAsPublished=True, retainHandling=0)
+                    sub_rc, _ = client.subscribe("#", options=rap_options)
+                    if sub_rc != mqtt_client.MQTT_ERR_SUCCESS:
+                        logger.warning(
+                            "Suscripcion RAP para '#' devolvio rc=%s. Fallback a qos=0 clasico.",
+                            sub_rc,
+                        )
+                        client.subscribe("#", qos=0)
+                except Exception as exc:
+                    logger.warning(
+                        "No se pudo activar retainAsPublished en suscripcion '#': %s. Fallback a qos=0 clasico.",
+                        exc,
+                    )
+                    client.subscribe("#", qos=0)
+            else:
+                client.subscribe("#", qos=0)
         else:
             mqtt_stats._is_connected = False
             logger.error("Fallo de conexión al broker MQTT, código %s", rc)
@@ -892,7 +923,20 @@ def connect_mqtt():
             logger.warning("Desconexión inesperada del broker MQTT (rc=%s), reconectando…", rc)
 
     try:
-        client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+        client = mqtt_client.Client(
+            callback_api_version=mqtt_client.CallbackAPIVersion.VERSION2,
+            client_id="mqtt-monitor",
+            protocol=mqtt_client.MQTTv5,
+        )
+    except TypeError:
+        try:
+            client = mqtt_client.Client(
+                mqtt_client.CallbackAPIVersion.VERSION2,
+                "mqtt-monitor",
+                protocol=mqtt_client.MQTTv5,
+            )
+        except TypeError:
+            client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
     except AttributeError:
         client = mqtt_client.Client(client_id="mqtt-monitor", protocol=mqtt_client.MQTTv5)
 

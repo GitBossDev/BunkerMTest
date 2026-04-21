@@ -416,6 +416,80 @@ export interface RetentionPurgeResponse {
   after: RetentionStatusResponse
 }
 
+// IP whitelist types
+export type IPWhitelistMode = 'disabled' | 'audit' | 'enforce'
+export type IPWhitelistScope = 'api_admin' | 'mqtt_clients'
+export type IPWhitelistAction = 'allow' | 'deny'
+
+export interface IPWhitelistActor {
+  type: string
+  id: string
+}
+
+export interface IPWhitelistEntry {
+  id: string
+  cidr: string
+  scope: IPWhitelistScope
+  description: string
+  enabled: boolean
+}
+
+export interface IPWhitelistPolicy {
+  mode: IPWhitelistMode
+  trustedProxies: string[]
+  defaultAction: {
+    api_admin: IPWhitelistAction
+    mqtt_clients: IPWhitelistAction
+  }
+  entries: IPWhitelistEntry[]
+  version: number
+  lastUpdatedAt: string | null
+  lastUpdatedBy: IPWhitelistActor
+}
+
+export interface IPWhitelistStatusScopeApiAdmin {
+  mode: IPWhitelistMode
+  enforcementPoint: string
+  configuredEntries: number
+  lastDecisionAt: string | null
+  lastDecisionResult: string | null
+  lastMatchedEntryId: string | null
+  lastEvaluatedIp: string | null
+  lastError: string | null
+}
+
+export interface IPWhitelistStatusScopeMqttClients {
+  mode: IPWhitelistMode
+  enforcementPoint: string
+  configuredEntries: number
+  desiredVersion: number
+  appliedVersion: number
+  observedVersion: number
+  driftDetected: boolean
+  lastError: string | null
+}
+
+export interface IPWhitelistStatus {
+  apiAdmin: IPWhitelistStatusScopeApiAdmin
+  mqttClients: IPWhitelistStatusScopeMqttClients
+}
+
+export interface IPWhitelistDocument {
+  policy: IPWhitelistPolicy
+  status: IPWhitelistStatus
+}
+
+export interface IPWhitelistPolicyUpsert {
+  mode: IPWhitelistMode
+  trustedProxies: string[]
+  defaultAction: {
+    api_admin: IPWhitelistAction
+    mqtt_clients: IPWhitelistAction
+  }
+  entries: IPWhitelistEntry[]
+  lastUpdatedBy?: IPWhitelistActor
+}
+
 // MQTT Explorer types
 export interface MqttTopic {
   topic: string

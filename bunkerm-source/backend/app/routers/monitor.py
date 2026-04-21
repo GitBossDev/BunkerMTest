@@ -21,6 +21,7 @@ from services.monitor_service import (
     mqtt_stats,
     nonce_manager,
     read_alert_config,
+    record_user_publish,
     save_alert_config,
     topic_store,
     mqtt_client_instance,
@@ -315,6 +316,13 @@ async def publish_message(body: PublishRequest, api_key: str = Security(get_api_
     if result.rc != 0:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail=f"Publish failed (rc={result.rc})")
+    record_user_publish(
+        body.topic,
+        body.payload.encode("utf-8"),
+        retained=body.retain,
+        qos=body.qos,
+        source="api-publish",
+    )
     return {"status": "published", "topic": body.topic}
 
 
