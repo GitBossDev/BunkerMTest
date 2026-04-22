@@ -16,10 +16,13 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
+from sqlalchemy.orm import sessionmaker
 
 from clientlogs.activity_storage import client_activity_storage
 from core.config import settings
+from core.sync_database import create_sync_engine_for_url, session_scope
 from monitor.topic_history_storage import topic_history_storage
+from models.orm import ClientMQTTEvent
 from services import broker_observability_client
 
 
@@ -103,6 +106,58 @@ class MQTTEvent(BaseModel):
     retained: Optional[bool] = None
     disconnect_kind: Optional[str] = None
     reason_code: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Persistencia de eventos en BD
+# ---------------------------------------------------------------------------
+
+_db_engine = None
+_db_session_factory = None
+_db_lock = threading.Lock()
+
+
+def _get_db_session_factory():
+    """Lazy initialization del session factory."""
+    global _db_engine, _db_session_factory
+    if _db_session_factory is None:
+        with _db_lock:
+            if _db_session_factory is None:
+                db_url = settings.resolved_control_plane_database_url
+                _db_engine = create_sync_engine_for_url(db_url)
+                _db_session_factory = sessionmaker(bind=_db_engine, expire_on_commit=False)
+    return _db_session_factory
+
+
+def persist_mqtt_event(event: MQTTEvent) -> None:
+    """Guarda un evento MQTT en la base de datos (async-safe)."""
+    try:
+        session_factory = _get_db_session_factory()
+        with session_scope(session_factory) as session:
+            db_event = ClientMQTTEvent(
+                event_id=event.id,
+                timestamp=datetime.fromisoformat(event.timestamp.replace('Z', '+00:00')) if isinstance(event.timestamp, str) else event.timestamp,
+                event_type=event.event_type,
+                client_id=event.client_id,
+                username=event.username,
+                ip_address=event.ip_address,
+                port=event.port,
+                protocol_level=event.protocol_level,
+                clean_session=event.clean_session,
+                keep_alive=event.keep_alive,
+                status=event.status,
+                details=event.details,
+                topic=event.topic,
+                qos=event.qos,
+                payload_bytes=event.payload_bytes,
+                retained=event.retained,
+                disconnect_kind=event.disconnect_kind,
+                reason_code=event.reason_code,
+            )
+            session.add(db_event)
+            session.commit()
+    except Exception as exc:
+        logger.warning("Failed to persist MQTT event to database: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -438,6 +493,7 @@ class MQTTMonitor:
                     client_activity_storage.record_event(event)
                 if not replay:
                     self.events.append(event)
+                    persist_mqtt_event(event)
                 return
 
         event = self.parse_publish_log(line)
@@ -446,6 +502,7 @@ class MQTTMonitor:
                 client_activity_storage.record_event(event)
             if not replay:
                 self.events.append(event)
+                persist_mqtt_event(event)
             return
 
 

@@ -374,3 +374,29 @@ class BrokerReconcileSecret(Base):
     encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class ClientMQTTEvent(Base):
+    """Append-only unified event log for all MQTT client events (connections, publishes, subscribes, auth failures)."""
+    __tablename__ = "client_mqtt_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    client_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protocol_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    clean_session: Mapped[bool | None] = mapped_column(nullable=True)
+    keep_alive: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)
+    topic: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    qos: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    payload_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retained: Mapped[bool | None] = mapped_column(nullable=True)
+    disconnect_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
