@@ -128,19 +128,8 @@ class SQLiteTopicHistoryStorage:
         with self._lock:
             with self._connect() as conn:
                 topic_id = self._ensure_topic_locked(conn, topic, event_ts)
-                last_retained_row = conn.execute(
-                    """
-                    SELECT retained
-                    FROM topic_message_events
-                    WHERE topic_id = ?
-                    ORDER BY id DESC
-                    LIMIT 1
-                    """,
-                    (topic_id,),
-                ).fetchone()
-                last_retained = bool(last_retained_row["retained"]) if last_retained_row else False
                 is_retained_clear = bool(retained) and max(0, payload_bytes) == 0 and not (payload_value or "")
-                effective_retained = False if is_retained_clear else (bool(retained) or last_retained)
+                effective_retained = False if is_retained_clear else bool(retained)
                 conn.execute(
                     """
                     INSERT INTO topic_publish_buckets (bucket_start, bucket_minutes, topic_id, publish_count, bytes_sum)

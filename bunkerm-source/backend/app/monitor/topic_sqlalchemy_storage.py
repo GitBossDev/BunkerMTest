@@ -57,14 +57,8 @@ class SQLAlchemyTopicHistoryStorage:
         with self._lock:
             with session_scope(self._session_factory) as session:
                 topic_row = self._ensure_topic_locked(session, topic, event_ts)
-                last_retained = session.scalar(
-                    select(TopicMessageEvent.retained)
-                    .where(TopicMessageEvent.topic_id == topic_row.id)
-                    .order_by(TopicMessageEvent.id.desc())
-                    .limit(1)
-                )
                 is_retained_clear = bool(retained) and max(0, payload_bytes) == 0 and not (payload_value or "")
-                effective_retained = False if is_retained_clear else (bool(retained) or bool(last_retained))
+                effective_retained = False if is_retained_clear else bool(retained)
                 bucket_row = session.scalar(
                     select(TopicPublishBucket).where(
                         TopicPublishBucket.bucket_start == bucket,

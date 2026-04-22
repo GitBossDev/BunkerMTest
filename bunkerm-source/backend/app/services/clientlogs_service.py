@@ -686,10 +686,14 @@ def monitor_mqtt_publishes() -> None:
         try:
             from services import monitor_service
 
+            try:
+                msg_retained = bool(getattr(message, "retain", False))
+            except (AttributeError, TypeError):
+                msg_retained = False
             monitor_service.record_user_publish(
                 message.topic,
                 message.payload,
-                retained=getattr(message, "retain", False),
+                retained=msg_retained,
                 qos=message.qos,
                 source="broker-observed",
             )
