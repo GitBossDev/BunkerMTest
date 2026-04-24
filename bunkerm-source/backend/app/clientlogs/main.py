@@ -22,6 +22,8 @@ import uuid
 import os
 from dotenv import load_dotenv
 
+from services.clientlogs_service import persist_mqtt_event as _persist_mqtt_event_from_service
+
 # Load environment variables
 load_dotenv()
 
@@ -728,6 +730,10 @@ def monitor_mqtt_publishes() -> None:
             qos=message.qos,
         )
         mqtt_monitor.events.append(event)
+        try:
+            _persist_mqtt_event_from_service(event)
+        except Exception as exc:
+            print(f"Failed to persist event to database: {exc}")
 
     mqtt_client = paho_mqtt.Client(
         client_id="bunkerm-publish-monitor",

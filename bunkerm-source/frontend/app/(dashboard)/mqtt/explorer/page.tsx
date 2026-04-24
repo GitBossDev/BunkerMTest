@@ -603,7 +603,6 @@ export default function MqttExplorerPage() {
                           <span className="text-muted-foreground">{formatRelativeTime(entry.timestamp)}</span>
                           <Badge variant="secondary">QoS {entry.qos}</Badge>
                           <Badge variant="outline">{detectPayloadType(entry.value)}</Badge>
-                          <Badge variant="outline">{entry.payload_bytes} B</Badge>
                           {entry.retained && (
                             <Badge variant="outline" className="border-orange-400 text-orange-500">
                               retained
