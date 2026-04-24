@@ -569,7 +569,10 @@ function Import-ImageIntoKind {
 
                 & $ContainerEngineExecutable save --format oci-archive -o $archivePath $ImageReference
                 if ($LASTEXITCODE -eq 0) {
-                    & $KindExecutable load image-archive $archivePath --name $ClusterName
+                    $ErrorActionPreference_Saved = $ErrorActionPreference
+                    $ErrorActionPreference = 'Continue'
+                    & $KindExecutable load image-archive $archivePath --name $ClusterName 2>&1 | Out-Null
+                    $ErrorActionPreference = $ErrorActionPreference_Saved
                     if ($LASTEXITCODE -eq 0) {
                         return
                     }
@@ -595,7 +598,10 @@ function Import-ImageIntoKind {
         return
     }
 
-    & $KindExecutable load docker-image $ImageReference --name $ClusterName
+    $ErrorActionPreference_Saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $KindExecutable load docker-image $ImageReference --name $ClusterName 2>&1 | Out-Null
+    $ErrorActionPreference = $ErrorActionPreference_Saved
     Assert-LastExitCode "kind load docker-image $ImageReference"
 }
 
@@ -670,12 +676,18 @@ try {
     Ensure-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase -EnvFile $EnvFile
     Assert-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase
 
-    $clusterExists = & $kindExecutable get clusters | Where-Object { $_ -eq $ClusterName }
-    Assert-LastExitCode "kind get clusters"
+    # kind writes warnings to stderr, so suppress exit code check for this command
+    $ErrorActionPreference_Saved = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    $clusterExists = & $kindExecutable get clusters 2>$null | Select-String "^$ClusterName`$" | Measure-Object | Select-Object -ExpandProperty Count
+    $ErrorActionPreference = $ErrorActionPreference_Saved
 
     if (-not $clusterExists) {
         Write-Host "[INFO] Creando cluster kind '$ClusterName'..." -ForegroundColor Cyan
-        & $kindExecutable create cluster --name $ClusterName --config $resolvedKindConfig
+        $ErrorActionPreference_Saved = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $kindExecutable create cluster --name $ClusterName --config $resolvedKindConfig 2>&1 | Out-Null
+        $ErrorActionPreference = $ErrorActionPreference_Saved
         Assert-LastExitCode "kind create cluster"
     } else {
         Write-Host "[INFO] Reutilizando cluster kind existente '$ClusterName'." -ForegroundColor Yellow
@@ -705,7 +717,10 @@ try {
             if ($deleteExitCode -eq 0) {
                 Write-Host "[OK] Cluster eliminado. Recreando ahora..." -ForegroundColor Green
                 Write-Host "[INFO] Creando cluster kind '$ClusterName'..." -ForegroundColor Cyan
-                & $kindExecutable create cluster --name $ClusterName --config $resolvedKindConfig
+                $ErrorActionPreference_Saved = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                & $kindExecutable create cluster --name $ClusterName --config $resolvedKindConfig 2>&1 | Out-Null
+                $ErrorActionPreference = $ErrorActionPreference_Saved
                 Assert-LastExitCode "kind create cluster"
                 
                 Write-Host "[INFO] Esperando a que el API server este listo..." -ForegroundColor Cyan

@@ -1031,6 +1031,20 @@ function Write-WorkloadDiagnostics {
     & $script:KubectlExecutable --context $script:KindKubectlContext describe $Target -n $Namespace 2>&1 |
         Select-Object -Last 40 | Out-Host
     $ErrorActionPreference = $savedPref
+    
+    # Diagnóstico específico para Mosquitto
+    if ($Target -match 'mosquitto') {
+        Write-Host "`n--- Diagnostico especifico de Mosquitto ---" -ForegroundColor Yellow
+        Write-Host "`nVerifica que .env.dev tiene MQTT_USERNAME y MQTT_PASSWORD" -ForegroundColor Cyan
+        Write-Host "Luego ejecuta: .\deploy.ps1 -Action diagnose-mosquitto para un diagnostico completo" -ForegroundColor Cyan
+    }
+    
+    # Diagnóstico para bhm-api (probablemente falla por Mosquitto)
+    if ($Target -match 'bhm-api' -or $Target -match 'bhm-identity') {
+        Write-Host "`n--- Diagnostico para $Target ---" -ForegroundColor Yellow
+        Write-Host "[!] Este pod probablemente falla porque mosquitto no esta listo." -ForegroundColor Yellow
+        Write-Host "    Asegurate de que Mosquitto se inicie primero: .\deploy.ps1 -Action start" -ForegroundColor Gray
+    }
 }
 
 function Wait-KubernetesRuntimeReady {
@@ -2163,6 +2177,80 @@ function Invoke-EnvSync {
     Write-Host ""
 }
 
+function Invoke-DiagnoseMosquitto {
+    Write-Info "Diagnosticando problemas de Mosquitto..."
+    Write-Host ""
+
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "=== DIAGNOSTICO DE MOSQUITTO ===" -ForegroundColor Yellow
+    Write-Host ""
+    
+    # 1. Verificar .env.dev
+    Write-Host "[1] Estado de .env.dev:" -ForegroundColor Cyan
+    if (Test-Path '.env.dev') {
+        $envContent = Get-Content '.env.dev'
+        if ($envContent -match '^MQTT_USERNAME=') {
+            Write-Host "    [OK] MQTT_USERNAME esta configurado" -ForegroundColor Green
+        } else {
+            Write-Host "    [FAIL] MQTT_USERNAME NO esta configurado (PROBLEMA)" -ForegroundColor Red
+        }
+        if ($envContent -match '^MQTT_PASSWORD=') {
+            Write-Host "    [OK] MQTT_PASSWORD esta configurado" -ForegroundColor Green
+        } else {
+            Write-Host "    [FAIL] MQTT_PASSWORD NO esta configurado (PROBLEMA)" -ForegroundColor Red
+        }
+    } else {
+        Write-Host "    [FAIL] .env.dev no existe (ejecuta: .\deploy.ps1 -Action setup)" -ForegroundColor Red
+        exit 1
+    }
+    
+    Write-Host ""
+    Write-Host "[2] Secrets en Kubernetes:" -ForegroundColor Cyan
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    
+    $secrets = @('mosquitto-passwd-bootstrap', 'mosquitto-tls-bootstrap', 'bhm-env')
+    foreach ($secret in $secrets) {
+        & $script:KubectlExecutable --context $script:KindKubectlContext get secret $secret -n $KindNamespace -o jsonpath='{.metadata.name}' 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "    [OK] Secret '$secret' existe" -ForegroundColor Green
+        } else {
+            Write-Host "    [FAIL] Secret '$secret' FALTA (PROBLEMA)" -ForegroundColor Red
+        }
+    }
+    
+    Write-Host ""
+    Write-Host "[3] Estado del pod mosquitto-0:" -ForegroundColor Cyan
+    & $script:KubectlExecutable --context $script:KindKubectlContext get pod mosquitto-0 -n $KindNamespace -o wide 2>&1 | Out-Host
+    
+    Write-Host ""
+    Write-Host "[4] Ultimos logs del contenedor mosquitto:" -ForegroundColor Cyan
+    & $script:KubectlExecutable --context $script:KindKubectlContext logs statefulset/mosquitto -n $KindNamespace -c mosquitto --tail=30 2>&1 | Out-Host
+    
+    Write-Host ""
+    Write-Host "[5] Ultimos logs del reconciler:" -ForegroundColor Cyan
+    & $script:KubectlExecutable --context $script:KindKubectlContext logs statefulset/mosquitto -n $KindNamespace -c reconciler --tail=30 2>&1 | Out-Host
+    
+    Write-Host ""
+    Write-Host "[6] Estado de los volumenes (PVC):" -ForegroundColor Cyan
+    & $script:KubectlExecutable --context $script:KindKubectlContext get pvc -n $KindNamespace -l app.kubernetes.io/name=mosquitto 2>&1 | Out-Host
+    
+    Write-Host ""
+    Write-Host "=== RECOMENDACIONES ===" -ForegroundColor Yellow
+    Write-Host "Si ves problemas, intenta:" -ForegroundColor Gray
+    Write-Host "  1. Verifica que .env.dev tiene MQTT_USERNAME y MQTT_PASSWORD" -ForegroundColor Gray
+    Write-Host "  2. Ejecuta: .\deploy.ps1 -Action env-sync" -ForegroundColor Gray
+    Write-Host "  3. Ejecuta: .\deploy.ps1 -Action rollout -Component mosquitto" -ForegroundColor Gray
+    Write-Host "  4. Si sigue fallando, intenta: .\deploy.ps1 -Action redeploy" -ForegroundColor Gray
+    Write-Host ""
+    
+    $ErrorActionPreference = $savedPref
+}
+
 function Invoke-DbMigrate {
     Write-Info "Ejecutando migraciones Alembic en el pod bhm-api..."
     Write-Host ""
@@ -2289,6 +2377,10 @@ switch ($Action)
     'reload-mosquitto'
     {
         Invoke-ReloadMosquitto
+    }
+    'diagnose-mosquitto'
+    {
+        Invoke-DiagnoseMosquitto
     }
     'test'
     {
