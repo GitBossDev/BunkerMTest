@@ -54,8 +54,8 @@ _MOSQUITTO_LOG_KEYWORDS = frozenset([
 _TS_CAPTURE = r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)"
 _TS_RE      = re.compile(r"^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)$")
 
-# Ventana de deduplicación temporal de eventos Publish (en segundos)
-_PUBLISH_DEDUP_SECONDS = 60
+# Ventana de deduplicación temporal de eventos Publish (en segundos) - 0 = deshabilitada
+_PUBLISH_DEDUP_SECONDS = 0
 
 # Prefijos de tópicos internos de la plataforma que no se muestran en la UI
 _INTERNAL_TOPIC_PREFIXES = ("$", "bunkerm/monitor/")
@@ -419,25 +419,53 @@ class MQTTMonitor:
         return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
-        pattern = (
-            _TS_CAPTURE
-            + r": Received PUBLISH from (\S+)"
-            r" \(d\d, q(\d), r\d, m\d+, '([^']+)', \.\.\. \((\d+) bytes\)\)"
-        )
-        m = re.match(pattern, log_line)
-        if not m:
+        """Parse PUBLISH with extreme flexibility - use search() not match()"""
+        if "Received PUBLISH from" not in log_line:
             return None
-        ts, client_id, qos_str, topic, size_str = m.groups()
+        
+        # Extraer timestamp (al inicio de la línea)
+        ts_match = re.search(_TS_CAPTURE, log_line)
+        if not ts_match:
+            return None
+        ts = ts_match.group(1)
+        
+        # Extraer client_id (texto después de "from")
+        client_match = re.search(r"Received PUBLISH from (\S+)", log_line)
+        if not client_match:
+            logger.warning(f"Could not extract client_id from PUBLISH: {log_line[:80]}")
+            return None
+        client_id = client_match.group(1)
+        
+        # Extraer tópico (entre comillas simples)
+        topic_match = re.search(r"'([^']+)'", log_line)
+        if not topic_match:
+            logger.warning(f"Could not extract topic from PUBLISH: {log_line[:80]}")
+            return None
+        topic = topic_match.group(1)
+        
+        # Extraer QoS (q seguido de dígito)
+        qos_match = re.search(r"q(\d)", log_line)
+        qos_str = qos_match.group(1) if qos_match else "0"
+        
+        # Extraer bytes
+        bytes_match = re.search(r"\((\d+) bytes\)", log_line)
+        size_str = bytes_match.group(1) if bytes_match else "0"
+        
+        # Skip internal topics
         if any(topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
             return None
+        
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         event_ts = _ts_to_epoch(ts)
         self._publisher_clients_seen[self._activity_client_key(client_id, username)] = event_ts
+        
+        # Deduplication check
         key = topic
         now_ts = event_ts
         if key in self._last_publish_ts and now_ts - self._last_publish_ts[key] < _PUBLISH_DEDUP_SECONDS:
             return None
         self._last_publish_ts[key] = now_ts
+        
         return MQTTEvent(
             id=str(uuid.uuid4()),
             timestamp=_ts_to_iso(ts),
@@ -669,10 +697,6 @@ def monitor_mosquitto_logs() -> None:
 
 
 def monitor_mqtt_publishes() -> None:
-    """
-    Se suscribe a '#' como administrador para capturar eventos Publish adicionales
-    vía MQTT (complementa el parser de logs).
-    """
     _update_source_status(
         "mqttPublish",
         enabled=False,
