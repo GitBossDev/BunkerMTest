@@ -1,7 +1,7 @@
 """Add client MQTT events table for persistent event logging.
 
-Revision ID: 005_client_mqtt_events
-Revises: 004_broker_reconcile_secret
+Revision ID: 007_client_mqtt_events
+Revises: 006_identity_bhm_users
 Create Date: 2026-04-22
 """
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 
-revision = "005_client_mqtt_events"
-down_revision = "004_broker_reconcile_secret"
+revision = "007_client_mqtt_events"
+down_revision = "006_identity_bhm_users"
 branch_labels = None
 depends_on = None
 

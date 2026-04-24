@@ -319,7 +319,42 @@ Equivalente manual:
 
 ---
 
-## Mantenimiento
+## Diagnostico y Resolucion de Problemas
+
+### Mosquitto no arranca (CrashLoopBackOff)
+
+Si ves que `mosquitto-0` está en `CrashLoopBackOff` y otros servicios fallan:
+
+```powershell
+# Ejecuta el diagnóstico automático
+.\deploy.ps1 -Action diagnose-mosquitto
+```
+
+**Causas comunes:**
+1. **`.env.dev` incompleto** - Falta `MQTT_USERNAME` o `MQTT_PASSWORD`
+   - Solución: Ejecuta `.\deploy.ps1 -Action setup` nuevamente
+
+2. **Secretos no creados correctamente**
+   - Solución: `.\deploy.ps1 -Action env-sync`
+
+3. **Volúmenes corrompidos o con permisos incorrectos**
+   - Solución: `.\deploy.ps1 -Action redeploy` (preserva `.env.dev`)
+
+### Verificación rápida de estado
+
+```powershell
+# Ver estado de todos los pods
+kubectl get pods -n bhm-lab
+
+# Ver logs del Mosquitto completos
+kubectl logs statefulset/mosquitto -n bhm-lab -c mosquitto --tail=50
+kubectl logs statefulset/mosquitto -n bhm-lab -c reconciler --tail=50
+
+# Describir el StatefulSet para ver eventos
+kubectl describe statefulset/mosquitto -n bhm-lab
+```
+
+### Mantenimiento
 
 ### Re-inyectar secretos despues de cambiar .env.dev
 
@@ -414,4 +449,5 @@ kubectl get secret bhm-env -n bhm-lab
 | `env-sync` | Recrea el Secret `bhm-env` con los valores de `.env.dev` |
 | `db-migrate` | Ejecuta `alembic upgrade head` en el pod bhm-api |
 | `reload-mosquitto` | Envia senal de recarga al pod mosquitto |
+| `diagnose-mosquitto` | Diagnostico completo de problemas con Mosquitto (CrashLoopBackOff) |
 
