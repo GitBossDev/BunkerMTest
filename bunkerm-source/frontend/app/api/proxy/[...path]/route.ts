@@ -13,6 +13,7 @@ const SERVICES: Record<string, string> = {
   clientlogs:     `${UNIFIED_API_BASE}/clientlogs`,
   reports:        `${UNIFIED_API_BASE}/reports`,
   config:         `${UNIFIED_API_BASE}/config`,
+  security:       `${UNIFIED_API_BASE}/security`,
   // Smart-anomaly también está montado en el backend unificado.
   ai:             `${UNIFIED_API_BASE}/ai`,
 }

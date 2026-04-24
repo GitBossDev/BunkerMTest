@@ -19,6 +19,10 @@ from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 from paho.mqtt import client as mqtt_client
+try:
+    from paho.mqtt.subscribeoptions import SubscribeOptions
+except Exception:  # pragma: no cover - compatibility with older paho-mqtt
+    SubscribeOptions = None  # type: ignore[assignment]
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
@@ -38,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 _MIRRORED_PUBLISH_DEDUP_SECONDS = 2.0
 _mirrored_publish_lock = threading.Lock()
-_mirrored_publish_signatures: Dict[tuple[str, str, int, bool], tuple[float, str]] = {}
+_mirrored_publish_signatures: Dict[tuple[str, str, int], tuple[float, str, bool]] = {}
 
 # ---------------------------------------------------------------------------
 # Tópicos $SYS que el monitor procesa
@@ -521,12 +525,15 @@ class TopicStore:
         value = payload.decode("utf-8", errors="replace") if payload else ""
         with self._lock:
             prev = self._topics.get(topic, {})
+            effective_retained = bool(retained)
+            if retained and len(payload or b"") == 0:
+                effective_retained = False
             self._topics[topic] = {
                 "topic": topic,
                 "value": value,
                 "timestamp": event_ts.isoformat().replace("+00:00", "Z"),
                 "count": prev.get("count", 0) + 1,
-                "retained": retained,
+                "retained": effective_retained,
                 "qos": qos,
             }
         try:
@@ -535,7 +542,7 @@ class TopicStore:
                 payload_bytes=len(payload or b""),
                 payload_value=value,
                 qos=qos,
-                retained=retained,
+                retained=effective_retained,
                 event_ts=event_ts,
             )
         except Exception as exc:
@@ -561,7 +568,9 @@ def _should_skip_mirrored_publish(topic: str, payload: bytes, qos: int, retained
             _mirrored_publish_signatures.pop(key, None)
         previous = _mirrored_publish_signatures.get(signature)
         _mirrored_publish_signatures[signature] = (now, source)
-    return previous is not None and previous[1] != source and now - previous[0] <= _MIRRORED_PUBLISH_DEDUP_SECONDS
+    if previous is None or previous[1] == source or now - previous[0] > _MIRRORED_PUBLISH_DEDUP_SECONDS:
+        return False
+    return True
 
 
 def record_user_publish(
@@ -985,10 +994,14 @@ def on_message(client, userdata, msg):
         except (ValueError, AttributeError):
             pass
     elif not msg.topic.startswith("$SYS/"):
+        try:
+            msg_retained = bool(getattr(msg, "retain", False))
+        except (AttributeError, TypeError):
+            msg_retained = False
         record_user_publish(
             msg.topic,
             msg.payload,
-            retained=getattr(msg, "retain", False),
+            retained=msg_retained,
             qos=msg.qos,
             source="mqtt-monitor",
         )
@@ -1003,9 +1016,10 @@ def connect_mqtt():
     def on_connect(client, userdata, flags, rc, properties=None):
         if rc == 0:
             logger.info("Conectado al broker MQTT %s:%s", broker_host, broker_port)
+            logger.info("Monitor MQTT protocol=%s", getattr(client, "_protocol", "unknown"))
             mqtt_stats._is_connected = True
             invalidate_broker_reachability_cache()
-            client.subscribe([("$SYS/broker/#", 0), ("#", 0)])
+            client.subscribe([("$SYS/broker/#", 2), ("#", 2)])
         else:
             mqtt_stats._is_connected = False
             logger.error("Fallo de conexión al broker MQTT, código %s", rc)

@@ -57,6 +57,8 @@ class SQLAlchemyTopicHistoryStorage:
         with self._lock:
             with session_scope(self._session_factory) as session:
                 topic_row = self._ensure_topic_locked(session, topic, event_ts)
+                is_retained_clear = bool(retained) and max(0, payload_bytes) == 0 and not (payload_value or "")
+                effective_retained = False if is_retained_clear else bool(retained)
                 bucket_row = session.scalar(
                     select(TopicPublishBucket).where(
                         TopicPublishBucket.bucket_start == bucket,
@@ -82,7 +84,7 @@ class SQLAlchemyTopicHistoryStorage:
                         payload_text=payload_value or "",
                         payload_bytes=max(0, payload_bytes),
                         qos=max(0, min(2, int(qos))),
-                        retained=bool(retained),
+                        retained=effective_retained,
                     )
                 )
                 self._prune_locked(session)
@@ -206,8 +208,8 @@ class SQLAlchemyTopicHistoryStorage:
                     latest_events_subq.c.message_count,
                 )
                 .select_from(TopicRegistry)
-                .outerjoin(latest_events_subq, latest_events_subq.c.topic_id == TopicRegistry.id)
-                .outerjoin(TopicMessageEvent, TopicMessageEvent.id == latest_events_subq.c.latest_event_id)
+                .join(latest_events_subq, latest_events_subq.c.topic_id == TopicRegistry.id)
+                .join(TopicMessageEvent, TopicMessageEvent.id == latest_events_subq.c.latest_event_id)
                 .where(TopicRegistry.kind == "user")
                 .order_by(TopicRegistry.topic.asc())
                 .limit(clamped_limit)

@@ -18,6 +18,9 @@ import type {
   ClientIncidentsResponse,
   RetentionStatusResponse,
   RetentionPurgeResponse,
+  IPWhitelistDocument,
+  IPWhitelistStatus,
+  IPWhitelistPolicyUpsert,
 } from '@/types'
 
 // The Python dynsec API's list endpoints return the raw mosquitto_ctrl stdout
@@ -97,6 +100,7 @@ const AZURE_BRIDGE_API_URL = '/api/proxy/azure-bridge'
 const CONFIG_API_URL     = '/api/proxy/config'
 const CLIENTLOGS_API_URL = '/api/proxy/clientlogs'
 const REPORTS_API_URL = '/api/proxy/reports'
+const SECURITY_API_URL   = '/api/proxy/security'
 
 function buildUrl(base: string, path: string): string {
   const nonce = generateCacheBuster()
@@ -508,6 +512,20 @@ export const reportsApi = {
     }
     return requestBlob(buildUrl(REPORTS_API_URL, `/export/client-activity/${encodeURIComponent(params.username)}?${qs.toString()}`))
   },
+}
+
+// ─── Security API ────────────────────────────────────────────────────────────
+
+export const securityApi = {
+  getIpWhitelist: () =>
+    request<IPWhitelistDocument>(buildUrl(SECURITY_API_URL, '/ip-whitelist')),
+  updateIpWhitelist: (payload: IPWhitelistPolicyUpsert) =>
+    request<IPWhitelistDocument>(buildUrl(SECURITY_API_URL, '/ip-whitelist'), {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  getIpWhitelistStatus: () =>
+    request<IPWhitelistStatus>(buildUrl(SECURITY_API_URL, '/ip-whitelist/status')),
 }
 
 // ─── Smart Anomaly Detection API ─────────────────────────────────────────────

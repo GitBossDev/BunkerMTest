@@ -29,8 +29,8 @@ services:
       - TIMEUNIT=3
       - TIME=10
       - MSGS=100
-      - QOS=0
-      - RETAIN=false
+      - QOS=1
+      - RETAIN=true
     
     networks:
       - bunkerm-network

@@ -10,12 +10,16 @@ from datetime import datetime, timezone
 from typing import Dict, Set
 
 from fastapi import APIRouter, Security, status
+from sqlalchemy import desc, select
+from sqlalchemy.orm import sessionmaker
 
 from clientlogs.activity_storage import client_activity_storage
 from core.auth import get_api_key
 from core.config import settings
+from core.sync_database import create_sync_engine_for_url
 from monitor.data_storage import PERIODS as _STORAGE_PERIODS
 from monitor.topic_history_storage import topic_history_storage
+from models.orm import ClientMQTTEvent
 from services import broker_desired_state_service as desired_state_svc
 from services.clientlogs_service import mqtt_monitor, MQTTEvent, get_clientlogs_source_status
 from services.monitor_service import mqtt_stats
@@ -156,10 +160,50 @@ def _build_client_capability_map() -> Dict[str, Dict[str, bool]]:
 
 @router.get("/events")
 async def get_mqtt_events(limit: int = 1000, api_key: str = Security(get_api_key)):
-    """Devuelve los eventos MQTT más recientes (conexión, desconexión, auth failure, etc.)."""
-    all_events = list(mqtt_monitor.events)
-    sorted_events = sorted(all_events, key=lambda x: x.timestamp, reverse=True)[:limit]
-    return {"events": [event.model_dump() for event in sorted_events]}
+    """Devuelve los eventos MQTT más recientes desde la base de datos (conexión, desconexión, auth failure, etc.)."""
+    try:
+        # Try to read from database first
+        db_url = settings.resolved_control_plane_database_url
+        engine = create_sync_engine_for_url(db_url)
+        session_factory = sessionmaker(bind=engine)
+        
+        with session_factory() as session:
+            rows = session.execute(
+                select(ClientMQTTEvent)
+                .order_by(desc(ClientMQTTEvent.timestamp))
+                .limit(limit)
+            ).scalars().all()
+            
+            events = []
+            for row in rows:
+                event = MQTTEvent(
+                    id=row.event_id,
+                    timestamp=row.timestamp.isoformat().replace('+00:00', 'Z') if row.timestamp else '',
+                    event_type=row.event_type,
+                    client_id=row.client_id,
+                    details=row.details,
+                    status=row.status,
+                    protocol_level=row.protocol_level or 'MQTT vunknown',
+                    clean_session=row.clean_session or False,
+                    keep_alive=row.keep_alive or 0,
+                    username=row.username or 'unknown',
+                    ip_address=row.ip_address or 'unknown',
+                    port=row.port or 0,
+                    topic=row.topic,
+                    qos=row.qos,
+                    payload_bytes=row.payload_bytes,
+                    retained=row.retained,
+                    disconnect_kind=row.disconnect_kind,
+                    reason_code=row.reason_code,
+                )
+                events.append(event)
+            
+            return {"events": [event.model_dump() for event in events]}
+    except Exception as exc:
+        # Fallback to in-memory events if database read fails
+        all_events = list(mqtt_monitor.events)
+        sorted_events = sorted(all_events, key=lambda x: x.timestamp, reverse=True)[:limit]
+        return {"events": [event.model_dump() for event in sorted_events]}
 
 
 @router.get("/connected-clients")
