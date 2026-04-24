@@ -1,4 +1,4 @@
-apiVersion: kustomize.config.k8s.io/v1beta1
+﻿apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
 namespace: bhm-lab
@@ -11,7 +11,11 @@ labels:
 resources:
   - namespace.yaml
   - postgres.yaml
-  - control-plane.yaml
+  - nextjs-data-pvc.yaml
+  - bhm-frontend.yaml
+  - bhm-api.yaml
+  - identity.yaml
+  - ingress.yaml
   - alert-delivery.yaml
   - mosquitto.yaml
   - observability.yaml
@@ -49,6 +53,10 @@ configMapGenerator:
       - BROKER_RESOURCE_STATS_FILE_ENABLED=true
       - MOSQUITTO_BACKUP_DIR=/var/lib/mosquitto/backups/mosquitto
       - DYNSEC_BACKUP_DIR=/var/lib/mosquitto/backups/dynsec
+      # Identity API — bhm-identity standalone service (5B-2)
+      - IDENTITY_API_URL=http://bhm-identity:8080
+      # Next.js server-side proxy target — must point to bhm-api K8s service
+      - BUNKERM_API_URL=http://bhm-api:9001/api/v1
   - name: postgres-init
     files:
       - init.sql=postgres-init.sql
@@ -65,8 +73,14 @@ secretGenerator:
 generatorOptions:
   disableNameSuffixHash: true
 
+# El tag se sobreescribe en tiempo de despliegue con deploy.ps1 -ImageTag <tag>.
+# El valor 'dev' es solo un marcador; no usar kubectl apply -k k8s/base sin ImageTag explicito.
 images:
-  - name: localhost/bunkermtest-bunkerm
-    newTag: latest
-  - name: localhost/bunkermtest-mosquitto
-    newTag: latest
+  - name: localhost/bhm-frontend
+    newTag: dev
+  - name: localhost/bhm-api
+    newTag: dev
+  - name: localhost/bhm-identity
+    newTag: dev
+  - name: localhost/bhm-mosquitto
+    newTag: dev

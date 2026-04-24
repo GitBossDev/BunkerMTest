@@ -62,6 +62,57 @@ _smart_anomaly_ok: bool = False
 
 
 # ---------------------------------------------------------------------------
+# Initial identity data seeding
+# ---------------------------------------------------------------------------
+
+async def _seed_initial_admin() -> None:
+    """Create the first admin user from env vars if identity.bhm_users is empty."""
+    import bcrypt as _bcrypt
+    from datetime import datetime as _dt
+    from uuid import uuid4 as _uuid4
+    from sqlalchemy import select as _select, func as _func
+    from core.identity_database import _get_identity_session_maker
+    from models.orm import BhmUser as _BhmUser
+
+    try:
+        async with _get_identity_session_maker()() as db:
+            count_result = await db.execute(
+                _select(_func.count()).select_from(_BhmUser)
+            )
+            if count_result.scalar_one() > 0:
+                return  # Already seeded
+
+            admin_email = settings.admin_initial_email if hasattr(settings, "admin_initial_email") else (
+                __import__("os").environ.get("ADMIN_INITIAL_EMAIL", "admin@bhm.local")
+            )
+            raw_password = __import__("os").environ.get("ADMIN_INITIAL_PASSWORD")
+            if not raw_password:
+                raw_password = str(_uuid4())
+                logger.warning(
+                    "ADMIN_INITIAL_PASSWORD not set — generated initial admin password: %s",
+                    raw_password,
+                )
+
+            now = _dt.utcnow()
+            admin = _BhmUser(
+                id=str(_uuid4()),
+                email=admin_email.strip().lower(),
+                password_hash=_bcrypt.hashpw(raw_password.encode(), _bcrypt.gensalt(10)).decode(),
+                first_name="Admin",
+                last_name="User",
+                role="admin",
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(admin)
+            await db.commit()
+            logger.info("Seeded initial admin user: %s", admin_email)
+
+    except Exception as exc:
+        logger.warning("Could not seed initial admin user (identity schema may not exist yet): %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # Lifespan — inicialización y apagado ordenado
 # ---------------------------------------------------------------------------
 
@@ -71,6 +122,10 @@ async def lifespan(app: FastAPI):
     await init_db()
     await ip_whitelist_service.refresh_ip_whitelist_cache()
     logger.info("Base de datos inicializada")
+
+    # 1b. Seed initial admin user if identity.bhm_users is empty
+    await _seed_initial_admin()
+    logger.info("Identidad inicializada")
 
     # 2. Conexión MQTT para el monitor
     client = connect_mqtt()

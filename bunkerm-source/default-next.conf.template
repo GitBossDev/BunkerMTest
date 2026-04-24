@@ -1,0 +1,294 @@
+server {
+    listen 0.0.0.0:2000;
+
+    # Cabeceras comunes de proxy
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_cache_bypass $http_upgrade;
+
+    # --- Proxies al backend API (${BACKEND_URL}) ---
+    # Se reemplaza ${BACKEND_URL} con el valor de la variable de entorno
+    # mediante envsubst en el entrypoint del contenedor.
+
+    location = /api/openapi.json {
+        proxy_pass ${BACKEND_URL}/api/v1/openapi.json;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        add_header 'Content-Type' 'application/json' always;
+    }
+
+    location /api/monitor/ {
+        proxy_pass ${BACKEND_URL}/api/v1/monitor/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Origin $http_origin;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/dynsec/ {
+        proxy_pass ${BACKEND_URL}/api/v1/dynsec/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        proxy_connect_timeout 180s;
+        proxy_send_timeout 180s;
+        proxy_read_timeout 180s;
+        client_max_body_size 10M;
+        proxy_request_buffering off;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/config/ {
+        proxy_pass ${BACKEND_URL}/api/v1/config/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        proxy_connect_timeout 120s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+        client_max_body_size 10M;
+        proxy_request_buffering off;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range,Content-Disposition' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/aws-bridge/ {
+        proxy_pass ${BACKEND_URL}/api/v1/aws-bridge/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        proxy_connect_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_read_timeout 90s;
+        client_max_body_size 10M;
+        proxy_request_buffering off;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/clientlogs/ {
+        proxy_pass ${BACKEND_URL}/api/v1/clientlogs/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/azure-bridge/ {
+        proxy_pass ${BACKEND_URL}/api/v1/azure-bridge/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        proxy_connect_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_read_timeout 90s;
+        client_max_body_size 10M;
+        proxy_request_buffering off;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/logs/broker {
+        proxy_pass ${BACKEND_URL}/api/v1/config/broker;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key "${API_KEY}";
+        proxy_set_header Origin $http_origin;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/logs/clients {
+        proxy_pass ${BACKEND_URL}/api/v1/clientlogs/events;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key "${API_KEY}";
+        proxy_set_header Origin $http_origin;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, OPTIONS';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    location /api/ai/ {
+        proxy_pass ${BACKEND_URL}/api/v1/ai/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-API-Key $http_x_api_key;
+        proxy_set_header Origin $http_origin;
+        proxy_connect_timeout 90s;
+        proxy_send_timeout 90s;
+        proxy_read_timeout 90s;
+        client_max_body_size 10M;
+        proxy_request_buffering off;
+        add_header 'Access-Control-Allow-Origin' $http_origin always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT' always;
+        add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization' always;
+        add_header 'Access-Control-Expose-Headers' 'Content-Length,Content-Range' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+        add_header 'Vary' 'Origin' always;
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' $http_origin;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, DELETE, PUT';
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,X-API-Key,Authorization';
+            add_header 'Access-Control-Allow-Credentials' 'true';
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Type' 'text/plain charset=UTF-8';
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+
+    # --- Next.js catch-all (maneja paginas + /api/auth/* + /api/proxy/*) ---
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        proxy_redirect http://localhost:3000/ $scheme://$http_host/;
+        proxy_redirect http://127.0.0.1:3000/ $scheme://$http_host/;
+        proxy_buffering off;
+        proxy_read_timeout 120s;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        client_max_body_size 10M;
+    }
+}

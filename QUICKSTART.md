@@ -1,226 +1,417 @@
-﻿# QUICK START — Despliegue Rapido
+﻿# BHM — Quick Start
 
-**Tiempo estimado**: 5-10 minutos  
-**Sistema**: Windows (PowerShell)  
-**Ultima revision**: 10 de abril de 2026
+> **Sistema**: Windows (PowerShell) + Podman Desktop + kind (Kubernetes)
+> **Ultima revision**: 2026-04-23
 
 ---
 
-## Metodo 1: Script Automatizado (Recomendado)
+## Requisitos previos
 
-### Paso 1: Setup Inicial
+| Herramienta | Version minima | Notas |
+|-------------|----------------|-------|
+| Podman Desktop | 1.4+ | debe estar corriendo |
+| PowerShell | 5.1+ | incluido en Windows 10/11 |
+| kind | 0.20+ | en el PATH |
+| kubectl | 1.28+ | en el PATH |
 
 ```powershell
-cd c:\Projects\BunkerMTest\BunkerMTest
+kind version ; kubectl version --client ; podman version
+```
 
-# Genera .env.dev con secrets aleatorios y crea directorios de datos
-.\deploy.ps1 -Action setup
+---
 
-# En caso el archivo esté bloqueado por políticas de seguridad de Windows
+## Ciclo de vida completo
+
+### 1. Setup inicial (primera vez)
+
+```powershell
+cd C:\Projects\BunkerMTest\BunkerMTest
+
+# Si PowerShell bloquea la ejecucion de scripts:
 Unblock-File deploy.ps1
+
+# Genera .env.dev con secretos aleatorios y crea directorios de datos
+.\deploy.ps1 -Action setup
 ```
 
-### Paso 2: Construir imagenes
+`setup` genera con valores seguros aleatorios: `JWT_SECRET`, `AUTH_SECRET`, `API_KEY`,
+`POSTGRES_PASSWORD`, `NEXTAUTH_SECRET`, `ADMIN_INITIAL_PASSWORD`.
+
+### 2. Construir imagenes
 
 ```powershell
-# Construir imagen principal de BHM (primera vez o cuando haya cambios de codigo)
-.\deploy.ps1 -Action build
-
-# Reconstruir imagen de Mosquitto (solo necesario cuando cambie Dockerfile.mosquitto)
-.\deploy.ps1 -Action build-mosquitto
+.\deploy.ps1 -Action build            # bhm-frontend, bhm-api, bhm-identity
+.\deploy.ps1 -Action build-mosquitto  # broker MQTT (solo si cambia Dockerfile.mosquitto)
 ```
 
-### Paso 3: Iniciar servicios
+### 3. Iniciar el cluster y los servicios
 
 ```powershell
-# Iniciar plataforma BHM en baseline Compose-first
-# Sigue funcionando sobre Podman/Docker sin Kubernetes y PostgreSQL
-# ya forma parte del baseline operativo del stack.
 .\deploy.ps1 -Action start
 ```
 
-`deploy.ps1 -Action start` levanta ahora el baseline Compose-first completo, incluyendo
-`postgres`, y el smoke test verifica conectividad real a PostgreSQL desde `bunkerm-platform`
-y `bhm-reconciler`.
+Crea (o reutiliza) el cluster kind `bhm-lab`, carga las imagenes, aplica los manifiestos
+Kubernetes y espera a que todos los pods esten listos.
 
-### Paso 4: Verificar estado
+Pods levantados: `postgres`, `mosquitto`, `bhm-frontend`, `bhm-api`,
+`bhm-identity`, `bhm-alert-delivery`.
+
+> **Primera vez**: espera 3-5 minutos. PostgreSQL debe inicializarse y los servicios
+> Python aplicar las migraciones Alembic antes de arrancar.
+
+### 4. Verificar estado
 
 ```powershell
-.\deploy.ps1 -Action status
+.\deploy.ps1 -Action status   # lista pods y servicios del namespace bhm-lab
+.\deploy.ps1 -Action smoke    # checks de endpoints — deben mostrar OK
 ```
 
-### Paso 5: Acceder a la plataforma
+### 5. Acceder a la plataforma
 
-- **Web UI**: http://localhost:2000
-- **MQTT broker**: `localhost:1900`
-- **PostgreSQL**: `localhost:5432`
-
-Si necesitas `pgAdmin`, levántalo manualmente fuera del flujo normal de deploy:
-
-```powershell
-docker compose --env-file .env.dev -f docker-compose.dev.yml --profile tools up -d pgadmin
-```
-
-#### Credenciales de la UI web
-
-Las credenciales del administrador se establecen con las variables `ADMIN_INITIAL_EMAIL` y
-`ADMIN_INITIAL_PASSWORD` del archivo `.env.dev`, generadas automáticamente con `setup`.
+| Servicio | Acceso |
+|---------|--------|
+| Web UI | http://localhost:22000 |
+| API docs (OpenAPI) | http://localhost:22000/api/docs |
+| MQTT broker (TCP) | `localhost:21900` |
+| MQTT broker (WS) | `localhost:29001` |
 
 ```powershell
-# Ver credenciales generadas
-Get-Content .env.dev | Select-String 'ADMIN_INITIAL'
-```
-
-> **Nota**: Si `.env.dev` no define `ADMIN_INITIAL_PASSWORD`, el sistema genera una contraseña
-> aleatoria en el primer arranque y la muestra en el log del contenedor:
-> ```powershell
-> podman logs bunkerm-platform 2>&1 | Select-String 'Contrasena'
-> ```
-> Cambia la contraseña desde la UI en **Settings → Account** tras el primer login.
-
----
-
-## Metodo 2: Hot-patch (sin rebuild)
-
-Para aplicar cambios de codigo a un contenedor ya corriendo sin reconstruir la imagen completa:
-
-```powershell
-# Actualizar servicios Python del backend (dynsec, monitor, clientlogs, config, ai)
-.\deploy.ps1 -Action patch-backend
-
-# Actualizar frontend Next.js
-.\deploy.ps1 -Action patch-frontend
-```
-
-> Los endpoints de AI usan el prefijo `/api/v1/ai` (p.ej. `GET /api/v1/ai/health`).
-
----
-
-## Desarrollo Frontend: Tipos generados desde OpenAPI
-
-After any backend schema change (e.g. new fields in `core/config.py` or a router model), regenerate
-the TypeScript types so the compiler catches mismatches at build time:
-
-```powershell
-# Requires the stack to be running at localhost:2000
-cd bunkerm-source\frontend
-npm run gen-types
-```
-
-The command fetches `http://localhost:2000/api/openapi.json` and overwrites
-`frontend/types/api.generated.ts` with types derived from the live Pydantic schema.
-
-**When to run:**
-- After adding or renaming a field in any Pydantic request/response model
-- After pulling backend changes from another contributor
-- Before opening a pull request that modifies API contracts
-
-> `types/api.generated.ts` is intentionally excluded from version control (`.gitignore`).
-> A hand-written placeholder is committed so the project compiles without running the generator.
-
----
-
-## Metodo 3: Simulador Industrial
-
-```powershell
-# Ejecutar simulador de invernadero
-.\simulator.ps1 start
-
-# Ver estado del simulador
-.\simulator.ps1 status
-
-# Ver logs en tiempo real
-.\simulator.ps1 logs
-
-# Detener
-.\simulator.ps1 stop
-```
-
-El simulador se conecta a `localhost:1900` y publica datos de 12 dispositivos IoT.
-
----
-
-## Gestion de Contenedores
-
-```powershell
-# Detener servicios
-.\deploy.ps1 -Action stop
-
-# Reiniciar servicios
-.\deploy.ps1 -Action restart
-
-# Ver logs en tiempo real
-.\deploy.ps1 -Action logs -Follow
-
-# Logs de un contenedor especifico
-podman logs bunkerm-platform -f
-
-# Limpiar todo (CUIDADO: borra todos los datos)
-.\deploy.ps1 -Action clean
+# Ver credenciales del admin inicial generadas en setup
+Get-Content .env.dev | Select-String "ADMIN_INITIAL"
 ```
 
 ---
 
-## Testing MQTT directo
+## Gestion con kubectl
+
+### Estado general
 
 ```powershell
-# Publicar mensaje en el broker interno
-podman exec bunkerm-platform mosquitto_pub -u bunker -P <password> -t test/topic -m "Hello"
+kubectl get pods -n bhm-lab                                    # estado de todos los pods
+kubectl get svc  -n bhm-lab                                    # servicios y puertos
+kubectl get all  -n bhm-lab                                    # todos los recursos
+kubectl get events -n bhm-lab --sort-by='.lastTimestamp'       # eventos recientes
+```
 
-# Suscribirse a topics
-podman exec bunkerm-platform mosquitto_sub -u bunker -P <password> -t "test/#" -v
+### Logs
+
+```powershell
+kubectl logs deployment/bhm-frontend   -n bhm-lab --tail=100
+kubectl logs deployment/bhm-api        -n bhm-lab --tail=100
+kubectl logs deployment/bhm-identity   -n bhm-lab --tail=100
+kubectl logs statefulset/mosquitto     -n bhm-lab -c mosquitto  --tail=100
+kubectl logs statefulset/mosquitto     -n bhm-lab -c reconciler --tail=100
+kubectl logs statefulset/postgres      -n bhm-lab --tail=50
+
+# Seguir logs en tiempo real (Ctrl+C para salir)
+kubectl logs deployment/bhm-api -n bhm-lab -f
+```
+
+### Rollouts y reinicios
+
+```powershell
+kubectl rollout restart deployment/bhm-api      -n bhm-lab
+kubectl rollout restart deployment/bhm-identity -n bhm-lab
+kubectl rollout restart deployment/bhm-frontend -n bhm-lab
+
+# Verificar que un rollout termino correctamente
+kubectl rollout status deployment/bhm-api -n bhm-lab
+```
+
+### Ejecutar comandos en pods
+
+```powershell
+# Abrir shell interactivo
+kubectl exec -it -n bhm-lab deployment/bhm-api      -- sh
+kubectl exec -it -n bhm-lab deployment/bhm-identity -- sh
+
+# Ver variables de entorno de un pod
+kubectl exec -n bhm-lab deployment/bhm-identity -- env
+
+# Migraciones Alembic desde el pod bhm-api
+kubectl exec -n bhm-lab deployment/bhm-api -- sh -c "cd /app && alembic upgrade head"
+kubectl exec -n bhm-lab deployment/bhm-api -- sh -c "cd /app && alembic current"
+```
+
+### Escalar deployments
+
+```powershell
+kubectl scale deployment/bhm-api -n bhm-lab --replicas=0   # pausar
+kubectl scale deployment/bhm-api -n bhm-lab --replicas=1   # restaurar
+```
+
+### Secrets y ConfigMaps
+
+```powershell
+# Listar claves del Secret (valores en base64)
+kubectl get secret bhm-env -n bhm-lab -o jsonpath='{.data}' | ConvertFrom-Json
+
+# Ver ConfigMap de variables no secretas
+kubectl get configmap bhm-k8s-config -n bhm-lab -o yaml
 ```
 
 ---
 
-## Troubleshooting Rapido
+## Acceso a PostgreSQL
 
-### Error: "Puerto ya en uso"
-
-```powershell
-netstat -ano | findstr :2000
-# Detener el proceso con el PID encontrado:
-Stop-Process -Id <PID> -Force
-```
-
-### Error: "Imagen no encontrada"
+### Port-forward (requerido para conexion externa)
 
 ```powershell
-# Reconstruir imagen
-.\deploy.ps1 -Action build
+# Abrir en una terminal separada; dejar corriendo mientras usas la BD
+kubectl port-forward -n bhm-lab statefulset/postgres 5432:5432
 ```
 
-### Frontend no actualizado tras patch-frontend
+### Parametros de conexion para herramientas externas
 
-```
-# Limpiar cache del navegador: Ctrl+Shift+R
-```
+Con el port-forward activo:
 
-### Ver logs de un servicio especifico del contenedor
+| Campo | Valor |
+|-------|-------|
+| Host | `localhost` |
+| Puerto | `5432` |
+| Base de datos | `bhm_db` |
+| Usuario | `bhm` |
+| Contrasena | valor de `POSTGRES_PASSWORD` en `.env.dev` |
 
 ```powershell
-podman exec bunkerm-platform tail -f /var/log/supervisor/dynsec-api.out.log
-podman exec bunkerm-platform tail -f /var/log/supervisor/nextjs.out.log
+Get-Content .env.dev | Select-String "POSTGRES_PASSWORD"
+```
+
+#### pgAdmin 4
+
+1. Descargar desde https://www.pgadmin.org/download/ e instalar
+2. Iniciar el port-forward (ver arriba)
+3. En pgAdmin: **Add New Server**
+   - **General > Name**: `BHM Dev`
+   - **Connection > Host**: `localhost`
+   - **Connection > Port**: `5432`
+   - **Connection > Username**: `bhm`
+   - **Connection > Password**: valor de `POSTGRES_PASSWORD`
+   - **Connection > Maintenance database**: `bhm_db`
+
+#### DBeaver Community
+
+1. Descargar desde https://dbeaver.io/download/ e instalar
+2. Iniciar el port-forward
+3. Nueva conexion > tipo **PostgreSQL**
+   - Server Host: `localhost` / Port: `5432`
+   - Database: `bhm_db` / Username: `bhm` / Password: valor de `POSTGRES_PASSWORD`
+4. Aceptar la descarga del driver JDBC cuando DBeaver lo solicite
+
+### Conexion psql directo en el pod (sin port-forward)
+
+```powershell
+kubectl exec -it -n bhm-lab statefulset/postgres -- psql -U bhm -d bhm_db
+```
+
+### Consultas utiles
+
+```sql
+-- Schemas disponibles
+\dn
+
+-- Usuarios del panel (schema identity)
+SET search_path TO identity;
+SELECT id, email, role, created_at FROM bhm_users;
+
+-- Estado de reconciliacion del broker (schema control_plane)
+SET search_path TO control_plane;
+SELECT * FROM reconcile_state ORDER BY updated_at DESC LIMIT 10;
+
+-- Estadisticas diarias (schema reporting)
+SET search_path TO reporting;
+SELECT * FROM daily_broker_reports ORDER BY date DESC LIMIT 7;
+
+-- Ultimos eventos de clientes (schema history)
+SET search_path TO history;
+SELECT * FROM client_events ORDER BY created_at DESC LIMIT 20;
 ```
 
 ---
 
-## Estructura del Proyecto
+## Port-forwards para otros servicios
 
+```powershell
+kubectl port-forward -n bhm-lab service/bhm-api      9001:9001   # API directo
+kubectl port-forward -n bhm-lab service/bhm-identity 8080:8080   # Identity directo
+kubectl port-forward -n bhm-lab service/bhm-frontend 2000:2000   # alternativa al NodePort
 ```
-BunkerMTest/
-├── deploy.ps1                  # Script de despliegue
-├── simulator.ps1               # Script del simulador
-├── docker-compose.dev.yml      # Compose principal (bunkerm + postgres opcional)
-├── docker-compose.simulator.yml # Compose del simulador
-├── .env.dev                    # Variables de entorno (generado por setup)
-├── bunkerm-source/             # Codigo fuente (backend + frontend)
-│   ├── Dockerfile.next
-│   ├── backend/app/            # Servicios FastAPI (Python)
-│   └── frontend/               # Aplicacion Next.js
-├── config/                     # Configuraciones del broker
-│   ├── mosquitto/
-│   └── postgres/
-├── scripts/                    # Scripts de utilidad
-└── greenhouse-simulator/       # Simulador MQTT de invernadero
+
+---
+
+## Actualizacion de componentes individuales
+
+Con el cluster corriendo puedes reconstruir y desplegar cualquier componente de forma
+aislada sin tocar los demas pods ni perder el estado de PostgreSQL.
+
+### Reconstruir y aplicar un solo componente
+
+```powershell
+# Solo el frontend (Next.js + nginx)
+.\deploy.ps1 -Action update-frontend
+
+# Solo el backend API (bhm-api + bhm-alert-delivery comparten imagen)
+.\deploy.ps1 -Action update-api
+
+# Solo el servicio de identidad / login
+.\deploy.ps1 -Action update-identity
+
+# Solo el broker MQTT (mosquitto + sidecars reconciler/observability)
+.\deploy.ps1 -Action update-mosquitto
+
+# Todos los componentes en secuencia (sin recrear el cluster)
+.\deploy.ps1 -Action update-all
 ```
+
+Cada `update-*` ejecuta: **build de imagen → carga en kind → rollout restart**.
+
+> `update-api` hace rollout de `deployment/bhm-api` **y** `deployment/bhm-alert-delivery`
+> porque comparten la misma imagen `bhm-api`.
+
+---
+
+## Rollout sin rebuild de imagen
+
+Si solo necesitas reiniciar un pod (cambio de ConfigMap, Secret o pod colgado) sin
+reconstruir ninguna imagen:
+
+```powershell
+# Reiniciar un componente especifico
+.\deploy.ps1 -Action rollout -Component frontend
+.\deploy.ps1 -Action rollout -Component api          # api + alert-delivery
+.\deploy.ps1 -Action rollout -Component identity
+.\deploy.ps1 -Action rollout -Component mosquitto
+.\deploy.ps1 -Action rollout -Component alerts       # solo alert-delivery
+
+# Reiniciar todos los pods
+.\deploy.ps1 -Action rollout -Component all
+```
+
+---
+
+## Desarrollo: hot-patch sin rebuild de imagen
+
+Para iterar rapido en el codigo fuente sin esperar un build de imagen completo:
+
+```powershell
+.\deploy.ps1 -Action patch-backend   # copia /backend/app al pod y reinicia bhm-api
+.\deploy.ps1 -Action patch-frontend  # copia /frontend al pod y reinicia bhm-frontend
+```
+
+> Nota: los cambios del hot-patch se pierden con el siguiente rollout o recreacion
+> del pod. Para persistirlos hay que hacer un `update-*`.
+
+---
+
+## Redeploy completo preservando secretos
+
+Destruye el cluster kind y lo recrea desde cero, sin tocar `.env.dev`.
+
+```powershell
+.\deploy.ps1 -Action redeploy
+```
+
+Equivalente manual:
+```powershell
+.\deploy.ps1 -Action clean    # elimina el cluster (pide confirmacion)
+.\deploy.ps1 -Action start    # recrea el cluster con los secretos existentes
+```
+
+---
+
+## Mantenimiento
+
+### Re-inyectar secretos despues de cambiar .env.dev
+
+Si rotaste una contrasena o cambiaste una variable en `.env.dev` sin recrear el cluster:
+
+```powershell
+.\deploy.ps1 -Action env-sync
+```
+
+El script elimina y recrea el Secret `bhm-env` con los valores actuales de `.env.dev`.
+Al finalizar pregunta si hacer rollout de todos los pods para aplicar los cambios.
+
+### Aplicar migraciones de base de datos
+
+```powershell
+.\deploy.ps1 -Action db-migrate
+```
+
+Ejecuta `alembic upgrade head` dentro del pod `bhm-api` en estado Running y muestra
+la salida completa. No reinicia ningun servicio.
+
+### Recargar configuracion de Mosquitto
+
+```powershell
+.\deploy.ps1 -Action reload-mosquitto
+```
+
+Envia una senal de recarga al pod mosquitto. Util despues de cambiar reglas ACL
+o configuracion del broker sin necesidad de reiniciar el StatefulSet.
+
+---
+
+## Tests y smoke
+
+```powershell
+.\deploy.ps1 -Action test    # pytest en el pod bhm-api
+.\deploy.ps1 -Action smoke   # checks de endpoints del stack
+```
+
+---
+
+## Ciclo de vida del cluster
+
+```powershell
+.\deploy.ps1 -Action stop      # escala todos los workloads a 0 (preserva cluster y PVCs)
+.\deploy.ps1 -Action restart   # stop + start
+.\deploy.ps1 -Action logs      # logs de los deployments principales
+.\deploy.ps1 -Action clean     # PELIGRO: elimina el cluster completo
+```
+
+---
+
+## Diagnostico rapido
+
+```powershell
+# Por que no arranca un pod
+kubectl describe pod -n bhm-lab -l app.kubernetes.io/name=bhm-identity
+
+# Eventos de warning del namespace
+kubectl get events -n bhm-lab --field-selector=type=Warning
+
+# Verificar que el Secret de credenciales existe
+kubectl get secret bhm-env -n bhm-lab
+```
+
+---
+
+## Referencia rapida de todas las acciones
+
+| Accion | Descripcion |
+|--------|-------------|
+| `setup` | Genera `.env.dev` con secretos aleatorios y crea directorios de datos |
+| `build` | Construye las 4 imagenes (frontend, api, identity, mosquitto) |
+| `build-mosquitto` | Construye solo la imagen del broker MQTT |
+| `start` | Crea (o reutiliza) el cluster kind y levanta todos los workloads |
+| `stop` | Escala los workloads a 0; preserva el cluster y los PVCs |
+| `restart` | `stop` + `start` |
+| `status` | Lista pods y servicios del namespace bhm-lab |
+| `logs` | Muestra logs de los pods principales |
+| `smoke` | Checks de endpoints — deben mostrar OK |
+| `test` | Ejecuta pytest dentro del pod bhm-api |
+| `clean` | Elimina el cluster kind completo (pide confirmacion) |
+| `redeploy` | Destruye el cluster y lo recrea preservando `.env.dev` |
+| `update-frontend` | Build + carga en kind + rollout de bhm-frontend |
+| `update-api` | Build + carga en kind + rollout de bhm-api y bhm-alert-delivery |
+| `update-identity` | Build + carga en kind + rollout de bhm-identity |
+| `update-mosquitto` | Build + carga en kind + rollout de mosquitto |
+| `update-all` | Todos los `update-*` en secuencia |
+| `rollout -Component <X>` | Rollout restart sin rebuild (`frontend\|api\|identity\|mosquitto\|alerts\|all`) |
+| `patch-frontend` | Hot-copy de fuentes al pod + rollout (sin rebuild) |
+| `patch-backend` | Hot-copy de fuentes al pod + rollout (sin rebuild) |
+| `env-sync` | Recrea el Secret `bhm-env` con los valores de `.env.dev` |
+| `db-migrate` | Ejecuta `alembic upgrade head` en el pod bhm-api |
+| `reload-mosquitto` | Envia senal de recarga al pod mosquitto |
+

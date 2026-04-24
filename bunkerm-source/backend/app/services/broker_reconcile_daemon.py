@@ -5,11 +5,24 @@ import argparse
 import asyncio
 import json
 import logging
+import pathlib
+import time
 
 from core.database import init_db
 from services import broker_reconcile_runner
 
 logger = logging.getLogger(__name__)
+
+# Archivo de heartbeat leido por las probes de Kubernetes para verificar actividad real del daemon
+_HEARTBEAT_FILE = pathlib.Path("/tmp/reconciler.alive")
+
+
+def _write_heartbeat() -> None:
+    """Escribe el timestamp actual al archivo de heartbeat de forma atomica."""
+    try:
+        _HEARTBEAT_FILE.write_text(str(time.time()))
+    except OSError:
+        logger.warning("No se pudo escribir el heartbeat en %s", _HEARTBEAT_FILE)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -38,6 +51,9 @@ def _build_parser() -> argparse.ArgumentParser:
 async def run_daemon(scopes: list[str], interval_seconds: float, once: bool = False) -> int:
     await init_db()
 
+    # Escribe el heartbeat inicial para que las probes no fallen durante el arranque
+    _write_heartbeat()
+
     while True:
         try:
             results = await broker_reconcile_runner.reconcile_requested_scopes(scopes)
@@ -47,6 +63,9 @@ async def run_daemon(scopes: list[str], interval_seconds: float, once: bool = Fa
             logger.exception("Broker reconcile cycle failed")
             if once:
                 return 1
+
+        # Actualiza el heartbeat tras cada ciclo (exitoso o fallido) para reflejar actividad real
+        _write_heartbeat()
 
         if once:
             return 0

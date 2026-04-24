@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, COOKIE_NAME } from '@/lib/auth'
-import { readUsers, deleteUser, writeUsers, stripHash } from '@/lib/users'
-import bcrypt from 'bcryptjs'
+import { deleteUserViaApi, resetUserPasswordViaApi } from '@/lib/users-api'
 
 async function requireAdmin(request: NextRequest) {
   const token = request.cookies.get(COOKIE_NAME)?.value
@@ -24,19 +23,14 @@ export async function DELETE(
     return NextResponse.json({ error: 'Cannot delete your own account' }, { status: 400 })
   }
 
-  const users = readUsers()
-  const admins = users.filter((u) => u.role === 'admin')
-  const target = users.find((u) => u.id === id)
-  if (!target) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-
-  if (target.role === 'admin' && admins.length <= 1) {
-    return NextResponse.json({ error: 'Cannot delete the last admin account' }, { status: 400 })
+  try {
+    await deleteUserViaApi(id)
+    return NextResponse.json({ message: 'User deleted' }, { status: 200 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Internal server error'
+    const status = msg.includes('not found') ? 404 : msg.includes('last admin') ? 400 : 500
+    return NextResponse.json({ error: msg }, { status })
   }
-
-  const success = deleteUser(id)
-  if (!success) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-
-  return NextResponse.json({ message: 'User deleted' }, { status: 200 })
 }
 
 // PATCH /api/auth/users/[id] — reset password for a panel user (admin only)
@@ -53,12 +47,12 @@ export async function PATCH(
     return NextResponse.json({ error: 'Password must be between 8 and 128 characters' }, { status: 400 })
   }
 
-  const users = readUsers()
-  const user = users.find((u) => u.id === id)
-  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-
-  user.passwordHash = await bcrypt.hash(password, 10)
-  writeUsers(users)
-
-  return NextResponse.json({ user: stripHash(user) }, { status: 200 })
+  try {
+    const user = await resetUserPasswordViaApi(id, password)
+    return NextResponse.json({ user }, { status: 200 })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Internal server error'
+    const status = msg.includes('not found') ? 404 : 500
+    return NextResponse.json({ error: msg }, { status })
+  }
 }

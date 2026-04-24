@@ -1,0 +1,4 @@
+# Patch Dockerfile: reuse existing bhm-api image (pip layers cached)
+# Only re-copies backend/app to pick up Python source changes.
+FROM bhm-api:latest
+COPY backend/app /app

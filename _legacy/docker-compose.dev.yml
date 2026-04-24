@@ -1,26 +1,28 @@
 # version obsoleta eliminada (Compose v2 no la requiere)
 #
-# ARQUITECTURA: Compose-first baseline de BHM
+# ARQUITECTURA: Microservicios BHM (Phase 5 final)
 #
-#   ┌──────────────────────────────────────────────────────────────────┐
-#   │  bunkerm-network                                                 │
-#   │                                                                  │
-#   │  ┌─────────────────────────┐    ┌───────────────────────────┐   │
-#   │  │   bunkerm-platform      │───▶│   bunkerm-mosquitto        │   │◀── Dispositivos / App procesamiento
-#   │  │   (UI + APIs + Next.js) │    │   (broker MQTT standalone) │   │    (puerto 1900)
-#   │  └─────────────────────────┘    └───────────────────────────┘   │
-#   └──────────────────────────────────────────────────────────────────┘
+#   ┌──────────────────────────────────────────────────────────────────────────────┐
+#   │  bunkerm-network                                                             │
+#   │                                                                              │
+#   │  bhm-frontend (:2000)  →  bhm-api (:9001)  →  postgres (:5432)             │
+#   │  bhm-frontend (:2000)  →  bhm-identity (:8080)  →  postgres (:5432)        │
+#   │  bhm-api (:9001)       →  bunkerm-mosquitto (:1900)                         │
+#   │  bhm-reconciler        →  bunkerm-mosquitto + postgres                      │
+#   │  bhm-broker-observability → bunkerm-mosquitto (read-only)                  │
+#   │  bhm-alert-delivery    →  postgres                                          │
+#   └──────────────────────────────────────────────────────────────────────────────┘
 #
-# El broker sobrevive reinicios de la plataforma de gestion (ciclos de vida independientes).
-# Volúmenes compartidos (mismas rutas en ambos contenedores):
+# Ciclos de vida independientes: el broker y cada servicio se reinician por separado.
+# Volumenes compartidos (mismas rutas donde aplica):
 #   mosquitto-data  → /var/lib/mosquitto  (DynSec JSON, persistencia)
 #   mosquitto-conf  → /etc/mosquitto      (mosquitto.conf + conf.d/)
-#   mosquitto-log   → /var/log/mosquitto  (logs leídos por clientlogs)
+#   mosquitto-log   → /var/log/mosquitto  (logs leidos por bhm-broker-observability)
 #
 # Para desarrollar nuevas funcionalidades:
 #   - Backend: editar bunkerm-source/backend/app/
 #   - Frontend: editar bunkerm-source/frontend/
-#   - Rebuild BHM platform:  .\deploy.ps1 -Action build
+#   - Rebuild:  .\deploy.ps1 -Action build
 #   - Rebuild mosquitto: .\deploy.ps1 -Action build-mosquitto
 
 services:
@@ -96,41 +98,81 @@ services:
       start_period: 15s
 
   # ==========================================
-  # BHM platform - Servicio transicional consolidado
-  # En esta fase representa temporalmente bhm-web + bhm-api.
+  # BHM Frontend — Next.js standalone + nginx reverse proxy
+  # Sirve la UI en :2000 y proxea /api/* hacia bhm-api:9001
   # ==========================================
-  bunkerm:
-    image: bunkermtest-bunkerm:latest
-    container_name: bunkerm-platform
+  bhm-frontend:
+    image: bhm-frontend:latest
+    container_name: bunkerm-frontend
     restart: unless-stopped
     depends_on:
       mosquitto:
         condition: service_healthy
+      bhm-identity:
+        condition: service_healthy
+      bhm-api:
+        condition: service_healthy
     environment:
-      # ------------------------------------------------------------------
-      # Variables requeridas (sin fallback) — deben estar en .env.dev
-      # Generadas automaticamente con: .\deploy.ps1 -Action setup
-      # Si faltan, el deploy falla con mensaje claro (validate-env.py).
-      # ------------------------------------------------------------------
-      - JWT_SECRET=${JWT_SECRET}
+      # URL interna del API backend (nginx proxea /api/* aqui)
+      - BACKEND_URL=http://bhm-api:9001
+      # Secretos de sesion Next.js
       - AUTH_SECRET=${AUTH_SECRET}
-
-      # ------------------------------------------------------------------
-      # Variables con fallback seguro — opcionales en .env.dev
-      # El valor a la derecha de :- se usa si la variable no esta definida.
-      # Sobreescribir en .env.dev para entornos distintos de desarrollo local.
-      # ------------------------------------------------------------------
-      # UI admin credentials — used by Next.js to seed the first user
+      # Identity service
+      - IDENTITY_API_URL=http://bhm-identity:8080
+      - IDENTITY_API_KEY=${API_KEY:-default_api_key_replace_in_production}
+      # UI admin credentials — para seed del primer usuario en el arranque
       - ADMIN_INITIAL_EMAIL=${ADMIN_INITIAL_EMAIL:-admin@bhm.local}
       - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-Usuario@1}
-      # API key — tambien referenciada en build args con el mismo fallback
+      # API key — para auth entre Next.js server-side y bhm-api
+      - API_KEY=${API_KEY:-default_api_key_replace_in_production}
+      # URLs publicas
+      - NEXTAUTH_URL=http://localhost:2000
+      - FRONTEND_URL=http://localhost:2000
+      - ALLOWED_ORIGINS=*
+      - ALLOWED_HOSTS=*
+      # Timezone
+      - TZ=${TZ:-Europe/Madrid}
+      - NODE_ENV=production
+    ports:
+      # UI + APIs accesibles en http://localhost:2000 (nginx interno del contenedor)
+      - "2000:2000"
+    volumes:
+      - bunkerm-logs-nginx:/var/log/nginx
+    networks:
+      bunkerm-network:
+        aliases:
+          - bhm-frontend
+          - bhm-web
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:2000/api/monitor/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # ==========================================
+  # BHM API — FastAPI + uvicorn (todos los routers excepto identity)
+  # No expone puerto al host (acceso via bhm-frontend nginx)
+  # ==========================================
+  bhm-api:
+    image: bhm-api:latest
+    container_name: bunkerm-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_healthy
+    environment:
+      # JWT
+      - JWT_SECRET=${JWT_SECRET}
+      # API key compartida
       - API_KEY=${API_KEY:-default_api_key_replace_in_production}
       # MQTT — apunta al contenedor mosquitto standalone en la red interna
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1900
       - MQTT_USERNAME=${MQTT_USERNAME:-admin}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
-      # Variables que usan los backends Python para conectarse al broker
       - MOSQUITTO_ADMIN_USERNAME=${MQTT_USERNAME:-admin}
       - MOSQUITTO_ADMIN_PASSWORD=${MQTT_PASSWORD:-Usuario@1}
       - MOSQUITTO_IP=mosquitto
@@ -138,7 +180,6 @@ services:
       - MOSQUITTO_INTERNAL_HOST=mosquitto
       - MOSQUITTO_INTERNAL_PORT=1901
       # URLs
-      - FRONTEND_URL=http://localhost:2000
       - ALLOWED_ORIGINS=*
       - ALLOWED_HOSTS=*
       - RATE_LIMIT_PER_MINUTE=100
@@ -151,15 +192,17 @@ services:
       - CLIENT_LOG_PATH=/var/log/api/api_activity.log
       - BROKER_OBSERVABILITY_ENABLED=true
       - BROKER_OBSERVABILITY_URL=http://bhm-broker-observability:9102
+      # PostgreSQL
       - DATABASE_URL=${DATABASE_URL}
       - CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL}
       - HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL}
       - REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL}
-      # Paths internos heredados de la plataforma actual
+      - IDENTITY_DATABASE_URL=${IDENTITY_DATABASE_URL}
+      # Paths internos
       - DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
       - BROKER_RECONCILE_MODE=daemon
       - BROKER_RECONCILE_WAIT_TIMEOUT_SECONDS=12
-      # Notifiaciones de Alertas (SMTP)
+      # Notificaciones de Alertas (SMTP)
       - ALERT_NOTIFY_ENABLED=${ALERT_NOTIFY_ENABLED:-false}
       - ALERT_NOTIFY_EMAIL_ENABLED=${ALERT_NOTIFY_EMAIL_ENABLED:-true}
       - ALERT_NOTIFY_EMAIL_TO=${ALERT_NOTIFY_EMAIL_TO:-}
@@ -174,43 +217,63 @@ services:
       - MAX_UPLOAD_SIZE=10485760
       - SSL_CERT_PATH=/app/certs/cert.pem
       - SSL_KEY_PATH=/app/certs/key.pem
-    ports:
-      # UI + APIs accesibles en http://localhost:2000 (nginx interno del contenedor)
-      - "2000:2000"
     volumes:
-      # Datos exclusivos de la plataforma BHM actual
-      - bunkerm-nextjs:/nextjs/data
       - bunkerm-logs-api:/var/log/api
-      - bunkerm-logs-nginx:/var/log/nginx
     networks:
       bunkerm-network:
         aliases:
-          - bhm-platform
           - bhm-api
-          - bhm-web
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:2000/api/monitor/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:9001/api/v1/monitor/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 45s
+
+  # ==========================================
+  # BHM Identity Service — standalone identity + credentials (5B-2)
+  # ==========================================
+  bhm-identity:
+    image: bhm-identity:latest
+    container_name: bunkerm-identity
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - IDENTITY_DATABASE_URL=${IDENTITY_DATABASE_URL}
+      - DATABASE_URL=${DATABASE_URL}
+      - API_KEY=${API_KEY:-default_api_key_replace_in_production}
+      - ADMIN_INITIAL_EMAIL=${ADMIN_INITIAL_EMAIL:-admin@bhm.local}
+      - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-Usuario@1}
+      - ALLOWED_ORIGINS=*
+      - ALLOWED_HOSTS=*
+      - TZ=${TZ:-Europe/Madrid}
+      - LOG_LEVEL=INFO
+    networks:
+      bunkerm-network:
+        aliases:
+          - bhm-identity
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ==========================================
   # BHM reconciler - servicio transicional broker-facing
-  # Ejecuta el loop de reconciliación fuera del proceso web, pero aún con la
-  # misma imagen y volúmenes compartidos del baseline Compose-first.
+  # Ejecuta el loop de reconciliación fuera del proceso web.
   # ==========================================
   bhm-reconciler:
-    image: bunkermtest-bunkerm:latest
+    image: bhm-api:latest
     container_name: bunkerm-reconciler
     restart: unless-stopped
     depends_on:
       mosquitto:
         condition: service_healthy
     environment:
-      - JWT_SECRET=${JWT_SECRET}
-      - AUTH_SECRET=${AUTH_SECRET}
-      - API_KEY=${API_KEY:-default_api_key_replace_in_production}
+      # Credenciales MQTT para conexion al broker
       - MQTT_BROKER=mosquitto
       - MQTT_PORT=1900
       - MQTT_USERNAME=${MQTT_USERNAME:-admin}
@@ -221,30 +284,21 @@ services:
       - MOSQUITTO_PORT=1900
       - MOSQUITTO_INTERNAL_HOST=mosquitto
       - MOSQUITTO_INTERNAL_PORT=1901
-      - FRONTEND_URL=http://localhost:2000
-      - ALLOWED_ORIGINS=*
-      - ALLOWED_HOSTS=*
-      - RATE_LIMIT_PER_MINUTE=100
-      - TZ=${TZ:-Europe/Madrid}
-      - LOG_LEVEL=INFO
-      - API_LOG_FILE=/var/log/api/api_activity.log
-      - BROKER_LOG_PATH=/var/log/mosquitto/mosquitto.log
-      - CLIENT_LOG_PATH=/var/log/api/api_activity.log
+      # Base de datos — el daemon solo requiere acceso al control-plane y al state store
       - DATABASE_URL=${DATABASE_URL}
       - CONTROL_PLANE_DATABASE_URL=${CONTROL_PLANE_DATABASE_URL}
       - HISTORY_DATABASE_URL=${HISTORY_DATABASE_URL}
       - REPORTING_DATABASE_URL=${REPORTING_DATABASE_URL}
+      # Ruta al archivo DynSec del broker (dentro del volumen compartido)
       - DYNSEC_PATH=/var/lib/mosquitto/dynamic-security.json
-      - MAX_UPLOAD_SIZE=10485760
-      - SSL_CERT_PATH=/app/certs/cert.pem
-      - SSL_KEY_PATH=/app/certs/key.pem
+      # Configuracion general
+      - TZ=${TZ:-Europe/Madrid}
+      - LOG_LEVEL=INFO
     command:
       - /bin/sh
       - -c
-      - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.broker_reconcile_daemon --interval 5
+      - /opt/venv/bin/python -m services.broker_reconcile_daemon --interval 5
     volumes:
-      - bunkerm-nextjs:/nextjs/data
-      - bunkerm-logs-api:/var/log/api
       - mosquitto-data:/var/lib/mosquitto
       - mosquitto-conf:/etc/mosquitto
     networks:
@@ -256,7 +310,7 @@ services:
   # Broker observability interno - read-only sobre artefactos del broker
   # ==========================================
   bhm-broker-observability:
-    image: bunkermtest-bunkerm:latest
+    image: bhm-api:latest
     container_name: bunkerm-broker-observability
     restart: unless-stopped
     depends_on:
@@ -270,7 +324,7 @@ services:
     command:
       - /bin/sh
       - -c
-      - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/uvicorn services.broker_observability_api:app --host 0.0.0.0 --port 9102
+      - /opt/venv/bin/uvicorn services.broker_observability_api:app --host 0.0.0.0 --port 9102
     volumes:
       - mosquitto-data:/var/lib/mosquitto:ro
       - mosquitto-conf:/etc/mosquitto:ro
@@ -290,7 +344,7 @@ services:
   # Alert delivery worker - consume outbox persistido
   # ==========================================
   bhm-alert-delivery:
-    image: bunkermtest-bunkerm:latest
+    image: bhm-api:latest
     container_name: bhm-alert-delivery
     restart: unless-stopped
     depends_on:
@@ -317,14 +371,9 @@ services:
     command:
       - /bin/sh
       - -c
-      - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
+      - /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
     volumes:
-      - bunkerm-nextjs:/nextjs/data
       - bunkerm-logs-api:/var/log/api
-    networks:
-      bunkerm-network:
-        aliases:
-          - bhm-alert-delivery
 
   # ==========================================
   # Nginx Reverse Proxy - DESACTIVADO
@@ -368,11 +417,10 @@ networks:
     driver: bridge
 
 volumes:
-  # Datos de postgres (Fase 3-4)
+  # Datos de postgres
   postgres-data:
   pgadmin-data:
-  # Datos exclusivos de BHM platform
-  bunkerm-nextjs:
+  # Datos de los servicios BHM
   bunkerm-logs-api:
   bunkerm-logs-nginx:
   # Volumenes compartidos entre BHM y mosquitto standalone

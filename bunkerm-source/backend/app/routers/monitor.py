@@ -3,6 +3,7 @@ Router Monitor: métricas del broker MQTT, alertas y publicación de mensajes.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -43,8 +44,9 @@ async def get_mqtt_stats(request: Request, nonce: str, timestamp: float,
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Invalid nonce or timestamp")
     try:
-        stats = mqtt_stats.get_stats()
-        stats.update(build_activity_summary(window_seconds=600))
+        stats = await asyncio.to_thread(mqtt_stats.get_stats)
+        activity = await asyncio.to_thread(build_activity_summary, 600)
+        stats.update(activity)
         stats["mqtt_connected"] = bool(stats.get("mqtt_connected", mqtt_stats._is_connected))
         stats["broker_reachable"] = bool(stats.get("broker_reachable", stats["mqtt_connected"]))
         stats["monitor_reconnecting"] = bool(

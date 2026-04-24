@@ -1,0 +1,65 @@
+# =============================================================================
+# Dockerfile.frontend — imagen bhm-frontend
+#
+# Contenido: Next.js standalone + nginx como reverse proxy.
+# Solo sirve la UI y redirige /api/* al servicio bhm-api via BACKEND_URL.
+# NO contiene Python ni uvicorn.
+#
+# Variables de entorno en tiempo de ejecucion:
+#   BACKEND_URL   — URL interna del servicio bhm-api, ej. http://bhm-api:9001
+#   API_KEY       — clave de API para el proxy nginx-to-api (logs endpoints)
+#   AUTH_SECRET   — secreto JWT para NextAuth
+#   NEXTAUTH_URL  — URL publica de la aplicacion
+# =============================================================================
+
+# Stage 1: compilacion Next.js
+FROM node:20-alpine AS nextjs-build
+
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm ci --prefer-offline
+
+COPY frontend .
+
+ENV AUTH_SECRET=build-time-placeholder \
+    NEXT_TELEMETRY_DISABLED=1
+
+RUN npm run build
+
+# Stage 2: imagen de produccion (nginx + Next.js standalone)
+FROM nginx:1.27-alpine AS final
+
+RUN apk add --no-cache bash curl nodejs
+
+# Directorios necesarios
+RUN mkdir -p \
+    /nextjs \
+    /nextjs/.next/static \
+    /var/log/nginx \
+    /run/nginx \
+    /etc/nginx/conf.d
+
+# Nginx config — usa variable BACKEND_URL para el upstream del API
+# Se aplica envsubst en el entrypoint antes de arrancar nginx
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY default-next.conf.template /etc/nginx/conf.d/default.conf.template
+
+# Next.js standalone output
+COPY --from=nextjs-build /frontend/.next/standalone /nextjs/
+COPY --from=nextjs-build /frontend/.next/static /nextjs/.next/static
+
+# Entrypoint: sustituye variables de entorno en la config de nginx y arranca ambos procesos
+COPY docker/entrypoint-frontend.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Valores por defecto (se sobreescriben en K8s por envFrom)
+ENV BACKEND_URL=http://bhm-api:9001 \
+    API_KEY=replace_in_production \
+    AUTH_SECRET=replace_in_production \
+    NEXTAUTH_URL=http://localhost:2000 \
+    NODE_ENV=production
+
+EXPOSE 2000
+
+CMD ["/entrypoint.sh"]

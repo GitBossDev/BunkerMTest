@@ -374,3 +374,22 @@ class BrokerReconcileSecret(Base):
     encrypted_payload: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
+class BhmUser(Base):
+    """Panel user account for the BHM web UI.
+
+    Persisted in the 'identity' PostgreSQL schema.
+    Created by migration 006; managed by the bhm-identity service (5B-2).
+    """
+    __tablename__ = "bhm_users"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="user", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

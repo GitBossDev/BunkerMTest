@@ -1,0 +1,96 @@
+# =============================================================================
+# Dockerfile.api — imagen bhm-api
+#
+# Contenido: FastAPI + uvicorn. Solo backend Python.
+# NO contiene nginx, Node.js ni Next.js.
+#
+# Variables de entorno requeridas en tiempo de ejecucion (via bhm-env Secret):
+#   DATABASE_URL / CONTROL_PLANE_DATABASE_URL
+#   HISTORY_DATABASE_URL / REPORTING_DATABASE_URL
+#   API_KEY
+#   JWT_SECRET
+#   MQTT_BROKER / MQTT_PORT / MQTT_USERNAME / MQTT_PASSWORD
+#   DYNSEC_PATH / MOSQUITTO_IP / MOSQUITTO_PORT
+# =============================================================================
+
+FROM python:3.12-slim AS final
+
+# Dependencias del sistema minimas
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    libffi-dev \
+    libpq-dev \
+    mosquitto \
+    && rm -rf /var/lib/apt/lists/*
+
+# Virtual environment
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir \
+    psutil \
+    paho-mqtt \
+    fastapi \
+    python-dotenv \
+    pydantic \
+    pydantic-settings \
+    "uvicorn[standard]" \
+    pytz \
+    python-multipart \
+    "passlib[bcrypt]" \
+    python-jwt \
+    PyJWT \
+    slowapi \
+    secure \
+    python-decouple \
+    starlette-context \
+    structlog \
+    python-json-logger \
+    aiofiles \
+    types-aiofiles \
+    typing-extensions \
+    "sqlalchemy[asyncio]>=2.0.30" \
+    "aiosqlite>=0.20.0" \
+    "asyncpg>=0.29.0" \
+    "psycopg[binary]>=3.2.1" \
+    "alembic>=1.13.0" \
+    "httpx>=0.27.0" \
+    "numpy>=1.26.0" \
+    cryptography \
+    pyOpenSSL \
+    "python-jose[cryptography]" \
+    fastapi-jwt-auth \
+    fastapi-limiter \
+    "pytest>=8.2.0" \
+    "pytest-asyncio>=0.23.0"
+
+# Directorios necesarios
+RUN mkdir -p \
+    /app \
+    /var/log/api \
+    /var/log/mosquitto
+
+# Codigo fuente del backend
+COPY backend/app /app
+
+# Variables de entorno por defecto (se sobreescriben en K8s por envFrom)
+ENV PYTHONPATH=/app \
+    LOG_LEVEL=INFO \
+    API_LOG_FILE=/var/log/api/api_activity.log \
+    CLIENT_LOG_PATH=/var/log/api/api_activity.log \
+    BROKER_LOG_PATH=/var/log/mosquitto/mosquitto.log \
+    BROKER_RECONCILE_MODE=daemon \
+    BROKER_RECONCILE_WAIT_TIMEOUT_SECONDS=12 \
+    MAX_UPLOAD_SIZE=10485760 \
+    ALLOWED_ORIGINS="*" \
+    ALLOWED_HOSTS="*" \
+    RATE_LIMIT_PER_MINUTE=100
+
+WORKDIR /app
+
+EXPOSE 9001
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "9001"]

@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     broker_reconcile_mode: str = "inline"
     broker_reconcile_wait_timeout_seconds: float = 10.0
     broker_reconcile_poll_interval_seconds: float = 0.2
-    broker_reconcile_secret_dir: str = "/nextjs/data/reconcile-secrets"
+    broker_reconcile_secret_dir: str = "/var/lib/mosquitto/reconcile-secrets"
     broker_reconcile_secret_ttl_seconds: float = 120.0
 
     # --- Base de datos ---
@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     control_plane_database_url: Optional[str] = None
     history_database_url: Optional[str] = None
     reporting_database_url: Optional[str] = None
+    identity_database_url: Optional[str] = None
 
     # --- Umbrales de alertas (monitor) ---
     alert_cpu_warning: float = 70.0
@@ -91,6 +92,10 @@ class Settings(BaseSettings):
     @property
     def resolved_reporting_database_url(self) -> str:
         return self.reporting_database_url or self.resolved_history_database_url
+
+    @property
+    def resolved_identity_database_url(self) -> str:
+        return self.identity_database_url or self.database_url
 
 
 @lru_cache(maxsize=1)

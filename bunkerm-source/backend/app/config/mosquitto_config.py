@@ -258,7 +258,7 @@ def generate_mosquitto_conf(
     lines.append("")
 
     # Add main configuration — skip keys handled separately
-    _SKIP_KEYS = {"plugin", "plugin_opt_config_file", "log_type"}
+    _SKIP_KEYS = {"plugin", "plugin_opt_config_file", "log_type", "listener"}
     for key, value in config_data.items():
         if key in _SKIP_KEYS:
             continue

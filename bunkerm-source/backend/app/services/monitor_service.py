@@ -165,19 +165,24 @@ def invalidate_broker_reachability_cache() -> None:
 
 
 def read_max_connections() -> int:
-    """Lee max_connections del mosquitto.conf (caché 30 s)."""
+    """Read max_connections for the primary MQTT listener (cached 30s).
+    Uses MOSQUITTO_PORT (default 1900) to target only the public listener and avoid
+    picking up the low limit on the internal system listener (port 1901, max_connections 16)."""
     now = time.time()
     if _max_connections_cache["value"] and now - _max_connections_cache["ts"] < 30.0:
         return _max_connections_cache["value"]
+    primary_port = int(os.getenv("MOSQUITTO_PORT", str(settings.mqtt_port)))
     limit = 0
     try:
         observed = broker_observability_client.fetch_broker_mosquitto_config_sync()
         for listener in observed.get("listeners", []):
             if not isinstance(listener, dict):
                 continue
-            val = int(listener.get("max_connections") or 0)
-            if val > 0 and (limit == 0 or val < limit):
-                limit = val
+            if listener.get("port") == primary_port:
+                val = int(listener.get("max_connections") or 0)
+                if val > 0:
+                    limit = val
+                break
     except Exception:
         pass
     if limit <= 0:

@@ -66,7 +66,10 @@ def upgrade_control_plane_database_sync(database_url: str, revision: str = "head
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
 
-    has_version_table = "alembic_version" in table_names
+    has_version_table = (
+        "alembic_version" in table_names
+        or "alembic_version" in set(inspector.get_table_names(schema="control_plane"))
+    )
     existing_control_plane_tables = CONTROL_PLANE_TABLE_NAMES & table_names
     if not has_version_table and existing_control_plane_tables:
         if existing_control_plane_tables == LEGACY_BOOTSTRAP_CONTROL_PLANE_TABLE_NAMES:
