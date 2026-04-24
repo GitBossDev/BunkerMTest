@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "jEE/nkCccVs=",
+  "dgSpecHash": "YmZcYj3rd8U=",
   "success": true,
   "projectFilePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
   "expectedPackageFiles": [
@@ -10,7 +10,7 @@
     {
       "code": "NU1603",
       "level": "Warning",
-      "message": "Greenhouse.Shared depende de MQTTnet (>= 4.3.7), pero no se encontró MQTTnet 4.3.7. MQTTnet 4.3.7.1207 se resolvió en su lugar.",
+      "message": "Greenhouse.Shared depends on MQTTnet (>= 4.3.7) but MQTTnet 4.3.7 was not found. MQTTnet 4.3.7.1207 was resolved instead.",
       "projectPath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",
       "warningLevel": 1,
       "filePath": "C:\\Projects\\BunkerMTest\\BunkerMTest\\greenhouse-simulator\\src\\Greenhouse.Shared\\Greenhouse.Shared.csproj",

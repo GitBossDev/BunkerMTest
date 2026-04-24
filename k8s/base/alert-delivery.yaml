@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: localhost/bunkermtest-bunkerm:latest
+          image: localhost/bhm-api:latest
           imagePullPolicy: Never
           envFrom:
             - secretRef:
@@ -24,16 +24,17 @@ spec:
           command:
             - /bin/sh
             - -c
-            - /docker-entrypoint.d/config-env.sh && /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
+            - /opt/venv/bin/python -m services.alert_delivery_daemon --interval 5
           volumeMounts:
             - name: api-logs
               mountPath: /var/log/api
           startupProbe:
             exec:
               command:
-                - /bin/sh
+                - /opt/venv/bin/python3
                 - -c
-                - ps -ef | grep alert_delivery_daemon | grep -v grep
+                # Comprueba que el daemon escribio el heartbeat (ventana amplia para el arranque)
+                - "import os,time; f='/tmp/alert_delivery.alive'; assert os.path.exists(f) and (time.time()-os.path.getmtime(f))<120"
             failureThreshold: 30
             periodSeconds: 10
           readinessProbe:
@@ -47,9 +48,10 @@ spec:
           livenessProbe:
             exec:
               command:
-                - /bin/sh
+                - /opt/venv/bin/python3
                 - -c
-                - ps -ef | grep alert_delivery_daemon | grep -v grep
+                # Ventana mas amplia para tolerar ciclos lentos o errores transitorios de BD
+                - "import os,time; f='/tmp/alert_delivery.alive'; assert os.path.exists(f) and (time.time()-os.path.getmtime(f))<120"
             initialDelaySeconds: 30
             periodSeconds: 20
           resources:

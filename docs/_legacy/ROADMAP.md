@@ -73,31 +73,40 @@ Desarrollo de BHM, una plataforma de gestión de broker MQTT basada en un fork d
 
 ### Arquitectura de Servicios
 
+> Nota: el diagrama siguiente refleja la topologia real actual (Fases 1-9 completadas).
+> El estado historico con multiples puertos y SQLite queda documentado en _legacy/.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Nginx Reverse Proxy                      │
-│                        (puerto 2000)                         │
-└───────────────────────┬─────────────────────────────────────┘
-                        │
-        ┌───────────────┼───────────────┐
-        │               │               │
-        ▼               ▼               ▼
-┌────────────┐  ┌──────────────┐  ┌──────────────┐
-│  Next.js   │  │   FastAPI    │  │  Mosquitto   │
-│  Frontend  │  │   Backend    │  │  MQTT Broker │
-│  (2000)    │  │ (1000-1005,  │  │   (1900)     │
-└────────────┘  │    8100)     │  └──────────────┘
-                └──────┬───────┘
-                       │
-              ┌────────▼───────┐
-              │     SQLite     │
-              │  (integrado)   │
-              └────────────────┘
-              ┌────────────────┐
-              │  PostgreSQL    │
-              │  (Fase 3-4,    │
-              │  solo -Tools)  │
-              └────────────────┘
+                          Host (localhost)
+                               |
+              :2000 HTTP    :1900 MQTT (TCP)
+                  |               |
+  +---------------+---------------+------------------------------------------+
+  |  bunkerm-network (Docker/Podman bridge)                                    |
+  |                                                                            |
+  |  +------------------------------+    +-------------------------------+    |
+  |  |  bunkerm-platform            |    |  bunkerm-mosquitto             |    |
+  |  |  nginx :2000                 |    |  Mosquitto broker             |    |
+  |  |    /api/v1/* -> uvicorn:9001 |    |  :1900 MQTT (TCP)             |    |
+  |  |    /* -> Next.js :3000       |    |  :9001 MQTT-WS (opcional)     |    |
+  |  |                              |    +-------------------------------+    |
+  |  |  uvicorn :9001 (FastAPI)     |                                        |
+  |  |    dynsec | monitor          |    +-------------------------------+    |
+  |  |    config | clientlogs       |    |  bunkerm-reconciler            |    |
+  |  |    bridges | reporting       |    |  broker_reconcile_daemon       |    |
+  |  +------------------------------+    +-------------------------------+    |
+  |                                                                            |
+  |  +------------------------------+    +-------------------------------+    |
+  |  |  postgres                    |    |  bhm-broker-observability      |    |
+  |  |  PostgreSQL :5432            |    |  broker_observability_api      |    |
+  |  |  (persistencia principal)    |    |  :9102 (interno)               |    |
+  |  +------------------------------+    +-------------------------------+    |
+  |                                                                            |
+  |  +------------------------------+                                        |
+  |  |  bhm-alert-delivery          |                                        |
+  |  |  alert_delivery_daemon       |                                        |
+  |  +------------------------------+                                        |
+  +----------------------------------------------------------------------------+
 ```
 
 ---
@@ -187,10 +196,14 @@ BunkerMTest/
 
 #### 1.2 Servicios Docker Compose
 
-| Servicio | Imagen | Puerto(s) | Propósito |
-|----------|--------|-----------|----------|
-| **bunkerm** | Build from source | 2000, 1000-1005, 8100, 1901 | Plataforma completa (nginx + Next.js + FastAPI + Mosquitto) |
-| **postgres** | postgres:16-alpine | 5432 | Persistencia principal del baseline Compose-first |
+| Servicio | Imagen | Puerto(s) | Proposito |
+|----------|--------|-----------|-----------|
+| **bunkerm** | Build from source | 2000 | Plataforma BHM: nginx + Next.js + FastAPI unificado en puerto 9001 |
+| **mosquitto** | Build from source | 1900, 9001 | Broker MQTT standalone con ciclo de vida independiente |
+| **bhm-reconciler** | Build from source | (sin puerto) | Daemon de reconciliacion broker-facing |
+| **bhm-broker-observability** | Build from source | 9102 (interno) | API de observabilidad read-only del broker |
+| **bhm-alert-delivery** | Build from source | (sin puerto) | Daemon de entrega de alertas via outbox |
+| **postgres** | postgres:16-alpine | 5432 | Persistencia principal (PostgreSQL, activo en todas las fases) |
 | **pgadmin** (opcional) | dpage/pgadmin4 | 5050 | Admin de PostgreSQL levantado manualmente con perfil `tools` |
 
 #### 1.3 Variables de Entorno (.env.dev)

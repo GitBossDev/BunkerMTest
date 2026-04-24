@@ -63,9 +63,17 @@ spec:
               port: http
             initialDelaySeconds: 30
             periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 384Mi
+            limits:
+              cpu: 1000m
+              memory: 768Mi
       volumes:
         - name: nextjs-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: nextjs-data
         - name: api-logs
           emptyDir: {}
         - name: nginx-logs

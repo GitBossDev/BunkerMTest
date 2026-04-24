@@ -11,10 +11,12 @@ param(
     [int]$MqttHostPort = 21900,
     [int]$MqttWsHostPort = 29001,
     [switch]$LoadLocalImage,
-    [string[]]$LocalImages = @("bunkermtest-bunkerm:latest", "bunkermtest-mosquitto:latest"),
-    [string]$BhmImage = "localhost/bunkermtest-bunkerm:latest",
-    [string]$MosquittoImage = "localhost/bunkermtest-mosquitto:latest",
-    [string]$GreenhouseSimulatorImage = "localhost/greenhouse-simulator:latest"
+    [string[]]$LocalImages = @("bhm-frontend:latest", "bhm-api:latest", "bhm-identity:latest", "bhm-mosquitto:latest"),
+    [string]$BhmFrontendImage = "localhost/bhm-frontend:latest",
+    [string]$BhmApiImage = "localhost/bhm-api:latest",
+    [string]$BhmIdentityImage = "localhost/bhm-identity:latest",
+    [string]$MosquittoImage = "localhost/bhm-mosquitto:latest",
+    [switch]$InstallIngress
 )
 
 $ErrorActionPreference = "Stop"
@@ -120,9 +122,10 @@ function New-KustomizeBaseWithFrontendUrl {
     param(
         [string]$BaseDirectory,
         [string]$FrontendUrl,
-        [string]$BhmImage,
-        [string]$MosquittoImage,
-        [string]$GreenhouseSimulatorImage
+        [string]$BhmFrontendImage,
+        [string]$BhmApiImage,
+        [string]$BhmIdentityImage,
+        [string]$MosquittoImage
     )
 
     $tempDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("bhm-k8s-base-" + [System.Guid]::NewGuid().ToString('N'))
@@ -134,13 +137,24 @@ function New-KustomizeBaseWithFrontendUrl {
     $kustomizationContent = $kustomizationContent -replace 'FRONTEND_URL=http://localhost:22000', "FRONTEND_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXTAUTH_URL=http://localhost:22000', "NEXTAUTH_URL=$FrontendUrl"
     $kustomizationContent = $kustomizationContent -replace 'NEXT_PUBLIC_API_URL=http://localhost:22000', "NEXT_PUBLIC_API_URL=$FrontendUrl"
-    if ($BhmImage -match ':(?<tag>[^:@]+)$') {
-        $bhmTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-bunkerm\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmTag)
+    # Restaura los wildcards de CORS y host para el entorno kind (laboratorio local)
+    $kustomizationContent = $kustomizationContent -replace 'ALLOWED_ORIGINS=REPLACE_WITH_ALLOWED_ORIGIN', 'ALLOWED_ORIGINS=*'
+    $kustomizationContent = $kustomizationContent -replace 'ALLOWED_HOSTS=REPLACE_WITH_ALLOWED_HOST', 'ALLOWED_HOSTS=*'
+    if ($BhmFrontendImage -match ':(?<tag>[^:@]+)$') {
+        $bhmFrontendTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-frontend\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmFrontendTag)
+    }
+    if ($BhmApiImage -match ':(?<tag>[^:@]+)$') {
+        $bhmApiTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-api\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmApiTag)
+    }
+    if ($BhmIdentityImage -match ':(?<tag>[^:@]+)$') {
+        $bhmIdentityTag = $Matches['tag']
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-identity\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmIdentityTag)
     }
     if ($MosquittoImage -match ':(?<tag>[^:@]+)$') {
         $mosquittoTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bunkermtest-mosquitto\s+newTag:\s+)[^\r\n]+', ('$1' + $mosquittoTag)
+        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-mosquitto\s+newTag:\s+)[^\r\n]+', ('$1' + $mosquittoTag)
     }
     Set-Content -Path $kustomizationPath -Value $kustomizationContent -Encoding ASCII
 
@@ -585,6 +599,41 @@ function Import-ImageIntoKind {
     Assert-LastExitCode "kind load docker-image $ImageReference"
 }
 
+function Wait-KubeApiServerReady {
+    param(
+        [string]$KubectlExecutable,
+        [string]$Context,
+        [int]$TimeoutSeconds = 120,
+        [int]$RetryIntervalSeconds = 5
+    )
+
+    Write-Host "[INFO] Esperando a que el API server de Kubernetes este listo..." -ForegroundColor Cyan
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $initialCheckDeadline = (Get-Date).AddSeconds(15)
+
+    while ((Get-Date) -lt $deadline) {
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $output = & $KubectlExecutable --context $Context cluster-info 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+
+        if ($exitCode -eq 0 -and ($output | Out-String) -notmatch 'tls handshake timeout|unable to connect|connection refused|i/o timeout') {
+            Write-Host "[OK] API server listo." -ForegroundColor Green
+            return
+        }
+
+        if ((Get-Date) -gt $initialCheckDeadline) {
+            throw "El API server de Kubernetes no respondio en tiempo inicial (15s). Es posible que el cluster tenga nodos parados. Usa: `$kindExecutable delete cluster --name `$clusterName` para forzar recreacion."
+        }
+
+        Write-Host "[INFO] API server aun no listo. Reintentando en $RetryIntervalSeconds s..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $RetryIntervalSeconds
+    }
+
+    throw "El API server de Kubernetes no respondio en $TimeoutSeconds segundos."
+}
+
 $kindExecutable = Resolve-CommandTarget -Candidate $KindCommand -DisplayName "Kind"
 $kubectlExecutable = Resolve-CommandTarget -Candidate $KubectlCommand -DisplayName "Kubectl"
 $containerEngineExecutable = $null
@@ -614,9 +663,10 @@ try {
     $resolvedKustomizeBase = New-KustomizeBaseWithFrontendUrl `
         -BaseDirectory (Join-Path (Split-Path $PSScriptRoot -Parent) 'base') `
         -FrontendUrl $frontendUrl `
-        -BhmImage $BhmImage `
-        -MosquittoImage $MosquittoImage `
-        -WaterPlantSimulatorImage $WaterPlantSimulatorImage
+        -BhmFrontendImage $BhmFrontendImage `
+        -BhmApiImage $BhmApiImage `
+        -BhmIdentityImage $BhmIdentityImage `
+        -MosquittoImage $MosquittoImage
     Ensure-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase -EnvFile $EnvFile
     Assert-KustomizeBootstrapSeedFiles -BaseDirectory $resolvedKustomizeBase
 
@@ -629,6 +679,45 @@ try {
         Assert-LastExitCode "kind create cluster"
     } else {
         Write-Host "[INFO] Reutilizando cluster kind existente '$ClusterName'." -ForegroundColor Yellow
+    }
+
+    # Wait for the API server to accept connections before any kubectl commands.
+    # After `kind create cluster` the API server can take several seconds to
+    # complete TLS setup — running kubectl immediately causes handshake timeouts.
+    # If the cluster exists but API server doesn't respond quickly, the nodes may
+    # be stopped (e.g., after computer restart). In that case, we automatically
+    # delete and recreate the cluster.
+    try {
+        Wait-KubeApiServerReady -KubectlExecutable $kubectlExecutable -Context "kind-$ClusterName"
+    } catch {
+        if ($clusterExists) {
+            Write-Host ""
+            Write-Host "[WARN] El cluster kind existe pero sus nodos no estan respondiendo." -ForegroundColor Yellow
+            Write-Host "       (Comun despues de reiniciar la computadora)." -ForegroundColor Yellow
+            Write-Host "[INFO] Eliminando cluster $ClusterName para recrearlo..." -ForegroundColor Cyan
+            
+            $savedPref = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & $kindExecutable delete cluster --name $ClusterName 2>&1 | Out-Null
+            $deleteExitCode = $LASTEXITCODE
+            $ErrorActionPreference = $savedPref
+            
+            if ($deleteExitCode -eq 0) {
+                Write-Host "[OK] Cluster eliminado. Recreando ahora..." -ForegroundColor Green
+                Write-Host "[INFO] Creando cluster kind '$ClusterName'..." -ForegroundColor Cyan
+                & $kindExecutable create cluster --name $ClusterName --config $resolvedKindConfig
+                Assert-LastExitCode "kind create cluster"
+                
+                Write-Host "[INFO] Esperando a que el API server este listo..." -ForegroundColor Cyan
+                Wait-KubeApiServerReady -KubectlExecutable $kubectlExecutable -Context "kind-$ClusterName"
+            } else {
+                Write-Host "[ERROR] No se pudo eliminar el cluster. Intenta manualmente:" -ForegroundColor Red
+                Write-Host "  $kindExecutable delete cluster --name $ClusterName" -ForegroundColor Gray
+                throw "No se pudo eliminar el cluster existente."
+            }
+        } else {
+            throw $_.Exception.Message
+        }
     }
 
     if ($LoadLocalImage) {
@@ -660,7 +749,24 @@ try {
     & $kubectlExecutable apply -k $resolvedKustomizeBase
     Assert-LastExitCode "kubectl apply -k $resolvedKustomizeBase"
 
-    Write-Host "" 
+    # 5D: Install nginx-ingress-controller (optional, requires extraPortMappings in cluster.yaml)
+    if ($InstallIngress) {
+        Write-Host "[INFO] Instalando nginx-ingress-controller (kind provider)..." -ForegroundColor Cyan
+        & $kubectlExecutable apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/kind/deploy.yaml
+        Assert-LastExitCode "kubectl apply nginx-ingress"
+        Write-Host "[INFO] Esperando a que nginx-ingress-controller este listo..." -ForegroundColor Cyan
+        & $kubectlExecutable wait --namespace ingress-nginx `
+            --for=condition=ready pod `
+            --selector=app.kubernetes.io/component=controller `
+            --timeout=120s
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[WARN] nginx-ingress-controller no esta listo aun. Verifica con: kubectl get pods -n ingress-nginx" -ForegroundColor Yellow
+        } else {
+            Write-Host "[OK] nginx-ingress-controller listo. Ingress disponible en http://localhost:80" -ForegroundColor Green
+        }
+    }
+
+    Write-Host ""
     Write-Host "[OK] Laboratorio inicial aplicado." -ForegroundColor Green
     Write-Host "     UI/API: $frontendUrl" -ForegroundColor Green
     Write-Host "     MQTT: localhost:$MqttHostPort" -ForegroundColor Green
@@ -670,7 +776,7 @@ try {
     Write-Host "Sugerencias de verificacion:" -ForegroundColor White
     Write-Host "  kubectl get pods -n $Namespace" -ForegroundColor Gray
     Write-Host "  kubectl get svc -n $Namespace" -ForegroundColor Gray
-    Write-Host "  kubectl logs deployment/bunkerm-platform -n $Namespace" -ForegroundColor Gray
+    Write-Host "  kubectl logs deployment/bhm-api -n $Namespace" -ForegroundColor Gray
     Write-Host "  kubectl logs statefulset/mosquitto -n $Namespace -c reconciler" -ForegroundColor Gray
 } finally {
     if ($resolvedKindConfig -and (Test-Path $resolvedKindConfig)) {

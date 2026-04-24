@@ -197,22 +197,35 @@ def invalidate_max_connections_cache() -> None:
     _max_connections_cache["ts"] = 0.0
 
 def _read_max_connections() -> int:
-    """Read the smallest positive max_connections from mosquitto.conf (cached 30s).
+    """Read max_connections for the primary MQTT listener from mosquitto.conf (cached 30s).
+    Only reads the max_connections for MOSQUITTO_PORT (default 1900) to avoid picking up
+    the low limit of the internal system listener on port 1901.
     Returns ALERT_CLIENT_MAX_DEFAULT env-var (default 10000) when no limit is configured."""
     import time as _t
     now = _t.time()
     if _max_connections_cache["value"] and now - _max_connections_cache["ts"] < 30.0:
         return _max_connections_cache["value"]
     conf_path = os.getenv("MOSQUITTO_CONF_PATH", "/etc/mosquitto/mosquitto.conf")
+    primary_port = MOSQUITTO_PORT
     limit = 0
     try:
+        current_port: int | None = None
         with open(conf_path) as _f:
             for line in _f:
                 line = line.strip()
-                if line.startswith("max_connections "):
-                    val = int(line.split()[1])
-                    if val > 0 and (limit == 0 or val < limit):
-                        limit = val
+                if line.startswith("listener "):
+                    parts = line.split()
+                    try:
+                        current_port = int(parts[1])
+                    except (IndexError, ValueError):
+                        current_port = None
+                elif line.startswith("max_connections ") and current_port == primary_port:
+                    try:
+                        val = int(line.split()[1])
+                        if val > 0:
+                            limit = val
+                    except (IndexError, ValueError):
+                        pass
     except Exception:
         pass
     if limit <= 0:

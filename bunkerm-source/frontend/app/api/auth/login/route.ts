@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { findUserByEmail, verifyPassword } from '@/lib/users'
+import { verifyCredentials } from '@/lib/users-api'
 import { signToken, cookieOptions, COOKIE_NAME } from '@/lib/auth'
 
 export async function POST(request: NextRequest) {
@@ -15,20 +15,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
-    const user = findUserByEmail(email)
+    const user = await verifyCredentials(email, password)
     if (!user) {
       return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
     }
 
-    const valid = await verifyPassword(password, user.passwordHash)
-    if (!valid) {
-      return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
-    }
-
-    const { passwordHash: _, ...userWithoutHash } = user
-    const token = await signToken(userWithoutHash)
-
-    const response = NextResponse.json({ user: userWithoutHash }, { status: 200 })
+    const token = await signToken(user)
+    const response = NextResponse.json({ user }, { status: 200 })
     response.cookies.set(COOKIE_NAME, token, cookieOptions())
 
     return response

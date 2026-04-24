@@ -11,7 +11,7 @@ BHM (Broker Health Manager) es una plataforma web de gestión y monitoreo de bro
 
 > Nota de naming: el nombre activo del producto es BHM o Broker Health Manager. Identificadores técnicos heredados como `bunkerm-source`, `bunkerm-platform`, `bunkerm-mosquitto`, `bunkerm-*` volúmenes, imágenes y rutas históricas de SQLite se mantienen por compatibilidad operativa hasta ejecutar una fase dedicada de renombre técnico.
 
-El objetivo es proporcionar una herramienta de operaciones completa que cubra el ciclo entero: desde la configuración del broker y la gestión de credenciales MQTT hasta la detección de anomalías, pruebas de estrés con simuladores industriales y alertas tempranas ante comportamientos anómalos.
+El objetivo es proporcionar una herramienta de operaciones completa que cubra el ciclo entero: desde la configuración del broker y la gestión de credenciales MQTT hasta la detección de anomalías y alertas tempranas ante comportamientos anómalos.
 
 ---
 
@@ -22,7 +22,7 @@ El objetivo es proporcionar una herramienta de operaciones completa que cubra el
 - **Broker Config UI** — formulario estructurado para ajustar listeners, WebSocket, max_connections, in-flight y queued messages sin editar ficheros
 - **Sistema de alertas configurable** — Detección de anomalias para broker offline, latencia alta, saturación de clientes, bucles de reconexión y fallos de auth. Permite configurar umbrales y recibir notificaciones en el panel
 - **Client y Broker Logs** — histórico de eventos (Connect, Disconnect, Subscribe, Publish, Auth Failure) con filtros por tipo y búsqueda
-- **Simulador industrial** — generador de carga con hasta 25 000 clientes simultáneos para pruebas de estrés y validación de capacidad
+- **Simulador industrial** — herramienta externa de carga MQTT (greenhouse-simulator, no forma parte del stack de producción)
 
 ---
 
@@ -33,40 +33,32 @@ El objetivo es proporcionar una herramienta de operaciones completa que cubra el
 | Capa | Tecnología |
 |------|-----------|
 | Frontend | Next.js 14 · React · TypeScript · Tailwind CSS · shadcn/ui |
-| Backend APIs | Python 3.12 · FastAPI · paho-mqtt · aiosqlite |
+| Backend APIs | Python 3.12 · FastAPI · paho-mqtt · SQLAlchemy async |
+| Identity Service | Python 3.12 · FastAPI · bcrypt · asyncpg |
 | Broker MQTT | Eclipse Mosquitto 2 · Dynamic Security Plugin |
-| Autenticación | NextAuth.js · bcrypt · JWT |
-| Base de datos | SQLite (usuarios, anomalías, estadísticas) |
+| Autenticacion | Next.js BFF · JWT cookies · bcrypt |
+| Base de datos | PostgreSQL 16 (schemas: control_plane, history, reporting, identity) |
 | Reverse proxy | Nginx |
-| Supervisor procesos | supervisord |
-| Despliegue | Docker Compose / Podman Compose |
+| Despliegue | Kubernetes (kind) con Podman Desktop |
 
-### Simulador industrial
-
-| Componente | Tecnología |
-|------------|-----------|
-| Greenhouse Simulator | C# · .NET · MQTTnet |
-| Orquestación | Docker Compose (perfil separado) |
-| Scripting | PowerShell (`simulator.ps1`) |
+> El repositorio incluye también un simulador de invernadero C# (greenhouse-simulator/) usado exclusivamente para pruebas de carga MQTT externas. No forma parte del aplicativo.
 
 ---
 
 ## Estado de avance
 
-**80 %** de las funcionalidades principales implementadas y testeadas en entorno local.
+**Fase 5 completada** — arquitectura de microservicios Compose-first + laboratorio Kubernetes kind operativo.
 
-| Área | Estado |
+| Area | Estado |
 |------|--------|
-| Revisión de estado del arte | Completo |
-| Test de brokers MQTT (Mosquitto, EMQX, HiveMQ) | Completo |
-| Diseño de aplicativo | Completo |
-| Diseño de simulador industrial | Completo |
-| Implementación inicial de proyecto | Completo |
-| Implementación de funcionalidades adicionales | Completo |
-| Pruebas de estrés iniciales a menos de 10 k clientes | Completo |
-| Migración de arquitectura monolítica a microservicios | Completo |
-| Corrección de bugs y optimización de rendimiento post-migración | En progreso |
-| Pruebas de estrés validadas a 25 k clientes | En progreso |
+| Monitoreo y gestion del broker MQTT | Completo |
+| Persistencia en PostgreSQL (4 schemas) | Completo |
+| Servicio de identidad standalone (bhm-identity) | Completo |
+| Image split (bhm-frontend / bhm-api / bhm-identity / bhm-mosquitto) | Completo |
+| Laboratorio Kubernetes kind (bhm-lab) | Completo |
+| K8s Ingress nginx | Completo |
+| Simulador externo de carga MQTT (greenhouse-simulator/) | Solo para pruebas |
+| Pruebas de estres validadas a 25 k clientes | En progreso |
 
 ---
 
@@ -87,11 +79,12 @@ El objetivo es proporcionar una herramienta de operaciones completa que cubra el
 git clone https://github.com/GitBossDev/BunkerMTest.git
 cd BunkerMTest
 
-# 2. Setup: genera .env.dev con credenciales y parchea el seed de Mosquitto
+# 2. Setup: genera .env.dev con credenciales seguras aleatorias
 .\deploy.ps1 -Action setup
 
-# 3. Build: construye las imágenes de BHM y Mosquitto
+# 3. Build: construye las tres imagenes (bhm-frontend, bhm-api, bhm-identity) + Mosquitto
 .\deploy.ps1 -Action build
+.\deploy.ps1 -Action build-mosquitto
 
 # 4. Start
 .\deploy.ps1 -Action start
@@ -99,52 +92,34 @@ cd BunkerMTest
 
 Acceder en **http://localhost:2000**
 
+Ver [QUICKSTART.md](./QUICKSTART.md) para instrucciones detalladas incluyendo Kubernetes,
+acceso a PostgreSQL y migracion de datos.
+
 ---
 
 ## Credenciales
 
-| Tipo | Usuario | Contraseña |
-|------|---------|-----------|
-| Panel (admin) | `admin@bhm.local` | `Usuario@1` |
-| Broker MQTT | `admin` | *(generada en `setup`, ver `.env.dev`)* |
-
-> Las credenciales del broker se generan aleatoriamente en cada `setup` y se sincronizan automáticamente con el broker al iniciar el contenedor.
-> Al redeplegar **sin** `clean`, las credenciales del volumen existente se actualizan en cada `start` — no es necesario borrar datos.
-> Para conectarse externamente (MQTT Explorer, etc.) usa el usuario `admin` y la contraseña que aparece en `.env.dev` como `MQTT_PASSWORD`.
-
----
-
-## Comandos útiles
+Las credenciales del admin del panel y del broker MQTT se generan aleatoriamente en `setup`:
 
 ```powershell
-.\deploy.ps1 -Action setup             # Configuración inicial
-.\deploy.ps1 -Action build             # Construir imágenes (BHM + Mosquitto)
-.\deploy.ps1 -Action start             # Iniciar servicios
-.\deploy.ps1 -Action stop              # Detener
-.\deploy.ps1 -Action restart           # Reiniciar
-.\deploy.ps1 -Action status            # Estado y health checks
-.\deploy.ps1 -Action logs -Follow      # Logs en tiempo real
-.\deploy.ps1 -Action clean             # Limpieza completa (requiere confirmación)
-.\deploy.ps1 -Action patch-backend     # Hot-patch Python (sin rebuild)
-.\deploy.ps1 -Action patch-frontend    # Hot-patch Next.js (sin rebuild)
-
-.\simulator.ps1 start                  # Ejecutar simulador de invernadero (greenhouse MQTT stresser)
-.\simulator.ps1 stop
-.\simulator.ps1 status
+Get-Content .env.dev | Select-String 'ADMIN_INITIAL|MQTT_PASSWORD'
 ```
+
+Ver [QUICKSTART.md](./QUICKSTART.md) para instrucciones de acceso.
 
 ---
 
-## Documentación
+## Documentacion
 
-| Documento | Descripción |
+| Documento | Descripcion |
 |-----------|-------------|
-| [BHM_MICROSERVICES_MIGRATION_PLAN.md](./BHM_MICROSERVICES_MIGRATION_PLAN.md) | Documento canónico para la migración actual a microservicios |
-| [BHM_TEAM_COLLABORATION_PLAN.md](./BHM_TEAM_COLLABORATION_PLAN.md) | Guía viva de coordinación entre trabajo de arquitectura y trabajo de funcionalidades |
-| [docs/adr/README.md](./docs/adr/README.md) | Registro de decisiones de arquitectura de BHM |
-| [ROADMAP.md](./ROADMAP.md) | Plan, fases y especificaciones |
-| [QUICKSTART.md](./QUICKSTART.md) | Inicio rápido detallado |
-| [ACL_GUIDE.md](./ACL_GUIDE.md) | Guía de ACL MQTT |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | Topologia, imagenes, schemas, decisiones de diseno inmutables |
+| [QUICKSTART.md](./QUICKSTART.md) | Guia detallada: Compose, Kubernetes, PostgreSQL, tests |
+| [ROADMAP.md](./ROADMAP.md) | Funcionalidades planeadas y especificaciones tecnicas |
+| [QUALITY_PLAN.md](./QUALITY_PLAN.md) | Capas de proteccion: tests, linting, architecture guards |
+| [BHM_BACKEND_KUBERNETES_STUDY_GUIDE.md](./BHM_BACKEND_KUBERNETES_STUDY_GUIDE.md) | Guia de estudio Kubernetes para el equipo |
+| [docs/adr/](./docs/adr/) | Registro de decisiones de arquitectura (ADRs) |
+| [docs/_legacy/](./docs/_legacy/) | Planes de trabajo y migracion concluidos (archivo historico) |
 
 ---
 
@@ -155,4 +130,4 @@ Extensiones y modificaciones propias © 2025-2026.
 
 ---
 
-**Última actualización**: 9 de abril de 2026
+**Ultima actualizacion**: 22 de abril de 2026

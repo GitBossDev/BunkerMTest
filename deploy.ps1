@@ -5,14 +5,26 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [ValidateSet('setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean', 'build', 'build-mosquitto', 'start-bunkerm', 'stop-bunkerm', 'patch-frontend', 'patch-backend', 'reload-mosquitto', 'test', 'smoke')]
+    [ValidateSet(
+        'setup', 'start', 'stop', 'restart', 'status', 'logs', 'clean',
+        'build', 'build-mosquitto',
+        'update-frontend', 'update-api', 'update-identity', 'update-mosquitto', 'update-all',
+        'rollout', 'redeploy', 'env-sync', 'db-migrate',
+        'patch-frontend', 'patch-backend', 'reload-mosquitto',
+        'test', 'smoke'
+    )]
     [string]$Action = 'setup',
+
+    # Componente objetivo para la accion 'rollout'
+    [Parameter(Mandatory=$false)]
+    [ValidateSet('frontend', 'api', 'identity', 'mosquitto', 'alerts', 'all')]
+    [string]$Component = 'all',
 
     [Parameter(Mandatory=$false)]
     [string]$ImageTag = 'latest',
 
     [Parameter(Mandatory=$false)]
-    [ValidateSet('kind', 'compose', 'both')]
+    [ValidateSet('kind')]
     [string]$Runtime = 'kind',
     
     [Parameter(Mandatory=$false)]
@@ -57,20 +69,24 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+$ErrorActionPreference = "Stop"
+
 # Motores de contenedor (se asignan en Get-RuntimeEngines al inicio)
 $script:CE = "docker"    # Container Engine: docker o podman
-$script:CCE = "docker-compose"  # Compose Engine: docker-compose, docker compose, o podman compose
 $script:KindExecutable = $null
 $script:KubectlExecutable = $null
 $script:ImageTag = 'latest'
-$script:BhmPlatformImageName = 'bunkermtest-bunkerm'
-$script:MosquittoImageName = 'bunkermtest-mosquitto'
-$script:GreenhouseSimulatorImageName = 'greenhouse-simulator'
+$script:BhmFrontendImageName = 'bhm-frontend'
+$script:BhmApiImageName = 'bhm-api'
+$script:BhmIdentityImageName = 'bhm-identity'
+$script:MosquittoImageName = 'bhm-mosquitto'
 $script:KindBaseImages = @(
     'postgres:16-alpine'
 )
 $script:KindImages = @(
-    "$($script:BhmPlatformImageName):$($script:ImageTag)",
+    "$($script:BhmFrontendImageName):$($script:ImageTag)",
+    "$($script:BhmApiImageName):$($script:ImageTag)",
+    "$($script:BhmIdentityImageName):$($script:ImageTag)",
     "$($script:MosquittoImageName):$($script:ImageTag)"
 )
 $script:KindWebBaseUrl = "http://localhost:$KindWebHostPort"
@@ -360,53 +376,9 @@ function Get-RuntimeEngines {
         $script:CE = "podman"
         Ensure-PodmanServiceAvailable
         Write-Info "Motor de contenedores: Podman"
-        if ($Runtime -in @('compose', 'both')) {
-            # Intentar podman compose (nativo Podman 4+ o proveedor externo)
-            $savedPref = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            podman compose version 2>&1 | Out-Null
-            $podmanComposeExitCode = $LASTEXITCODE
-            $ErrorActionPreference = $savedPref
-            if ($podmanComposeExitCode -eq 0) {
-                $script:CCE = "podman compose"
-                Write-Info "Motor de compose: podman compose (disponible)"
-            } else {
-                $podmanComposePkg = Get-Command podman-compose -ErrorAction SilentlyContinue
-                if ($podmanComposePkg) {
-                    $script:CCE = "podman-compose"
-                    Write-Info "Motor de compose: podman-compose (paquete externo)"
-                } else {
-                    Write-Warning "[WARNING] No se encontro compose para Podman."
-                    Write-Warning "Instala con: pip install podman-compose"
-                    Write-Warning "O actualiza Podman a 4+ para compose nativo."
-                    exit 1
-                }
-            }
-        }
     } elseif ($dockerFound) {
         $script:CE = "docker"
         Write-Info "Motor de contenedores: Docker"
-        if ($Runtime -in @('compose', 'both')) {
-            $savedPref = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            docker compose version 2>&1 | Out-Null
-            $dockerComposeExitCode = $LASTEXITCODE
-            $ErrorActionPreference = $savedPref
-            if ($dockerComposeExitCode -eq 0) {
-                $script:CCE = "docker compose"
-                Write-Info "Motor de compose: docker compose (v2 nativo)"
-            } else {
-                $dcV1 = Get-Command docker-compose -ErrorAction SilentlyContinue
-                if ($dcV1) {
-                    $script:CCE = "docker-compose"
-                    Write-Info "Motor de compose: docker-compose (v1 standalone)"
-                } else {
-                    Write-Warning "[WARNING] Docker Compose no encontrado."
-                    Write-Warning "Instala Docker Compose v2 o ejecuta: pip install docker-compose"
-                    exit 1
-                }
-            }
-        }
     } else {
         Write-Host "[ERROR] No se encontro Docker ni Podman." -ForegroundColor Red
         Write-Host "Instala Podman (https://podman.io) o Docker Desktop." -ForegroundColor Red
@@ -501,12 +473,8 @@ function Test-PostgresRequired {
     return $false
 }
 
-function Test-ComposeRuntime {
-    return $Runtime -in @('compose', 'both')
-}
-
 function Test-KindRuntime {
-    return $Runtime -in @('kind', 'both')
+    return $true
 }
 
 function Resolve-CommandTarget {
@@ -731,31 +699,6 @@ function Clear-KindHostPortConflicts {
     throw "Los puertos del laboratorio kind ya estan ocupados: $summary"
 }
 
-function Wait-ContainerRunning {
-    param(
-        [string]$ContainerName,
-        [int]$TimeoutSeconds = 90
-    )
-
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $status = & $script:CE inspect -f "{{.State.Status}}" $ContainerName 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $normalizedStatus = ($status | Out-String).Trim().ToLowerInvariant()
-            if ($normalizedStatus -eq 'running') {
-                return $true
-            }
-            if ($normalizedStatus -in @('exited', 'dead')) {
-                return $false
-            }
-        }
-
-        Start-Sleep -Seconds 2
-    }
-
-    return $false
-}
-
 function Test-TcpPortOpen {
     param(
         [int]$Port,
@@ -951,7 +894,7 @@ function Start-KindPortForwards {
 
         try {
             $entries = @(
-                (Start-KindPortForwardProcess -Name 'platform' -Resource 'service/bunkerm-platform' -Mappings @("${KindWebHostPort}:2000") -LocalPorts @($KindWebHostPort)),
+                (Start-KindPortForwardProcess -Name 'frontend' -Resource 'service/bhm-frontend' -Mappings @("${KindWebHostPort}:2000") -LocalPorts @($KindWebHostPort)),
                 (Start-KindPortForwardProcess -Name 'mosquitto' -Resource 'service/mosquitto' -Mappings @("${KindMqttHostPort}:1900", "${KindMqttWsHostPort}:9001") -LocalPorts @($KindMqttHostPort, $KindMqttWsHostPort))
             )
 
@@ -1029,70 +972,6 @@ function Wait-HttpEndpoint {
     return $false
 }
 
-function Wait-ComposeRuntimeReady {
-    param(
-        [bool]$PostgresRequired,
-        [string]$ApiKey
-    )
-
-    Write-Info 'Esperando readiness real del runtime Compose-first...'
-
-    if (-not (Wait-ContainerHealthy -ContainerName 'bunkerm-platform' -TimeoutSeconds 180)) {
-        if ($PostgresRequired) {
-            $platformPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName 'bunkerm-platform'
-            $reconcilerPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName 'bunkerm-reconciler'
-
-            if (-not $platformPgCheck.Success -or -not $reconcilerPgCheck.Success) {
-                Write-Host ''
-                Write-Warning 'Se detecto un problema de conectividad a PostgreSQL desde los servicios Compose-first.'
-                Write-Host '  Esto suele ocurrir cuando .env.dev fue regenerado pero el volumen existente de PostgreSQL conserva credenciales antiguas.' -ForegroundColor Yellow
-                Write-Host "  bunkerm-platform: $($platformPgCheck.Output)" -ForegroundColor Yellow
-                Write-Host "  bunkerm-reconciler: $($reconcilerPgCheck.Output)" -ForegroundColor Yellow
-                Write-Host ''
-                Write-Host '  Opciones de recuperacion:' -ForegroundColor Yellow
-                Write-Host '  1. Restaurar en .env.dev las credenciales originales de PostgreSQL del volumen actual.' -ForegroundColor Yellow
-                Write-Host '  2. Si buscas un arranque realmente limpio y puedes perder los datos locales, ejecutar: .\deploy.ps1 -Action clean y luego .\deploy.ps1 -Action setup' -ForegroundColor Yellow
-                Write-Host ''
-            }
-        }
-
-        Write-Error 'bunkerm-platform no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs'
-        exit 1
-    }
-
-    if (-not (Wait-ContainerRunning -ContainerName 'bunkerm-reconciler' -TimeoutSeconds 120)) {
-        Write-Error 'bunkerm-reconciler no alcanzo estado running. Revisa: .\deploy.ps1 -Action logs'
-        exit 1
-    }
-
-    if (-not (Wait-HttpEndpoint -Uri 'http://localhost:2000/api/auth/me' -AcceptStatusCodes @(200, 401, 403) -TimeoutSeconds 120)) {
-        Write-Error 'El backend no expuso /api/auth/me a tiempo. Revisa: .\deploy.ps1 -Action logs'
-        exit 1
-    }
-
-    if ($ApiKey) {
-        if (-not (Wait-HttpEndpoint -Uri 'http://localhost:2000/api/dynsec/roles' -AcceptStatusCodes @(200) -Headers @{ 'X-API-Key' = $ApiKey } -TimeoutSeconds 120)) {
-            Write-Error 'El backend no expuso /api/dynsec/roles a tiempo. Revisa: .\deploy.ps1 -Action logs'
-            exit 1
-        }
-    }
-
-    if ($PostgresRequired) {
-        $deadline = (Get-Date).AddSeconds(90)
-        while ((Get-Date) -lt $deadline) {
-            $reconcilerPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName 'bunkerm-reconciler'
-            if ($reconcilerPgCheck.Success) {
-                return
-            }
-
-            Start-Sleep -Seconds 3
-        }
-
-        Write-Error 'bunkerm-reconciler no pudo confirmar conectividad con PostgreSQL. Revisa: .\deploy.ps1 -Action logs'
-        exit 1
-    }
-}
-
 function Test-KindClusterExists {
     Ensure-KubernetesTooling
 
@@ -1105,46 +984,149 @@ function Test-KindClusterExists {
     return ($kindExitCode -eq 0 -and ($clusters | Where-Object { $_ -eq $KindClusterName }))
 }
 
+# ---------------------------------------------------------------------------
+# Kubernetes readiness helpers
+# ---------------------------------------------------------------------------
+
+# Returns the first terminal waiting reason found for pods belonging to a
+# workload (e.g. CrashLoopBackOff, ImagePullBackOff). Returns $null when no
+# terminal state is found or when kubectl itself fails (avoids false positives).
+function Get-WorkloadTerminalFailureReason {
+    param([string]$ResourceName, [string]$Namespace)
+
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $jsonRaw = & $script:KubectlExecutable --context $script:KindKubectlContext `
+        get pods -n $Namespace `
+        -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{range .status.containerStatuses[*]}{.state.waiting.reason}{.state.terminated.reason}{"\n"}{end}{end}' 2>&1
+    $ErrorActionPreference = $savedPref
+
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    $terminalReasons = @(
+        'CrashLoopBackOff', 'ImagePullBackOff', 'ErrImageNeverPull', 'ErrImagePull',
+        'InvalidImageName', 'CreateContainerConfigError', 'RunContainerError'
+    )
+    foreach ($line in ($jsonRaw -split "`n")) {
+        if ($line -match [regex]::Escape($ResourceName)) {
+            foreach ($reason in $terminalReasons) {
+                if ($line -match $reason) { return $reason }
+            }
+        }
+    }
+    return $null
+}
+
+# Prints pod list + last 40 lines of describe for $Target to help diagnose
+# stuck or failing workloads.
+function Write-WorkloadDiagnostics {
+    param([string]$Target, [string]$Namespace)
+
+    Write-Host "`n=== DIAGNOSTICO: $Target ===" -ForegroundColor Yellow
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Write-Host "--- kubectl get pods ---" -ForegroundColor Yellow
+    & $script:KubectlExecutable --context $script:KindKubectlContext get pods -n $Namespace 2>&1 | Out-Host
+    Write-Host "--- kubectl describe $Target (ultimas 40 lineas) ---" -ForegroundColor Yellow
+    & $script:KubectlExecutable --context $script:KindKubectlContext describe $Target -n $Namespace 2>&1 |
+        Select-Object -Last 40 | Out-Host
+    $ErrorActionPreference = $savedPref
+}
+
 function Wait-KubernetesRuntimeReady {
     Ensure-KubernetesTooling
 
-    $perAttemptTimeout = '45s'
-    foreach ($target in @('statefulset/postgres', 'statefulset/mosquitto', 'deployment/bunkerm-platform', 'deployment/bhm-alert-delivery')) {
-        $deadline = (Get-Date).AddMinutes(5)
+    # Per-workload overall budget in minutes. Sized to cover the pod's own
+    # startupProbe window plus a generous margin for slow/CI environments.
+    $workloadBudgets = @{
+        'statefulset/postgres'          = 15
+        'statefulset/mosquitto'         = 12
+        'deployment/bhm-identity'       = 12
+        'deployment/bhm-frontend'       = 15
+        'deployment/bhm-api'            = 15
+        'deployment/bhm-alert-delivery' = 12
+    }
+
+    # Each kubectl rollout status call is given this window before we check again.
+    $perAttemptTimeout = '90s'
+
+    $orderedTargets = @(
+        'statefulset/postgres',
+        'statefulset/mosquitto',
+        'deployment/bhm-identity',
+        'deployment/bhm-frontend',
+        'deployment/bhm-api',
+        'deployment/bhm-alert-delivery'
+    )
+
+    foreach ($target in $orderedTargets) {
+        $budgetMinutes = $workloadBudgets[$target]
+        $deadline = (Get-Date).AddMinutes($budgetMinutes)
         $lastRolloutOutput = ''
+
+        Write-Host "[INFO] Esperando $target (presupuesto: ${budgetMinutes} min)..." -ForegroundColor Cyan
+
         while ((Get-Date) -lt $deadline) {
             $savedPref = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
-            $rolloutOutput = & $script:KubectlExecutable --context $script:KindKubectlContext rollout status $target -n $KindNamespace --timeout=$perAttemptTimeout 2>&1
+            $rolloutOutput = & $script:KubectlExecutable --context $script:KindKubectlContext `
+                rollout status $target -n $KindNamespace --timeout=$perAttemptTimeout 2>&1
             $rolloutExitCode = $LASTEXITCODE
             $ErrorActionPreference = $savedPref
 
             if ($rolloutExitCode -eq 0) {
+                Write-Success "[OK] $target listo."
                 $lastRolloutOutput = ''
                 break
             }
 
             $lastRolloutOutput = ($rolloutOutput | Out-String)
             $normalizedOutput = $lastRolloutOutput.ToLowerInvariant()
-            if (
+
+            # ── Network-level transient errors: API server not yet reachable ──
+            $isNetworkError = (
                 $normalizedOutput.Contains('tls handshake timeout') -or
                 $normalizedOutput.Contains('unable to connect to the server') -or
                 $normalizedOutput.Contains('i/o timeout') -or
                 $normalizedOutput.Contains('connection refused') -or
-                $normalizedOutput.Contains('eof') -or
-                $normalizedOutput.Contains('timed out waiting for the condition')
-            ) {
-                Write-Warning "Kubectl devolvio un fallo transitorio al esperar $target. Reintentando..."
+                $normalizedOutput.Contains('eof')
+            )
+            if ($isNetworkError) {
+                Write-Warning "Error de red transitorio al esperar $target. Reintentando en 5 s..."
                 Start-Sleep -Seconds 5
                 continue
             }
 
-            Write-Error "El workload $target no alcanzo estado listo en Kubernetes. Salida: $lastRolloutOutput"
+            # ── Rollout still in progress (pod not ready yet) ────────────────
+            $isRolloutPending = (
+                $normalizedOutput.Contains('timed out waiting for the condition') -or
+                $normalizedOutput.Contains('updated replicas are available') -or
+                $normalizedOutput.Contains('waiting for deployment')
+            )
+            if ($isRolloutPending) {
+                # Fast-fail if the pod has crashed or has a pull error.
+                $resourceName = $target -replace '^[^/]+/', ''
+                $terminalReason = Get-WorkloadTerminalFailureReason `
+                    -ResourceName $resourceName -Namespace $KindNamespace
+                if ($terminalReason) {
+                    Write-Error "$target esta en estado terminal ($terminalReason) -- abortando."
+                    Write-WorkloadDiagnostics -Target $target -Namespace $KindNamespace
+                    exit 1
+                }
+                $remaining = [int](($deadline - (Get-Date)).TotalSeconds)
+                Write-Warning "$target aun no listo ($($remaining)s restantes del presupuesto). Reintentando..."
+                continue
+            }
+
+            # ── Unexpected error ──────────────────────────────────────────────
+            Write-Error "$target reporto un error inesperado: $lastRolloutOutput"
+            Write-WorkloadDiagnostics -Target $target -Namespace $KindNamespace
             exit 1
         }
 
         if ($lastRolloutOutput) {
-            Write-Error "El workload $target no alcanzo estado listo en Kubernetes dentro del tiempo esperado. Ultima salida: $lastRolloutOutput"
+            Write-Error "$target no alcanzo estado listo en ${budgetMinutes} minutos."
+            Write-WorkloadDiagnostics -Target $target -Namespace $KindNamespace
             exit 1
         }
     }
@@ -1161,7 +1143,8 @@ function Set-KindWorkloadReplicas {
     $workloads = @(
         'statefulset/postgres',
         'statefulset/mosquitto',
-        'deployment/bunkerm-platform',
+        'deployment/bhm-frontend',
+        'deployment/bhm-api',
         'deployment/bhm-alert-delivery'
     )
 
@@ -1224,9 +1207,10 @@ function Invoke-StartKindRuntime {
         -MqttWsHostPort $KindMqttWsHostPort `
         -LoadLocalImage `
         -LocalImages ($script:KindImages + $script:KindBaseImages) `
-        -BhmImage "localhost/$($script:BhmPlatformImageName):$ImageTag" `
-        -MosquittoImage "localhost/$($script:MosquittoImageName):$ImageTag" `
-        -GreenhouseSimulatorImage "localhost/$($script:GreenhouseSimulatorImageName):$ImageTag"
+        -BhmFrontendImage "localhost/$($script:BhmFrontendImageName):$ImageTag" `
+        -BhmApiImage "localhost/$($script:BhmApiImageName):$ImageTag" `
+        -BhmIdentityImage "localhost/$($script:BhmIdentityImageName):$ImageTag" `
+        -MosquittoImage "localhost/$($script:MosquittoImageName):$ImageTag"
 
     if ($LASTEXITCODE -ne 0) {
         Write-Error 'Fallo el arranque del laboratorio kind. Revisa la salida anterior.'
@@ -1265,44 +1249,7 @@ function Invoke-StopKindRuntime {
     Write-Success "[OK] Cluster kind '$KindClusterName' eliminado."
 }
 
-function Wait-ContainerHealthy {
-    param(
-        [string]$ContainerName,
-        [int]$TimeoutSeconds = 90
-    )
 
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        $status = & $script:CE inspect -f "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}" $ContainerName 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $normalizedStatus = ($status | Out-String).Trim().ToLowerInvariant()
-            if ($normalizedStatus -in @('healthy', 'running')) {
-                return $true
-            }
-            if ($normalizedStatus -in @('exited', 'dead')) {
-                return $false
-            }
-        }
-
-        Start-Sleep -Seconds 2
-    }
-
-    return $false
-}
-
-function Test-ContainerControlPlanePostgresConnectivity {
-    param(
-        [string]$ContainerName
-    )
-
-    $pythonSnippet = "import sys; sys.path.insert(0, '/app'); from sqlalchemy import create_engine, text; from core.config import Settings; from core.database_url import get_sync_database_url; settings = Settings(); resolved_url = settings.resolved_control_plane_database_url; assert resolved_url.lower().startswith('postgresql'), f'resolved_control_plane_database_url is not PostgreSQL: {resolved_url}'; engine = create_engine(get_sync_database_url(resolved_url), future=True); connection = engine.connect(); connection.execute(text('SELECT 1')); connection.close(); print('OK')"
-
-    $output = & $script:CE exec $ContainerName /opt/venv/bin/python -c $pythonSnippet 2>&1
-    return @{
-        Success = ($LASTEXITCODE -eq 0)
-        Output = (($output | Out-String).Trim())
-    }
-}
 
 function Invoke-Setup {
     Write-Info "Starting setup process..."
@@ -1433,93 +1380,24 @@ function Invoke-Start {
     $postgresRequired = Test-PostgresRequired -EnvMap $envMap
     $apiKey = Get-ApiKey
 
-    if (Test-ComposeRuntime) {
-        if (Test-Path 'bunkerm-source') {
-            if (-not (Test-Path 'bunkerm-source\.env')) {
-                Write-Warning 'bunkerm-source/.env no encontrado. Creando archivo vacio para evitar error de compose...'
-                New-Item -ItemType File -Path 'bunkerm-source\.env' -Force | Out-Null
-                Write-Info 'Si BunkerM requiere variables propias, edita bunkerm-source/.env'
-            }
-        } else {
-            Write-Warning "bunkerm-source/ no existe. El servicio 'bunkerm' no se construira."
-            Write-Warning 'Para incluirlo ejecuta: git clone https://github.com/bunkeriot/BunkerM bunkerm-source'
-            Write-Host ''
-        }
-
-        $orphanContainers = @('bunkerm-platform', 'bunkerm-reconciler')
-        foreach ($cname in $orphanContainers) {
-            $exists = & $script:CE ps -a --format '{{.Names}}' 2>&1 | Select-String "^${cname}$"
-            if ($exists) {
-                Write-Warning "Contenedor huerfano encontrado: $cname. Eliminando antes de compose..."
-                $savedPref = $ErrorActionPreference
-                $ErrorActionPreference = 'Continue'
-                & $script:CE stop $cname 2>&1 | Out-Null
-                & $script:CE rm $cname 2>&1 | Out-Null
-                $ErrorActionPreference = $savedPref
-                Write-Success "[OK] $cname eliminado"
-            }
-        }
-
-        $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d"
-        Invoke-Expression $composeCmd
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error 'Fallo el arranque del stack Compose-first. Revisa: .\deploy.ps1 -Action logs'
-            exit 1
-        }
-
-        Write-Host ''
-        Write-Success '[OK] Runtime Compose-first iniciado.'
-        Write-Host ''
-
-        if ($postgresRequired) {
-            Write-Info 'Esperando a que PostgreSQL quede healthy para el runtime Compose-first...'
-            if (-not (Wait-ContainerHealthy -ContainerName 'bunkerm-postgres' -TimeoutSeconds 90)) {
-                Write-Error 'PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs'
-                exit 1
-            }
-        }
-
-        Write-Host ''
-        Write-Info 'Applying local source patches to the running container...'
-        Invoke-PatchBackend
-        Invoke-PatchFrontend
-        Wait-ComposeRuntimeReady -PostgresRequired $postgresRequired -ApiKey $apiKey
-    }
-
-    if (Test-KindRuntime) {
-        if (Test-ComposeRuntime) {
-            Write-Host ''
-        }
-
-        Invoke-StartKindRuntime
-    }
+    Invoke-StartKindRuntime
 
     Write-Host ''
     Write-Info 'Ejecutando smoke test del stack...'
     $smokeFailures = Invoke-Smoke
     if ($smokeFailures -gt 0) {
         Write-Warning "[AVISO] El smoke test detecto $smokeFailures fallo(s). El stack sigue corriendo para debug manual."
-        Write-Host "  Logs: .\deploy.ps1 -Action logs -Runtime $Runtime" -ForegroundColor Yellow
+        Write-Host "  Logs: .\deploy.ps1 -Action logs" -ForegroundColor Yellow
     }
 
     Write-Host ''
     Write-Info 'Service URLs:'
-    if (Test-ComposeRuntime) {
-        Write-Host '  - Compose Web UI:    http://localhost:2000' -ForegroundColor Cyan
-        Write-Host '  - Compose MQTT:      localhost:1900' -ForegroundColor Cyan
-        if ($postgresRequired) {
-            Write-Host '  - Compose PostgreSQL: localhost:5432' -ForegroundColor Cyan
-        }
-    }
-    if (Test-KindRuntime) {
-        Write-Host "  - kind Web UI:       $script:KindWebBaseUrl" -ForegroundColor Cyan
-        Write-Host "  - kind MQTT:         localhost:$KindMqttHostPort" -ForegroundColor Cyan
-        Write-Host "  - kind MQTT WS:      localhost:$KindMqttWsHostPort" -ForegroundColor Cyan
-    }
+    Write-Host "  - kind Web UI:       $script:KindWebBaseUrl" -ForegroundColor Cyan
+    Write-Host "  - kind MQTT:         localhost:$KindMqttHostPort" -ForegroundColor Cyan
+    Write-Host "  - kind MQTT WS:      localhost:$KindMqttWsHostPort" -ForegroundColor Cyan
 
     Write-Host ''
-    Write-Info "Run health check: .\deploy.ps1 -Action status -Runtime $Runtime"
+    Write-Info "Run health check: .\deploy.ps1 -Action status"
     Write-Host ''
 }
 
@@ -1527,14 +1405,7 @@ function Invoke-Stop {
     Write-Info "Stopping services..."
     Write-Host ""
 
-    if (Test-ComposeRuntime) {
-        $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml down"
-        Invoke-Expression $composeCmd
-    }
-
-    if (Test-KindRuntime) {
-        Invoke-StopKindRuntime
-    }
+    Invoke-StopKindRuntime
 
     Write-Host ""
     Write-Success "[OK] Services stopped successfully!"
@@ -1552,114 +1423,41 @@ function Invoke-Status {
     Write-Info "Checking service status..."
     Write-Host ""
 
-    if (Test-ComposeRuntime) {
-        Write-Host 'Contenedores Compose:' -ForegroundColor Yellow
-        $containers = & $script:CE ps --format json 2>$null | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if ($containers) {
-            $containers | Where-Object { $_.Names -match 'bunkerm|greenhouse' } |
-                Format-Table @{L='Nombre';E={$_.Names}}, @{L='Estado';E={$_.State}}, @{L='Puertos';E={$_.Ports}} -AutoSize
-        } else {
-            Invoke-Expression "$script:CE ps" | Select-String 'bunkerm|greenhouse|NAME'
-        }
-
-        Write-Host ''
-        Write-Host 'Health Checks Compose:' -ForegroundColor Yellow
-        Write-Host ''
-
-        Write-Host -NoNewline '  Mosquitto MQTT standalone (localhost:1900)... '
-        $savedPref = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $tcpClient = New-Object System.Net.Sockets.TcpClient
-        try {
-            $tcpClient.Connect('localhost', 1900)
-            Write-Success '[OK] puerto 1900 accesible'
-            $tcpClient.Close()
-        } catch {
-            Write-Host '[NO DISPONIBLE]' -ForegroundColor Red
-        } finally {
-            $ErrorActionPreference = $savedPref
-        }
-
-        Write-Host -NoNewline '  BHM Web UI (http://localhost:2000)... '
-        try {
-            $resp = Invoke-WebRequest -Uri 'http://localhost:2000' -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
-            Write-Success "[OK] HTTP $($resp.StatusCode)"
-        } catch {
-            $code = $_.Exception.Response.StatusCode.value__
-            if ($code -ge 300 -and $code -lt 400) {
-                Write-Success "[OK] HTTP $code (redirect al login)"
-            } else {
-                Write-Host '[NO DISPONIBLE]' -ForegroundColor Red
-            }
-        }
-
-        Write-Host -NoNewline '  BHM API (/api/auth/me)... '
-        try {
-            $resp = Invoke-WebRequest -Uri 'http://localhost:2000/api/auth/me' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-            Write-Success "[OK] HTTP $($resp.StatusCode)"
-        } catch {
-            if ($_.Exception.Response.StatusCode.value__ -in @(401, 403)) {
-                Write-Success "[OK] HTTP $($_.Exception.Response.StatusCode.value__) (no autenticado, backend activo)"
-            } else {
-                Write-Host '[NO DISPONIBLE]' -ForegroundColor Red
-            }
-        }
-
-        Write-Host ''
+    Ensure-KubernetesTooling
+    Write-Host 'Workloads kind:' -ForegroundColor Yellow
+    if (Test-KindClusterExists) {
+        & $script:KubectlExecutable get pods,svc -n $KindNamespace
+    } else {
+        Write-Warning "El cluster kind '$KindClusterName' no existe."
     }
-
-    if (Test-KindRuntime) {
-        Ensure-KubernetesTooling
-        Write-Host 'Workloads kind:' -ForegroundColor Yellow
-        if (Test-KindClusterExists) {
-            & $script:KubectlExecutable get pods,svc -n $KindNamespace
-        } else {
-            Write-Warning "El cluster kind '$KindClusterName' no existe."
-        }
-        Write-Host ''
-    }
+    Write-Host ''
 }
 
 function Invoke-Logs {
     Write-Info "Showing logs..."
     Write-Host ""
 
-    if (Test-ComposeRuntime) {
-        $composeCmd = "$script:CCE --env-file .env.dev -f docker-compose.dev.yml logs"
-        if ($Follow) {
-            $composeCmd += ' -f'
-            Write-Info 'Following Compose logs (Ctrl+C to exit)...'
-        } else {
-            $composeCmd += ' --tail=100'
-        }
-
-        Invoke-Expression $composeCmd
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Warning "El cluster kind '$KindClusterName' no existe."
+        return
     }
 
-    if (Test-KindRuntime) {
-        Ensure-KubernetesTooling
-        if (-not (Test-KindClusterExists)) {
-            Write-Warning "El cluster kind '$KindClusterName' no existe."
-            return
-        }
-
-        if (Test-ComposeRuntime) {
-            Write-Host ''
-        }
-
-        if ($Follow) {
-            Write-Info 'Following bunkerm-platform logs in kind (Ctrl+C to exit)...'
-            & $script:KubectlExecutable logs deployment/bunkerm-platform -n $KindNamespace -f --all-containers=true
-        } else {
-            Write-Info 'kind pods:'
-            & $script:KubectlExecutable get pods -n $KindNamespace
-            Write-Host ''
-            Write-Info 'bunkerm-platform:'
-            & $script:KubectlExecutable logs deployment/bunkerm-platform -n $KindNamespace --all-containers=true --tail=80
-            Write-Host ''
-            Write-Info 'mosquitto/reconciler:'
-            & $script:KubectlExecutable logs statefulset/mosquitto -n $KindNamespace -c reconciler --tail=80
-        }
+    if ($Follow) {
+        Write-Info 'Following bhm-frontend logs in kind (Ctrl+C to exit)...'
+        & $script:KubectlExecutable logs deployment/bhm-frontend -n $KindNamespace -f --all-containers=true
+    } else {
+        Write-Info 'kind pods:'
+        & $script:KubectlExecutable get pods -n $KindNamespace
+        Write-Host ''
+        Write-Info 'bhm-frontend:'
+        & $script:KubectlExecutable logs deployment/bhm-frontend -n $KindNamespace --all-containers=true --tail=80
+        Write-Host ''
+        Write-Info 'bhm-api:'
+        & $script:KubectlExecutable logs deployment/bhm-api -n $KindNamespace --tail=80
+        Write-Host ''
+        Write-Info 'mosquitto/reconciler:'
+        & $script:KubectlExecutable logs statefulset/mosquitto -n $KindNamespace -c reconciler --tail=80
     }
 }
 
@@ -1670,24 +1468,9 @@ function Invoke-Clean {
     if ($confirm -eq 'yes') {
         Write-Info "Cleaning up..."
         Write-Host ""
-        
-        if (Test-ComposeRuntime) {
-            Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml down -v"
-        }
 
-        if (Test-KindRuntime) {
-            Invoke-StopKindRuntime -DeleteCluster
-        }
-        
-        if (Test-ComposeRuntime) {
-            Write-Info 'Removing data directories...'
-            $dataDir = 'data'
-            if (Test-Path $dataDir) {
-                Remove-Item -Recurse -Force "$dataDir/*" -ErrorAction SilentlyContinue
-                Write-Success '[OK] Data directories cleaned'
-            }
-        }
-        
+        Invoke-StopKindRuntime -DeleteCluster
+
         # Remove .env.dev
         if (Test-Path ".env.dev") {
             $removeEnv = Read-Host "Remove .env.dev as well? (y/N)"
@@ -1696,7 +1479,7 @@ function Invoke-Clean {
                 Write-Success "[OK] .env.dev removed"
             }
         }
-        
+
         Write-Host ""
         Write-Success "[OK] Cleanup completed!"
         Write-Info "Run setup again: .\deploy.ps1 -Action setup"
@@ -1706,20 +1489,11 @@ function Invoke-Clean {
     }
 }
 
-function Invoke-Build {
-    Write-Info "Construyendo imagen de Broker Health Manager..."
-    Write-Host ""
+# ---------------------------------------------------------------------------
+# Build helpers - una funcion por imagen para permitir builds individuales
+# ---------------------------------------------------------------------------
 
-    if (-not (Test-Path "bunkerm-source")) {
-        Write-Host "[ERROR] bunkerm-source/ no encontrado." -ForegroundColor Red
-        Write-Host "  git clone https://github.com/bunkeriot/BunkerM bunkerm-source" -ForegroundColor Yellow
-        exit 1
-    }
-
-    # Construir Mosquitto primero (más rápido; Broker Health Manager depende de él en runtime)
-    Invoke-BuildMosquitto
-
-    # Convertir CRLF a LF en scripts .sh antes de construir
+function Invoke-NormalizeShellScripts {
     Write-Info "Normalizando line endings en scripts shell..."
     Get-ChildItem bunkerm-source -Recurse -Filter "*.sh" | ForEach-Object {
         $content = [System.IO.File]::ReadAllText($_.FullName)
@@ -1729,25 +1503,85 @@ function Invoke-Build {
             Write-Info "  Normalizado: $($_.Name)"
         }
     }
+}
 
-    Write-Info "Construyendo imagen (puede tardar 5-15 minutos la primera vez)..."
+function Invoke-EnsureBunkerMSource {
+    if (-not (Test-Path "bunkerm-source")) {
+        Write-Host "[ERROR] bunkerm-source/ no encontrado." -ForegroundColor Red
+        Write-Host "  git clone https://github.com/bunkeriot/BunkerM bunkerm-source" -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+function Invoke-BuildFrontendImage {
+    Invoke-EnsureBunkerMSource
+    Write-Info "Construyendo $($script:BhmFrontendImageName):$ImageTag ..."
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
     & $script:CE build `
-        -t "$($script:BhmPlatformImageName):$ImageTag" `
-        -f bunkerm-source/Dockerfile.next `
+        -t "$($script:BhmFrontendImageName):$ImageTag" `
+        -f bunkerm-source/Dockerfile.frontend `
         bunkerm-source
     $buildExit = $LASTEXITCODE
     $ErrorActionPreference = $savedPref
-
-    if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen de Broker Health Manager construida correctamente: $($script:BhmPlatformImageName):$ImageTag"
-        Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
-    } else {
-        Write-Host "[ERROR] Fallo en el build. Revisa los logs de arriba." -ForegroundColor Red
+    if ($buildExit -ne 0) {
+        Write-Host "[ERROR] Fallo en el build de bhm-frontend. Revisa los logs de arriba." -ForegroundColor Red
         exit 1
     }
+    Write-Success "[OK] $($script:BhmFrontendImageName):$ImageTag construida."
+}
 
-    Invoke-BuildGreenhouseSimulator
+function Invoke-BuildApiImage {
+    Invoke-EnsureBunkerMSource
+    Write-Info "Construyendo $($script:BhmApiImageName):$ImageTag ..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:CE build `
+        -t "$($script:BhmApiImageName):$ImageTag" `
+        -f bunkerm-source/Dockerfile.api `
+        bunkerm-source
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($buildExit -ne 0) {
+        Write-Host "[ERROR] Fallo en el build de bhm-api. Revisa los logs de arriba." -ForegroundColor Red
+        exit 1
+    }
+    Write-Success "[OK] $($script:BhmApiImageName):$ImageTag construida."
+}
+
+function Invoke-BuildIdentityImage {
+    Invoke-EnsureBunkerMSource
+    Write-Info "Construyendo $($script:BhmIdentityImageName):$ImageTag ..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:CE build `
+        -t "$($script:BhmIdentityImageName):$ImageTag" `
+        -f bunkerm-source/Dockerfile.identity `
+        bunkerm-source
+    $buildExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($buildExit -ne 0) {
+        Write-Host "[ERROR] Fallo en el build de bhm-identity. Revisa los logs de arriba." -ForegroundColor Red
+        exit 1
+    }
+    Write-Success "[OK] $($script:BhmIdentityImageName):$ImageTag construida."
+}
+
+function Invoke-Build {
+    Write-Info "Construyendo todas las imagenes de Broker Health Manager..."
+    Write-Host ""
+
+    Invoke-EnsureBunkerMSource
+
+    # Construir Mosquitto primero
+    Invoke-BuildMosquitto
+
+    Invoke-NormalizeShellScripts
+
+    Invoke-BuildFrontendImage
+    Invoke-BuildApiImage
+    Invoke-BuildIdentityImage
+
+    Write-Host ""
+    Write-Success "[OK] Imagenes BHM construidas: $($script:BhmFrontendImageName):$ImageTag, $($script:BhmApiImageName):$ImageTag, $($script:BhmIdentityImageName):$ImageTag y $($script:MosquittoImageName):$ImageTag"
+    Write-Info "Ahora ejecuta: .\deploy.ps1 -Action start"
     Write-Host ""
 }
 
@@ -1786,27 +1620,92 @@ function Invoke-BuildMosquitto {
     Write-Host ""
 }
 
-function Invoke-BuildGreenhouseSimulator {
-    Write-Info "Construyendo imagen de Greenhouse Simulator..."
-    Write-Host ""
+# ---------------------------------------------------------------------------
+# Kind image loading helper
+# ---------------------------------------------------------------------------
 
-    if (-not (Test-Path "greenhouse-simulator\src\Greenhouse.Sensors\Dockerfile")) {
-        Write-Host "[ERROR] greenhouse-simulator/src/Greenhouse.Sensors/Dockerfile no encontrado." -ForegroundColor Red
-        exit 1
-    }
+function Invoke-LoadImageIntoKind {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ImageName
+    )
 
-    & $script:CE build `
-        -t "$($script:GreenhouseSimulatorImageName):$ImageTag" `
-        .\greenhouse-simulator\src\Greenhouse.Sensors
-    $buildExit = $LASTEXITCODE
+    Ensure-KubernetesTooling
 
-    if ($buildExit -eq 0) {
-        Write-Success "[OK] Imagen Greenhouse Simulator construida: $($script:GreenhouseSimulatorImageName):$ImageTag"
+    Write-Info "Cargando imagen '$ImageName' en el cluster kind '$KindClusterName'..."
+
+    if ($script:CE -eq 'podman') {
+        $tmpArchive = Join-Path $env:TEMP ("bhm-kind-load-" + [System.IO.Path]::GetRandomFileName() + ".tar")
+        try {
+            $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+            & $script:CE save --format oci-archive -o $tmpArchive $ImageName 2>&1 | Out-Null
+            $saveExit = $LASTEXITCODE
+            $ErrorActionPreference = $savedPref
+
+            if ($saveExit -ne 0) {
+                throw "podman save fallo para '$ImageName'."
+            }
+
+            $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+            & $script:KindExecutable load image-archive $tmpArchive --name $KindClusterName 2>&1
+            $loadExit = $LASTEXITCODE
+            $ErrorActionPreference = $savedPref
+
+            if ($loadExit -ne 0) {
+                throw "kind load image-archive fallo para '$ImageName'."
+            }
+        } finally {
+            if (Test-Path $tmpArchive) {
+                Remove-Item $tmpArchive -Force -ErrorAction SilentlyContinue
+            }
+        }
     } else {
-        Write-Host "[ERROR] Fallo en el build de Greenhouse Simulator." -ForegroundColor Red
-        exit 1
+        $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+        & $script:KindExecutable load docker-image $ImageName --name $KindClusterName 2>&1
+        $loadExit = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+
+        if ($loadExit -ne 0) {
+            throw "kind load docker-image fallo para '$ImageName'."
+        }
     }
-    Write-Host ""
+
+    Write-Success "[OK] Imagen '$ImageName' cargada en kind."
+}
+
+# ---------------------------------------------------------------------------
+# Rollout helper
+# ---------------------------------------------------------------------------
+
+function Invoke-RolloutRestart {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Resource,
+        [int]$TimeoutSeconds = 120
+    )
+
+    Ensure-KubernetesTooling
+
+    Write-Info "Rollout restart: $Resource ..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext rollout restart $Resource -n $KindNamespace 2>&1
+    $restartExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($restartExit -ne 0) {
+        throw "kubectl rollout restart fallo para '$Resource'."
+    }
+
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext rollout status $Resource -n $KindNamespace --timeout="${TimeoutSeconds}s" 2>&1
+    $statusExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($statusExit -ne 0) {
+        throw "kubectl rollout status indico fallo o timeout para '$Resource'."
+    }
+
+    Write-Success "[OK] $Resource listo."
 }
 
 function Invoke-KubernetesSmoke {
@@ -1900,231 +1799,19 @@ function Invoke-KubernetesSmoke {
     return $failed
 }
 
-function Invoke-ComposeSmoke {
-    # Verifica que los endpoints criticos del stack esten respondiendo correctamente.
-    # Retorna el numero de checks fallidos (0 = todo OK).
-    # Se usa como accion standalone ('smoke') o llamado automaticamente desde Invoke-Start (A3).
-    Write-Info "Smoke test -- verificando stack en ejecucion..."
-    Write-Host ""
-
-    # Leer API key del archivo de entorno
-    $apiKey = ""
-    if (Test-Path ".env.dev") {
-        $line = Get-Content ".env.dev" | Select-String "^API_KEY=" | Select-Object -First 1
-        if ($line) { $apiKey = "$line" -replace "^API_KEY=", "" }
-    }
-    if (-not $apiKey) {
-        Write-Warning "  API_KEY no encontrada en .env.dev -- check autenticado sera omitido"
-    }
-
-    $envMap = Get-EnvMap -Path ".env.dev"
-    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    $totalChecks = if ($postgresRequired) { 7 } else { 5 }
-
-    $passed = 0
-    $failed = 0
-    $savedPref = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-
-    # ── 1. Puerto MQTT 1900 ──────────────────────────────────────────────────
-    Write-Host -NoNewline "  [1/$totalChecks] MQTT puerto 1900 .......................... "
-    $tcpClient = New-Object System.Net.Sockets.TcpClient
-    try {
-        $tcpClient.Connect('localhost', 1900)
-        Write-Host "OK" -ForegroundColor Green
-        $passed++
-        $tcpClient.Close()
-    } catch {
-        Write-Host "FAIL" -ForegroundColor Red
-        $failed++
-    }
-
-    # ── 2. Nginx / Web UI ────────────────────────────────────────────────────
-    Write-Host -NoNewline "  [2/$totalChecks] Web UI http://localhost:2000 .............. "
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:2000" -UseBasicParsing -TimeoutSec 5 -MaximumRedirection 5 -ErrorAction Stop
-        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
-        $passed++
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        if ($code -ge 200 -and $code -lt 400) {
-            Write-Host "OK HTTP $code" -ForegroundColor Green; $passed++
-        } else {
-            Write-Host "FAIL HTTP $code" -ForegroundColor Red; $failed++
-        }
-    }
-
-    # ── 3. Next.js / Auth ────────────────────────────────────────────────────
-    Write-Host -NoNewline "  [3/$totalChecks] Auth API /api/auth/me ..................... "
-    try {
-        $r = Invoke-WebRequest -Uri "http://localhost:2000/api/auth/me" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
-        $passed++
-    } catch {
-        $code = $_.Exception.Response.StatusCode.value__
-        if ($code -in @(401, 403)) {
-            Write-Host "OK HTTP $code (sin sesion activa)" -ForegroundColor Green; $passed++
-        } else {
-            Write-Host "FAIL HTTP $code" -ForegroundColor Red; $failed++
-        }
-    }
-
-    # ── 4. Backend health: ruta publica legacy o ruta autenticada actual ─────
-    Write-Host -NoNewline "  [4/$totalChecks] Backend monitor health ..................... "
-    $healthOk = $false
-    $healthNote = ""
-    foreach ($attempt in 1..3) {
-        try {
-            $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/health" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-            Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/health)" -ForegroundColor Green
-            $passed++
-            $healthOk = $true
-            break
-        } catch {
-            $code = $_.Exception.Response.StatusCode.value__
-            if ($code) {
-                $healthNote = "HTTP $code en /api/monitor/health"
-            } elseif ($_.Exception.Message) {
-                $healthNote = "$($_.Exception.Message) en /api/monitor/health"
-            }
-
-            if ($attempt -lt 3) {
-                Start-Sleep -Seconds 2
-            }
-        }
-    }
-    if (-not $healthOk) {
-        if ($apiKey) {
-            foreach ($attempt in 1..3) {
-                try {
-                    $r = Invoke-WebRequest -Uri "http://localhost:2000/api/monitor/stats/health" -UseBasicParsing -TimeoutSec 5 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
-                    Write-Host "OK HTTP $($r.StatusCode) (/api/monitor/stats/health con API key)" -ForegroundColor Green
-                    $passed++
-                    $healthOk = $true
-                    break
-                } catch {
-                    $code = $_.Exception.Response.StatusCode.value__
-                    if ($code) {
-                        $healthNote = "$healthNote; HTTP $code en /api/monitor/stats/health"
-                    } elseif ($_.Exception.Message) {
-                        $healthNote = "$healthNote; $($_.Exception.Message) en /api/monitor/stats/health"
-                    }
-
-                    if ($attempt -lt 3) {
-                        Start-Sleep -Seconds 2
-                    }
-                }
-            }
-        }
-    }
-    if (-not $healthOk) {
-        Write-Host "FAIL $healthNote" -ForegroundColor Red
-        $failed++
-    }
-
-    # ── 5. Backend autenticado: endpoint DynSec ligero ───────────────────────
-    if ($apiKey) {
-        Write-Host -NoNewline "  [5/$totalChecks] Backend /api/dynsec/roles (API key) ....... "
-        $dynsecOk = $false
-        $dynsecError = ""
-        foreach ($attempt in 1..5) {
-            try {
-                $r = Invoke-WebRequest -Uri "http://localhost:2000/api/dynsec/roles" -UseBasicParsing -TimeoutSec 10 -Headers @{ 'X-API-Key' = $apiKey } -ErrorAction Stop
-                Write-Host "OK HTTP $($r.StatusCode)" -ForegroundColor Green
-                $passed++
-                $dynsecOk = $true
-                break
-            } catch {
-                $code = $_.Exception.Response.StatusCode.value__
-                if ($code) {
-                    $dynsecError = "HTTP $code"
-                } elseif ($_.Exception.Message) {
-                    $dynsecError = $_.Exception.Message
-                } else {
-                    $dynsecError = "error no especificado"
-                }
-
-                if ($attempt -lt 5) {
-                    Start-Sleep -Seconds 3
-                }
-            }
-        }
-
-        if (-not $dynsecOk) {
-            Write-Host "FAIL $dynsecError" -ForegroundColor Red
-            $failed++
-        }
-    } else {
-        Write-Host "  [5/$totalChecks] Backend /api/dynsec/roles .................. OMITIDO (sin API key)" -ForegroundColor Yellow
-    }
-
-    if ($postgresRequired) {
-        Write-Host -NoNewline "  [6/$totalChecks] bhm-api -> PostgreSQL control-plane ....... "
-        $platformPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName "bunkerm-platform"
-        if ($platformPgCheck.Success) {
-            Write-Host "OK" -ForegroundColor Green
-            $passed++
-        } else {
-            $platformError = if ($platformPgCheck.Output) { $platformPgCheck.Output } else { "error no especificado" }
-            Write-Host "FAIL $platformError" -ForegroundColor Red
-            $failed++
-        }
-
-        Write-Host -NoNewline "  [7/$totalChecks] bhm-reconciler -> PostgreSQL control-plane . "
-        $reconcilerPgCheck = Test-ContainerControlPlanePostgresConnectivity -ContainerName "bunkerm-reconciler"
-        if ($reconcilerPgCheck.Success) {
-            Write-Host "OK" -ForegroundColor Green
-            $passed++
-        } else {
-            $reconcilerError = if ($reconcilerPgCheck.Output) { $reconcilerPgCheck.Output } else { "error no especificado" }
-            Write-Host "FAIL $reconcilerError" -ForegroundColor Red
-            $failed++
-        }
-    }
-
-    $ErrorActionPreference = $savedPref
-
-    Write-Host ""
-    $total = $passed + $failed
-    if ($failed -eq 0) {
-        Write-Host "  Resultado: $passed/$total OK" -ForegroundColor Green
-        Write-Success "[SMOKE OK] Stack operativo."
-    } else {
-        Write-Host "  Resultado: $passed/$total OK, $failed FAIL(s)" -ForegroundColor Red
-        Write-Host "[SMOKE FAIL] Ejecuta '.\deploy.ps1 -Action logs' para diagnosticar." -ForegroundColor Red
-    }
-    Write-Host ""
-
-    return $failed
-}
-
 function Invoke-Smoke {
-    $failures = 0
-
-    if (Test-ComposeRuntime) {
-        $failures += Invoke-ComposeSmoke
-    }
-
-    if (Test-KindRuntime) {
-        if (Test-ComposeRuntime) {
-            Write-Host ''
-        }
-
-        $failures += Invoke-KubernetesSmoke
-    }
-
-    return $failures
+    return Invoke-KubernetesSmoke
 }
 
 function Invoke-Test {
-    # Ejecuta los tests de pytest dentro del contenedor bunkerm-platform en ejecucion.
-    # Requiere que el contenedor este corriendo: .\.deploy.ps1 -Action start
-    Write-Info "Ejecutando tests dentro del contenedor bunkerm-platform..."
+    # Ejecuta los tests de pytest dentro del pod bhm-api en Kubernetes.
+    # Requiere que el cluster este corriendo: .\deploy.ps1 -Action start
+    Write-Info "Ejecutando tests dentro del pod bhm-api en Kubernetes..."
     Write-Host ""
 
-    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
-    if (-not $containerRunning) {
-        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
         exit 1
     }
 
@@ -2146,20 +1833,24 @@ function Invoke-Test {
     }
 
     $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    $apiPod = & $script:KubectlExecutable get pods -n $KindNamespace -l app.kubernetes.io/name=bhm-api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>&1
+    if (-not $apiPod -or $LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] No se encontro pod bhm-api en estado Running." -ForegroundColor Red
+        exit 1
+    }
     if ($testDir) {
-        & $script:CE exec bunkerm-platform pytest $testDir -v
+        & $script:KubectlExecutable exec -n $KindNamespace $apiPod -- pytest $testDir -v
     } else {
-        # Primero backend unificado (si el directorio existe), luego smart-anomaly
-        $backendTestsExist = & $script:CE exec bunkerm-platform sh -c "test -d /app/tests && echo yes || echo no" 2>&1
+        $backendTestsExist = & $script:KubectlExecutable exec -n $KindNamespace $apiPod -- sh -c "test -d /app/tests `&`& echo yes `|`| echo no" 2>&1
         if ($backendTestsExist -match 'yes') {
             Write-Info "Suite: backend unificado (/app/tests)"
-            & $script:CE exec bunkerm-platform pytest /app/tests -v
+            & $script:KubectlExecutable exec -n $KindNamespace $apiPod -- pytest /app/tests -v
         } else {
             Write-Warning "/app/tests no existe aun. Implementar Fase T del QUALITY_PLAN.md"
         }
         Write-Host ""
         Write-Info "Suite: smart-anomaly (/app/smart-anomaly/tests)"
-        & $script:CE exec bunkerm-platform pytest /app/smart-anomaly/tests -v
+        & $script:KubectlExecutable exec -n $KindNamespace $apiPod -- pytest /app/smart-anomaly/tests -v
     }
     $testExit = $LASTEXITCODE
     $ErrorActionPreference = $savedPref
@@ -2175,105 +1866,41 @@ function Invoke-Test {
 }
 
 function Invoke-ReloadMosquitto {
-    Write-Info "Enviando señal de recarga a Mosquitto standalone..."
-    $mqContainer = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-mosquitto"
-    if (-not $mqContainer) {
-        Write-Host "[ERROR] El contenedor bunkerm-mosquitto no esta corriendo." -ForegroundColor Red
+    Write-Info "Enviando senal de recarga a Mosquitto en Kubernetes..."
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
         exit 1
     }
-    # Write the reload trigger file directly in the mosquitto container
-    & $script:CE exec bunkerm-mosquitto sh -c "touch /var/lib/mosquitto/.reload"
-    Write-Success "[OK] Señal enviada. Mosquitto recargara su configuracion en ~2 segundos."
+    $mqPod = & $script:KubectlExecutable get pods -n $KindNamespace -l app.kubernetes.io/name=mosquitto --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>&1
+    if (-not $mqPod -or $LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] No se encontro pod mosquitto en estado Running." -ForegroundColor Red
+        exit 1
+    }
+    & $script:KubectlExecutable exec -n $KindNamespace $mqPod -- sh -c "touch /var/lib/mosquitto/.reload"
+    Write-Success "[OK] Senal enviada. Mosquitto recargara su configuracion en ~2 segundos."
     Write-Host ""
 }
 
 function Invoke-StartBunkerM {
-    Write-Info "Starting Broker Health Manager platform..."
-    Write-Host ""
-    
-    if (-not (Test-Path ".env.dev")) {
-        Write-Error ".env.dev not found. Run setup first: .\deploy.ps1 -Action setup"
-        exit 1
-    }
-
-    $envMap = Get-EnvMap -Path ".env.dev"
-    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    
-    # Verificar que la red exista
-    Write-Info "Verificando red Docker..."
-    $networkExists = Invoke-Expression "$script:CE network ls" | Select-String "bunkerm-network"
-    if (-not $networkExists) {
-        Write-Info "Creando red bunkerm-network..."
-        & $script:CE network create bunkerm-network
-        Write-Success "[OK] Red creada"
-    }
-
-    # Iniciar mosquitto standalone primero (Broker Health Manager depende de el)
-    Write-Info "Iniciando Mosquitto standalone..."
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d mosquitto"
-    
-    Write-Info "Esperando a que Mosquitto este listo (15 segundos)..."
-    Start-Sleep -Seconds 15
-
-    if ($postgresRequired) {
-        Write-Info "La configuracion actual requiere PostgreSQL. Iniciando el servicio postgres del baseline Compose-first..."
-        Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d postgres"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "No se pudo iniciar el servicio postgres requerido por la configuracion actual."
-            exit 1
-        }
-        if (-not (Wait-ContainerHealthy -ContainerName "bunkerm-postgres" -TimeoutSeconds 90)) {
-            Write-Error "PostgreSQL no alcanzo estado healthy. Revisa: .\deploy.ps1 -Action logs"
-            exit 1
-        }
-    }
-
-    # Iniciar solo el servicio bunkerm. Si la configuracion ya apunta a PostgreSQL,
-    # se levanta antes el servicio postgres para que el runtime no arranque degradado.
-    Write-Info "Iniciando Broker Health Manager..."
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml up -d bunkerm"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Fallo el arranque del servicio bunkerm. Revisa: .\deploy.ps1 -Action logs"
-        exit 1
-    }
-    
-    Write-Host ""
-    Write-Success "[OK] Broker Health Manager iniciado!"
-    Write-Host ""
-    Write-Info "Esperando a que Broker Health Manager esté listo (60 segundos)..."
-    Start-Sleep -Seconds 60
-    
-    Write-Host ""
-    Write-Info "URLs de acceso:"
-    Write-Host "  - Web UI:    http://localhost:2000" -ForegroundColor Cyan
-    Write-Host "  - MQTT:      localhost:1900" -ForegroundColor Cyan
-    if ($postgresRequired) {
-        Write-Host "  - PostgreSQL: localhost:5432" -ForegroundColor Cyan
-    }
-    Write-Host ""
-    Write-Info "Verificar estado: .\deploy.ps1 -Action status"
-    Write-Info "Ver logs: $script:CE logs bunkerm-platform -f"
-    Write-Host ""
+    Write-Warning "'start-bunkerm' ha sido eliminado. Usa: .\deploy.ps1 -Action start"
+    Invoke-Start
 }
 
 function Invoke-StopBunkerM {
-    Write-Info "Deteniendo Broker Health Manager platform..."
-    Write-Host ""
-
-    $envMap = Get-EnvMap -Path ".env.dev"
-    $postgresRequired = Test-PostgresRequired -EnvMap $envMap
-    $services = if ($postgresRequired) { "bunkerm mosquitto postgres" } else { "bunkerm mosquitto" }
-
-    Invoke-Expression "$script:CCE --env-file .env.dev -f docker-compose.dev.yml stop $services"
-
-    Write-Host ""
-    Write-Success "[OK] Broker Health Manager y Mosquitto detenidos!"
-    Write-Host ""
+    Write-Warning "'stop-bunkerm' ha sido eliminado. Usa: .\deploy.ps1 -Action stop"
+    Invoke-StopKindRuntime
 }
 
 function Invoke-PatchFrontend {
-    Write-Info "Hot-patch del frontend Next.js..."
+    Write-Info "Hot-patch del frontend Next.js (Kubernetes)..."
     Write-Host ""
+
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+        exit 1
+    }
 
     $frontendPath = Join-Path $PSScriptRoot "bunkerm-source\frontend"
     if (-not (Test-Path $frontendPath)) {
@@ -2281,63 +1908,32 @@ function Invoke-PatchFrontend {
         exit 1
     }
 
-    # Verificar si el contenedor esta corriendo
-    $containerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "bunkerm-platform"
-    if (-not $containerRunning) {
-        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+    Write-Info "Copiando fuentes del frontend al pod bhm-frontend..."
+    $pod = & $script:KubectlExecutable get pods -n $KindNamespace -l app.kubernetes.io/name=bhm-frontend --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>&1
+    if (-not $pod -or $LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] No se encontro un pod bhm-frontend en estado Running." -ForegroundColor Red
         exit 1
     }
 
-    Write-Info "Compilando frontend con Node.js..."
-    # Nota: se monta el directorio frontend en el contenedor node para el build
-    & $script:CE run --rm `
-        -v "${frontendPath}:/frontend" `
-        -w /frontend `
-        -e AUTH_SECRET=build-placeholder `
-        -e NEXT_TELEMETRY_DISABLED=1 `
-        node:20-alpine `
-        sh -c "npm run build 2>&1 | tail -15"
+    & $script:KubectlExecutable cp "${frontendPath}/." "$KindNamespace/${pod}:/nextjs/" 2>&1 | Out-Null
+    Write-Info "Reiniciando deployment bhm-frontend..."
+    & $script:KubectlExecutable rollout restart deployment/bhm-frontend -n $KindNamespace
+    & $script:KubectlExecutable rollout status deployment/bhm-frontend -n $KindNamespace --timeout=90s
 
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[ERROR] Fallo el build del frontend." -ForegroundColor Red
-        exit 1
-    }
-
-    Write-Info "Desplegando al contenedor..."
-
-    # Copiar standalone (servidor Next.js)
-    # Se usa la ruta con '\.' para copiar el CONTENIDO del directorio, no el directorio mismo
-    $standalonePath = Join-Path $frontendPath ".next\standalone"
-    & $script:CE cp "${standalonePath}/." "bunkerm-platform:/nextjs/"
-
-    # Copiar estaticos: IMPORTANTE usar '\.' al final para copiar el CONTENIDO
-    # sin esto, podman crea un directorio anidado static/static/ en vez de sobreescribir
-    $staticPath = Join-Path $frontendPath ".next\static"
-    & $script:CE cp "${staticPath}/." "bunkerm-platform:/nextjs/.next/static/"
-
-    # Limpiar cualquier directorio 'static' anidado si quedó de deploys anteriores
-    $nestedStatic = & $script:CE exec bunkerm-platform sh -c "test -d /nextjs/.next/static/static && echo exists || echo none" 2>&1
-    if ($nestedStatic -match "exists") {
-        Write-Info "Limpiando directorio static anidado de deploys anteriores..."
-        & $script:CE exec bunkerm-platform sh -c "cp -rf /nextjs/.next/static/static/. /nextjs/.next/static/ && rm -rf /nextjs/.next/static/static"
-    }
-
-    # Reiniciar el servidor Next.js (supervisord lo relanzara automaticamente)
-    Write-Info "Reiniciando servidor Next.js..."
-    $nextPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep next-server | grep -v grep | sed 's/^ *//' | cut -d' ' -f1" 2>&1 | Select-Object -First 1
-    if ($nextPid) {
-        & $script:CE exec bunkerm-platform sh -c "kill $nextPid"
-        Start-Sleep -Seconds 3
-    }
-
-    Write-Success "[OK] Frontend actualizado correctamente!"
+    Write-Success "[OK] Frontend reiniciado en Kubernetes."
     Write-Host "  Recarga la pagina del navegador (Ctrl+Shift+R) para ver los cambios." -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Invoke-PatchBackend {
-    Write-Info "Hot-patch de servicios Python del backend..."
+    Write-Info "Hot-patch del backend Python (Kubernetes)..."
     Write-Host ""
+
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+        exit 1
+    }
 
     $backendPath = Join-Path $PSScriptRoot "bunkerm-source\backend\app"
     if (-not (Test-Path $backendPath)) {
@@ -2345,49 +1941,261 @@ function Invoke-PatchBackend {
         exit 1
     }
 
-    $platformRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "^bunkerm-platform$"
-    if (-not $platformRunning) {
-        Write-Host "[ERROR] El contenedor bunkerm-platform no esta corriendo." -ForegroundColor Red
+    Write-Info "Copiando fuentes del backend al pod bhm-api..."
+    $pod = & $script:KubectlExecutable get pods -n $KindNamespace -l app.kubernetes.io/name=bhm-api --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>&1
+    if (-not $pod -or $LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] No se encontro un pod bhm-api en estado Running." -ForegroundColor Red
         exit 1
     }
 
-    $reconcilerRunning = & $script:CE ps --format "{{.Names}}" 2>&1 | Select-String "^bunkerm-reconciler$"
+    & $script:KubectlExecutable cp "${backendPath}/." "$KindNamespace/${pod}:/app/" 2>&1 | Out-Null
 
-    # Patch único: copiar todo el directorio app/ de una vez y recargar el proceso uvicorn unificado
-    $serviceNames = @('dynsec', 'monitor', 'clientlogs', 'config', 'smart-anomaly')
-    foreach ($name in $serviceNames) {
-        Write-Info "  Copiando $name..."
+    Write-Info "Reiniciando deployment bhm-api..."
+    & $script:KubectlExecutable rollout restart deployment/bhm-api -n $KindNamespace
+    & $script:KubectlExecutable rollout status deployment/bhm-api -n $KindNamespace --timeout=90s
+
+    Write-Success "[OK] Backend reiniciado en Kubernetes."
+    Write-Host ""
+}
+
+# ---------------------------------------------------------------------------
+# Acciones de actualizacion por componente (Phase C)
+# ---------------------------------------------------------------------------
+
+function Invoke-EnsureClusterRunning {
+    Ensure-KubernetesTooling
+    if (-not (Test-KindClusterExists)) {
+        Write-Host "[ERROR] El cluster kind '$KindClusterName' no existe. Ejecuta: .\deploy.ps1 -Action start" -ForegroundColor Red
+        exit 1
     }
-    & $script:CE cp "${backendPath}/." "bunkerm-platform:/app/"
-    if ($reconcilerRunning) {
-        & $script:CE cp "${backendPath}/." "bunkerm-reconciler:/app/"
+}
+
+function Invoke-UpdateFrontend {
+    Write-Info "Actualizando componente: bhm-frontend (build + load + rollout)..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+    Invoke-NormalizeShellScripts
+    Invoke-BuildFrontendImage
+    Invoke-LoadImageIntoKind -ImageName "$($script:BhmFrontendImageName):$ImageTag"
+    Invoke-RolloutRestart -Resource 'deployment/bhm-frontend'
+    Write-Host ""
+    Write-Success "[OK] bhm-frontend actualizado."
+    Write-Host ""
+}
+
+function Invoke-UpdateApi {
+    Write-Info "Actualizando componente: bhm-api + bhm-alert-delivery (build + load + rollout)..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+    Invoke-NormalizeShellScripts
+    Invoke-BuildApiImage
+    Invoke-LoadImageIntoKind -ImageName "$($script:BhmApiImageName):$ImageTag"
+    Invoke-RolloutRestart -Resource 'deployment/bhm-api'
+    Invoke-RolloutRestart -Resource 'deployment/bhm-alert-delivery'
+    Write-Host ""
+    Write-Success "[OK] bhm-api y bhm-alert-delivery actualizados."
+    Write-Host ""
+}
+
+function Invoke-UpdateIdentity {
+    Write-Info "Actualizando componente: bhm-identity (build + load + rollout)..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+    Invoke-NormalizeShellScripts
+    Invoke-BuildIdentityImage
+    Invoke-LoadImageIntoKind -ImageName "$($script:BhmIdentityImageName):$ImageTag"
+    Invoke-RolloutRestart -Resource 'deployment/bhm-identity'
+    Write-Host ""
+    Write-Success "[OK] bhm-identity actualizado."
+    Write-Host ""
+}
+
+function Invoke-UpdateMosquitto {
+    Write-Info "Actualizando componente: mosquitto (build + load + rollout)..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+    Invoke-BuildMosquitto
+    Invoke-LoadImageIntoKind -ImageName "$($script:MosquittoImageName):$ImageTag"
+    Invoke-RolloutRestart -Resource 'statefulset/mosquitto'
+    Write-Host ""
+    Write-Success "[OK] Mosquitto actualizado."
+    Write-Host ""
+}
+
+function Invoke-UpdateAll {
+    Write-Info "Actualizando todos los componentes..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+    Invoke-UpdateFrontend
+    Invoke-UpdateApi
+    Invoke-UpdateIdentity
+    Invoke-UpdateMosquitto
+    Write-Host ""
+    Write-Success "[OK] Todos los componentes actualizados."
+    Write-Host ""
+}
+
+# ---------------------------------------------------------------------------
+# Accion rollout - reinicio sin rebuild (Phase D)
+# ---------------------------------------------------------------------------
+
+function Invoke-Rollout {
+    Write-Info "Rollout restart del componente: $Component ..."
+    Write-Host ""
+    Invoke-EnsureClusterRunning
+
+    switch ($Component) {
+        'frontend'  {
+            Invoke-RolloutRestart -Resource 'deployment/bhm-frontend'
+        }
+        'api'       {
+            Invoke-RolloutRestart -Resource 'deployment/bhm-api'
+            Invoke-RolloutRestart -Resource 'deployment/bhm-alert-delivery'
+        }
+        'identity'  {
+            Invoke-RolloutRestart -Resource 'deployment/bhm-identity'
+        }
+        'mosquitto' {
+            Invoke-RolloutRestart -Resource 'statefulset/mosquitto'
+        }
+        'alerts'    {
+            Invoke-RolloutRestart -Resource 'deployment/bhm-alert-delivery'
+        }
+        'all'       {
+            Invoke-RolloutRestart -Resource 'deployment/bhm-frontend'
+            Invoke-RolloutRestart -Resource 'deployment/bhm-api'
+            Invoke-RolloutRestart -Resource 'deployment/bhm-identity'
+            Invoke-RolloutRestart -Resource 'deployment/bhm-alert-delivery'
+            Invoke-RolloutRestart -Resource 'statefulset/mosquitto'
+        }
     }
 
-    # Recargar el proceso uvicorn unificado (puerto 9001)
-    $svcPid = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep | awk '{print `$2; exit}'" 2>&1 | Select-Object -First 1
-    if ($svcPid -match '\d+') {
-        & $script:CE exec bunkerm-platform sh -c "kill -HUP $svcPid" 2>&1 | Out-Null
-        Write-Info "    Proceso $svcPid recargado (SIGHUP)"
+    Write-Host ""
+    Write-Success "[OK] Rollout completado para: $Component"
+    Write-Host ""
+}
+
+# ---------------------------------------------------------------------------
+# Acciones de operacion y mantenimiento (Phase E)
+# ---------------------------------------------------------------------------
+
+function Invoke-Redeploy {
+    Write-Warning "Redeploy completo: se eliminara el cluster kind y se recreara desde cero."
+    Write-Warning ".env.dev NO se eliminara - los secretos se preservan."
+    $confirm = Read-Host "Continuar? (y/N)"
+    if ($confirm -ne 'y' -and $confirm -ne 'Y') {
+        Write-Info "Redeploy cancelado."
+        return
     }
 
-    # D2 -- Verificar que uvicorn sigue vivo 3 segundos despues del SIGHUP
-    Start-Sleep -Seconds 3
-    $uvicornAlive = & $script:CE exec bunkerm-platform sh -c "ps aux | grep 'uvicorn main:app.*9001' | grep -v grep" 2>&1
-    if (-not $uvicornAlive) {
-        Write-Host "" 
-        Write-Host "[AVISO] uvicorn (puerto 9001) no aparece en ps aux tras el SIGHUP." -ForegroundColor Yellow
-        Write-Host "  Ultimas 30 lineas de log de uvicorn:" -ForegroundColor Yellow
-        & $script:CE exec bunkerm-platform sh -c "tail -30 /var/log/supervisor/bunkerm-api.out.log 2>/dev/null || echo '(log no disponible)'" 2>&1 |
-            ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
-        Write-Host ""
-        Write-Host "  El backend puede no estar respondiendo. Comprueba con: .\deploy.ps1 -Action smoke" -ForegroundColor Yellow
+    Write-Info "Eliminando cluster kind '$KindClusterName'..."
+    Ensure-KubernetesTooling
+    if (Test-KindClusterExists) {
+        Stop-KindPortForwards
+        & $script:KindExecutable delete cluster --name $KindClusterName
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[ERROR] No se pudo eliminar el cluster kind." -ForegroundColor Red
+            exit 1
+        }
+        Write-Success "[OK] Cluster eliminado."
     } else {
-        Write-Success "[OK] Backend actualizado. Los servicios afectados se han recargado."
+        Write-Info "El cluster kind no existe, continuando con start..."
     }
 
-    if ($reconcilerRunning) {
-        & $script:CE restart bunkerm-reconciler 2>&1 | Out-Null
-        Write-Info "    Contenedor bunkerm-reconciler reiniciado para recargar el daemon broker-facing"
+    Write-Host ""
+    Invoke-Start
+}
+
+function Invoke-EnvSync {
+    Write-Info "Sincronizando secretos de .env.dev con el cluster kind..."
+    Write-Host ""
+
+    if (-not (Test-Path '.env.dev')) {
+        Write-Host "[ERROR] .env.dev no encontrado." -ForegroundColor Red
+        exit 1
+    }
+
+    Invoke-EnsureClusterRunning
+
+    # Leer el .env.dev y construir los argumentos --from-literal
+    $envMap = Get-EnvMap -Path '.env.dev'
+    if ($envMap.Count -eq 0) {
+        Write-Warning ".env.dev esta vacio o no tiene pares clave=valor."
+        return
+    }
+
+    Write-Info "Recreando Secret 'bhm-env' en el namespace '$KindNamespace'..."
+
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        delete secret bhm-env -n $KindNamespace 2>&1 | Out-Null
+    $ErrorActionPreference = $savedPref
+
+    $literalArgs = @()
+    foreach ($key in $envMap.Keys) {
+        $literalArgs += "--from-literal=${key}=$($envMap[$key])"
+    }
+
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        create secret generic bhm-env `
+        -n $KindNamespace `
+        @literalArgs 2>&1
+    $createExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+
+    if ($createExit -ne 0) {
+        Write-Host "[ERROR] No se pudo crear el Secret bhm-env." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Success "[OK] Secret bhm-env actualizado con $($envMap.Count) variables."
+    Write-Host ""
+
+    $doRollout = Read-Host "Hacer rollout de todos los pods para que apliquen los nuevos secretos? (y/N)"
+    if ($doRollout -eq 'y' -or $doRollout -eq 'Y') {
+        $Component = 'all'
+        Invoke-Rollout
+    } else {
+        Write-Warning "Los pods seguiran usando los valores del Secret anterior hasta reiniciarse."
+    }
+
+    Write-Host ""
+}
+
+function Invoke-DbMigrate {
+    Write-Info "Ejecutando migraciones Alembic en el pod bhm-api..."
+    Write-Host ""
+
+    Invoke-EnsureClusterRunning
+
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    $apiPod = & $script:KubectlExecutable --context $script:KindKubectlContext `
+        get pods -n $KindNamespace `
+        -l app.kubernetes.io/name=bhm-api `
+        --field-selector=status.phase=Running `
+        -o jsonpath='{.items[0].metadata.name}' 2>&1
+    $ErrorActionPreference = $savedPref
+
+    if (-not $apiPod -or $LASTEXITCODE -ne 0) {
+        Write-Host "[ERROR] No se encontro pod bhm-api en estado Running." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Info "Pod: $apiPod"
+    Write-Info "Ejecutando: alembic upgrade head"
+    Write-Host ""
+
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        exec -n $KindNamespace $apiPod -- sh -c "cd /app `&`& alembic upgrade head"
+    $migrateExit = $LASTEXITCODE
+
+    Write-Host ""
+    if ($migrateExit -eq 0) {
+        Write-Success "[OK] Migraciones aplicadas correctamente."
+    } else {
+        Write-Host "[ERROR] Las migraciones fallaron. Revisa la salida de arriba." -ForegroundColor Red
+        exit 1
     }
     Write-Host ""
 }
@@ -2396,29 +2204,104 @@ function Invoke-PatchBackend {
 Show-Banner
 Test-Prerequisites
 
-switch ($Action) {
-    'setup'            { Invoke-Setup }
-    'start'            { Invoke-Start }
-    'stop'             { Invoke-Stop }
-    'restart'          { Invoke-Restart }
-    'status'           { Invoke-Status }
-    'logs'             { Invoke-Logs }
-    'clean'            { Invoke-Clean }
-    'build'            { Invoke-Build }
-    'build-mosquitto'  { Invoke-BuildMosquitto }
-    'start-bunkerm'    { Invoke-StartBunkerM }
-    'stop-bunkerm'     { Invoke-StopBunkerM }
-    'patch-frontend'   { Invoke-PatchFrontend }
-    'patch-backend'    { Invoke-PatchBackend }
-    'reload-mosquitto' { Invoke-ReloadMosquitto }
-    'test'             { Invoke-Test }
-    'smoke'            {
+switch ($Action)
+{
+    'setup'
+    {
+        Invoke-Setup
+    }
+    'start'
+    {
+        Invoke-Start
+    }
+    'stop'
+    {
+        Invoke-Stop
+    }
+    'restart'
+    {
+        Invoke-Restart
+    }
+    'status'
+    {
+        Invoke-Status
+    }
+    'logs'
+    {
+        Invoke-Logs
+    }
+    'clean'
+    {
+        Invoke-Clean
+    }
+    'build'
+    {
+        Invoke-Build
+    }
+    'build-mosquitto'
+    {
+        Invoke-BuildMosquitto
+    }
+    'update-frontend'
+    {
+        Invoke-UpdateFrontend
+    }
+    'update-api'
+    {
+        Invoke-UpdateApi
+    }
+    'update-identity'
+    {
+        Invoke-UpdateIdentity
+    }
+    'update-mosquitto'
+    {
+        Invoke-UpdateMosquitto
+    }
+    'update-all'
+    {
+        Invoke-UpdateAll
+    }
+    'rollout'
+    {
+        Invoke-Rollout
+    }
+    'redeploy'
+    {
+        Invoke-Redeploy
+    }
+    'env-sync'
+    {
+        Invoke-EnvSync
+    }
+    'db-migrate'
+    {
+        Invoke-DbMigrate
+    }
+    'patch-frontend'
+    {
+        Invoke-PatchFrontend
+    }
+    'patch-backend'
+    {
+        Invoke-PatchBackend
+    }
+    'reload-mosquitto'
+    {
+        Invoke-ReloadMosquitto
+    }
+    'test'
+    {
+        Invoke-Test
+    }
+    'smoke'
+    {
         $smokeResult = Invoke-Smoke
         if ($smokeResult -gt 0) { exit 1 }
     }
-    default {
+    default
+    {
         Write-Error "Unknown action: $Action"
-        Write-Info "Acciones disponibles: setup, start, stop, restart, status, logs, clean, build, build-mosquitto, start-bunkerm, stop-bunkerm, patch-frontend, patch-backend, reload-mosquitto, test, smoke"
     }
 }
 

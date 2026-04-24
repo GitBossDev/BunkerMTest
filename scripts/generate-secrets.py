@@ -149,6 +149,7 @@ DATABASE_URL={db_url}
 CONTROL_PLANE_DATABASE_URL={db_url}
 HISTORY_DATABASE_URL={db_url}
 REPORTING_DATABASE_URL={db_url}
+IDENTITY_DATABASE_URL={db_url}
 
 # ------------------------------------------
 # MQTT Broker (Mosquitto) Configuration

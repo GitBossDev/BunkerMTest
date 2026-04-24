@@ -26,14 +26,33 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-# Nombres de variables que se inyectan directamente por Compose (no vienen de .env.dev)
-# y por lo tanto no se deben reportar como faltantes.
-COMPOSE_INTERNAL = {
-    "MQTT_BROKER",      # hardcoded como nombre de servicio
-    "MQTT_PORT",        # hardcoded como numero de puerto
-    "MOSQUITTO_IP",     # hardcoded como nombre de servicio
-    "MOSQUITTO_PORT",   # hardcoded como numero de puerto
-}
+# Variables obligatorias en .env.dev — se inyectan en el Secret bhm-env de Kubernetes
+# y deben estar presentes antes de ejecutar el bootstrap del cluster kind.
+REQUIRED_VARS: list[str] = [
+    # PostgreSQL
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_DB",
+    # Database URLs (una por schema)
+    "DATABASE_URL",
+    "CONTROL_PLANE_DATABASE_URL",
+    "HISTORY_DATABASE_URL",
+    "REPORTING_DATABASE_URL",
+    "IDENTITY_DATABASE_URL",
+    # MQTT
+    "MQTT_USERNAME",
+    "MQTT_PASSWORD",
+    # Seguridad
+    "API_KEY",
+    "JWT_SECRET",
+    "AUTH_SECRET",
+    # Frontend / autenticacion
+    "NEXTAUTH_URL",
+    "NEXTAUTH_SECRET",
+    # Admin inicial
+    "ADMIN_INITIAL_EMAIL",
+    "ADMIN_INITIAL_PASSWORD",
+]
 
 GENERATOR_SAFE_SECRET_NAMES = {
     "POSTGRES_PASSWORD",
@@ -120,6 +139,7 @@ def validate_database_url_coherence(env_values: dict[str, str]) -> list[str]:
         "CONTROL_PLANE_DATABASE_URL",
         "HISTORY_DATABASE_URL",
         "REPORTING_DATABASE_URL",
+        "IDENTITY_DATABASE_URL",
     ):
         raw_url = env_values.get(name)
         if not raw_url:
@@ -216,69 +236,33 @@ def validate_mosquitto_seed_coherence(repo_root: Path, env_values: dict[str, str
     return errors, warnings
 
 
-def parse_required_vars(compose_path: Path) -> list[str]:
-    """
-    Scan docker-compose.dev.yml for variables referenced as ${VAR} (no :- fallback).
-    Returns a deduplicated list preserving first-occurrence order.
-    """
-    text = read_text_with_fallbacks(compose_path)
-
-    # ${VAR} — variable requerida, sin valor por defecto
-    required_pattern = re.compile(r"\$\{([A-Z_][A-Z0-9_]*)\}")
-    # ${VAR:-...} — variable con fallback; se extrae su nombre para excluirlo
-    optional_pattern = re.compile(r"\$\{([A-Z_][A-Z0-9_]*):-[^}]*\}")
-
-    optional_vars: set[str] = {m.group(1) for m in optional_pattern.finditer(text)}
-
-    seen: set[str] = set()
-    required: list[str] = []
-    for match in required_pattern.finditer(text):
-        var = match.group(1)
-        if var in seen or var in optional_vars or var in COMPOSE_INTERNAL:
-            continue
-        seen.add(var)
-        required.append(var)
-
-    return required
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate required environment variables before deploying"
+        description="Validate required environment variables before deploying to Kubernetes (kind)"
     )
     parser.add_argument(
         "--env-file",
         default=".env.dev",
         help="Path to the .env file (default: .env.dev)",
     )
-    parser.add_argument(
-        "--compose",
-        default="docker-compose.dev.yml",
-        help="Path to the compose file (default: docker-compose.dev.yml)",
-    )
     args = parser.parse_args()
 
     env_path = Path(args.env_file)
-    compose_path = Path(args.compose)
+    repo_root = env_path.parent
 
-    # Verificar que los archivos requeridos existen
     if not env_path.exists():
         print(f"[ERROR] {env_path} not found.")
         print("        Run: .\\deploy.ps1 -Action setup")
         return 1
 
-    if not compose_path.exists():
-        print(f"[ERROR] {compose_path} not found.")
-        return 1
-
     env_values = parse_env_file(env_path)
-    required = parse_required_vars(compose_path)
     errors = []
-    errors.extend(validate_required_values(required, env_values))
+    errors.extend(validate_required_values(REQUIRED_VARS, env_values))
     errors.extend(validate_generated_secret_shapes(env_values))
     errors.extend(validate_database_url_coherence(env_values))
     errors.extend(validate_broker_resource_limits(env_values))
-    seed_errors, warnings = validate_mosquitto_seed_coherence(compose_path.parent, env_values)
+    seed_errors, warnings = validate_mosquitto_seed_coherence(repo_root, env_values)
     errors.extend(seed_errors)
 
     if errors:
@@ -296,7 +280,7 @@ def main() -> int:
             print(f"  - {issue}")
         print()
 
-    print(f"[OK] All {len(required)} required environment variables are defined and coherent in {env_path}")
+    print(f"[OK] All {len(REQUIRED_VARS)} required environment variables are defined and coherent in {env_path}")
     return 0
 
 

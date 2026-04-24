@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyToken, COOKIE_NAME } from '@/lib/auth'
-import { readUsers, writeUsers, verifyPassword } from '@/lib/users'
-import bcrypt from 'bcryptjs'
+import { changePasswordViaApi, InvalidPasswordError } from '@/lib/users-api'
 
 export async function POST(request: NextRequest) {
   const token = request.cookies.get(COOKIE_NAME)?.value
@@ -22,15 +21,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Password must be between 8 and 128 characters' }, { status: 400 })
   }
 
-  const users = readUsers()
-  const user = users.find((u) => u.id === currentUser.id)
-  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
-
-  const valid = await verifyPassword(currentPassword, user.passwordHash)
-  if (!valid) return NextResponse.json({ error: 'Current password is incorrect' }, { status: 401 })
-
-  user.passwordHash = await bcrypt.hash(newPassword, 10)
-  writeUsers(users)
-
-  return NextResponse.json({ message: 'Password changed successfully' }, { status: 200 })
+  try {
+    await changePasswordViaApi(currentUser.id, currentPassword, newPassword)
+    return NextResponse.json({ message: 'Password changed successfully' }, { status: 200 })
+  } catch (err) {
+    if (err instanceof InvalidPasswordError) {
+      return NextResponse.json({ error: 'Current password is incorrect' }, { status: 401 })
+    }
+    console.error('Change password error:', err)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+  }
 }
