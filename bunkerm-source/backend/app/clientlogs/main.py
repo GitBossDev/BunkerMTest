@@ -67,7 +67,8 @@ _TS_RE = re.compile(r'^(?:\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d+)$')
 
 # How long (seconds) to suppress duplicate Publish events for the same topic.
 # Keeps the event stream readable when clients publish at high frequency.
-_PUBLISH_DEDUP_SECONDS = 60
+# 0 = disabled, show all publish events
+_PUBLISH_DEDUP_SECONDS = 0
 
 # Topic prefixes that are internal to the BunkerM platform.
 # These are never shown in the client events view — they are system/infrastructure
@@ -341,23 +342,47 @@ class MQTTMonitor:
         return event
 
     def parse_publish_log(self, log_line: str) -> Optional[MQTTEvent]:
-        """Parse PUBLISH log entries, deduplicated by (client_id, topic)."""
-        pattern = (_TS_CAPTURE + r": Received PUBLISH from (\S+)"
-                   r" \(d\d, q(\d), r\d, m\d+, '([^']+)', \.\.\. \((\d+) bytes\)\)")
-        m = re.match(pattern, log_line)
-        if not m:
+        """Parse PUBLISH with extreme flexibility - use search() not match()"""
+        if "Received PUBLISH from" not in log_line:
             return None
-
-        ts, client_id, qos_str, topic, size_str = m.groups()
-        # Skip internal platform topics (same rule as the paho monitor)
+        
+        # Extraer timestamp (al inicio de la línea)
+        ts_match = re.search(_TS_CAPTURE, log_line)
+        if not ts_match:
+            return None
+        ts = ts_match.group(1)
+        
+        # Extraer client_id (texto después de "from")
+        client_match = re.search(r"Received PUBLISH from (\S+)", log_line)
+        if not client_match:
+            return None
+        client_id = client_match.group(1)
+        
+        # Extraer tópico (entre comillas simples)
+        topic_match = re.search(r"'([^']+)'", log_line)
+        if not topic_match:
+            return None
+        topic = topic_match.group(1)
+        
+        # Extraer QoS (q seguido de dígito)
+        qos_match = re.search(r"q(\d)", log_line)
+        qos_str = qos_match.group(1) if qos_match else "0"
+        
+        # Extraer bytes
+        bytes_match = re.search(r"\((\d+) bytes\)", log_line)
+        size_str = bytes_match.group(1) if bytes_match else "0"
+        
+        # Skip internal topics
         if any(topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
             return None
+        
         username, protocol_level, ip, port, clean, keep_alive = self._get_client_info(client_id)
         if self._is_admin(username):
-            return None
-
+            pass  # Allow admin publishes now
+        
+        event_ts = time.time()
         key = topic
-        now_ts = time.time()
+        now_ts = event_ts
         if key in self._last_publish_ts and now_ts - self._last_publish_ts[key] < _PUBLISH_DEDUP_SECONDS:
             return None
         self._last_publish_ts[key] = now_ts
