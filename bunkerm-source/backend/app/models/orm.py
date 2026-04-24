@@ -398,5 +398,23 @@ class ClientMQTTEvent(Base):
     payload_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retained: Mapped[bool | None] = mapped_column(nullable=True)
     disconnect_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class BhmUser(Base):
+    """Panel user record stored in the `identity` schema.
+
+    This model backs the `identity.bhm_users` table used by the
+    `bhm-identity` service and the unified backend seeding logic.
+    """
+    __tablename__ = "bhm_users"
+    __table_args__ = {"schema": "identity"}
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    first_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # created_at/updated_at are managed by callers; keep fields explicit

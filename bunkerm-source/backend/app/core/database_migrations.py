@@ -5,6 +5,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from alembic.script.revision import MultipleHeads
+from alembic.util.exc import CommandError
 from sqlalchemy import inspect
 
 from core.database_url import get_async_database_url
@@ -105,7 +107,20 @@ def upgrade_control_plane_database_sync(database_url: str, revision: str = "head
             "Control-plane schema is partially present without alembic_version; manual reconciliation is required."
         )
 
-    command.upgrade(cfg, revision)
+    try:
+        command.upgrade(cfg, revision)
+    except MultipleHeads:
+        # If multiple heads exist in the alembic history (e.g. parallel branches),
+        # retry upgrading to all heads so migrations are applied across branches.
+        command.upgrade(cfg, "heads")
+    except CommandError as exc:
+        # Some alembic versions raise a CommandError wrapping the MultipleHeads
+        # situation; detect and retry with 'heads', otherwise re-raise.
+        msg = str(exc)
+        if "Multiple head" in msg or "Multiple heads" in msg:
+            command.upgrade(cfg, "heads")
+        else:
+            raise
 
 
 async def upgrade_control_plane_database(database_url: str, revision: str = "head") -> None:
