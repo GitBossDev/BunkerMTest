@@ -90,7 +90,7 @@ export function CreateClientDialog({ open, onOpenChange, onSuccess }: CreateClie
             <Input
               id="password"
               type="password"
-              placeholder="Min. 6 characters"
+              placeholder="Min. 8 characters"
               {...register('password')}
             />
             {errors.password && (

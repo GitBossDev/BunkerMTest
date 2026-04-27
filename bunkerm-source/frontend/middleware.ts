@@ -16,6 +16,55 @@ const ADMIN_ONLY_PATHS = ['/settings/users']
 // HTTP methods that mutate state — blocked for 'user' role on proxy API
 const MUTATING_METHODS = ['POST', 'PUT', 'DELETE', 'PATCH']
 
+// ─── Granular access control for 'user' role ─────────────────────────────────
+// Prefixes where user role can only read (GET allowed, mutations blocked)
+const USER_READONLY_PREFIXES = [
+  '/api/proxy/config/',           // Broker configuration (mosquitto.conf)
+  '/api/proxy/security/',         // Security settings
+  '/api/proxy/monitor/alerts/config',  // Alert threshold configuration
+]
+
+// Endpoints blocked for 'user' role by specific HTTP method
+const USER_BLOCKED_ENDPOINTS: Array<{ prefix: string; methods: string[] }> = [
+  // Cannot import password files
+  { prefix: '/api/proxy/dynsec/import-password-file', methods: ['POST', 'PUT', 'PATCH'] },
+]
+
+/**
+ * Determines if an endpoint is blocked for the 'user' role.
+ * User can CREATE/UPDATE sub-resources (ACLs, group members) but cannot DELETE root entities.
+ */
+function isBlockedForUser(pathname: string, method: string): boolean {
+  // 1. Read-only prefixes: block all mutations
+  if (
+    MUTATING_METHODS.includes(method) &&
+    USER_READONLY_PREFIXES.some((p) => pathname.startsWith(p))
+  ) {
+    return true
+  }
+
+  // 2. Specific endpoint blocks by method
+  for (const rule of USER_BLOCKED_ENDPOINTS) {
+    if (rule.methods.includes(method) && pathname.startsWith(rule.prefix)) {
+      return true
+    }
+  }
+
+  // 3. DELETE root DynSec entities (clients/roles/groups) but allow sub-resources
+  //    Pattern: /api/proxy/dynsec/{clients|roles|groups}/{name}  (exactly 2 segments)
+  //    Allowed: /api/proxy/dynsec/roles/{name}/acls  (3+ segments = sub-resource)
+  if (method === 'DELETE' && pathname.startsWith('/api/proxy/dynsec/')) {
+    const dynsecPath = pathname.slice('/api/proxy/dynsec/'.length)
+    const segments = dynsecPath.split('/').filter(Boolean)
+    const ROOT_COLLECTIONS = ['clients', 'roles', 'groups']
+    if (segments.length === 2 && ROOT_COLLECTIONS.includes(segments[0])) {
+      return true  // Block: DELETE /clients/{name}, /roles/{name}, /groups/{name}
+    }
+  }
+
+  return false
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
@@ -52,14 +101,10 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL('/dashboard', request.url))
     }
 
-    // 'user' role: block mutating API proxy calls (read-only mode)
-    if (
-      role === 'user' &&
-      pathname.startsWith('/api/proxy') &&
-      MUTATING_METHODS.includes(request.method)
-    ) {
+    // 'user' role: granular permission checks for API mutations
+    if (role === 'user' && isBlockedForUser(pathname, request.method)) {
       return NextResponse.json(
-        { error: 'Insufficient permissions — this account is read-only' },
+        { error: 'Insufficient permissions for this operation' },
         { status: 403 }
       )
     }

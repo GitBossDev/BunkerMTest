@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { Plus, Trash2, ListChecks, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -33,6 +34,10 @@ interface RolesTableProps {
 }
 
 export function RolesTable({ roles, onRefresh }: RolesTableProps) {
+  const { data: session } = useSession()
+  const userRole = (session?.user as { role?: string })?.role ?? 'admin'
+  const isAdmin = userRole === 'admin'
+
   const [createOpen, setCreateOpen] = useState(false)
   const [aclRole, setAclRole] = useState<Role | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null)
@@ -115,20 +120,22 @@ export function RolesTable({ roles, onRefresh }: RolesTableProps) {
                           <TooltipContent>Manage ACLs</TooltipContent>
                         </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setDeleteTarget(role)}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              aria-label={`Delete ${role.rolename}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>Delete role</TooltipContent>
-                        </Tooltip>
+                        {isAdmin && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteTarget(role)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                aria-label={`Delete ${role.rolename}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Delete role</TooltipContent>
+                          </Tooltip>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
