@@ -579,11 +579,10 @@ def _normalize_listener_entries(raw_listeners: List[Any]) -> List[Dict[str, Any]
     return sorted(entries, key=lambda item: (item["port"], item["bind_address"], item["protocol"] or ""))
 
 
-def _listener_identity(listener: Dict[str, Any]) -> tuple[int, str, str]:
+def _listener_identity(listener: Dict[str, Any]) -> tuple[int, str]:
     return (
         int(listener.get("port", 0)),
         str(listener.get("bind_address") or ""),
-        str(listener.get("protocol") or ""),
     )
 
 
@@ -597,7 +596,7 @@ def _merge_listener_payload(
     current_listeners: List[Dict[str, Any]],
     requested_listeners: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    merged: Dict[tuple[int, str, str], Dict[str, Any]] = {}
+    merged: Dict[tuple[int, str], Dict[str, Any]] = {}
 
     for listener in current_listeners:
         merged[_listener_identity(listener)] = dict(listener)

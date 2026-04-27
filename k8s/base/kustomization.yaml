@@ -74,13 +74,13 @@ generatorOptions:
   disableNameSuffixHash: true
 
 # El tag se sobreescribe en tiempo de despliegue con deploy.ps1 -ImageTag <tag>.
-# El valor 'dev' es solo un marcador; no usar kubectl apply -k k8s/base sin ImageTag explicito.
+# El valor '2.0.0' es la versión actual de despliegue.
 images:
   - name: localhost/bhm-frontend
-    newTag: dev
+    newTag: 2.0.0
   - name: localhost/bhm-api
-    newTag: dev
+    newTag: 2.0.0
   - name: localhost/bhm-identity
-    newTag: dev
+    newTag: 2.0.0
   - name: localhost/bhm-mosquitto
-    newTag: dev
+    newTag: 2.0.0

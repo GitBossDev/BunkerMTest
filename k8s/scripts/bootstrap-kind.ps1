@@ -140,21 +140,22 @@ function New-KustomizeBaseWithFrontendUrl {
     # Restaura los wildcards de CORS y host para el entorno kind (laboratorio local)
     $kustomizationContent = $kustomizationContent -replace 'ALLOWED_ORIGINS=REPLACE_WITH_ALLOWED_ORIGIN', 'ALLOWED_ORIGINS=*'
     $kustomizationContent = $kustomizationContent -replace 'ALLOWED_HOSTS=REPLACE_WITH_ALLOWED_HOST', 'ALLOWED_HOSTS=*'
+    # Extract tags and update kustomization images section
     if ($BhmFrontendImage -match ':(?<tag>[^:@]+)$') {
         $bhmFrontendTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-frontend\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmFrontendTag)
+        $kustomizationContent = $kustomizationContent -replace '(localhost/bhm-frontend\s+newTag:)\s+\S+', ('$1 ' + $bhmFrontendTag)
     }
     if ($BhmApiImage -match ':(?<tag>[^:@]+)$') {
         $bhmApiTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-api\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmApiTag)
+        $kustomizationContent = $kustomizationContent -replace '(localhost/bhm-api\s+newTag:)\s+\S+', ('$1 ' + $bhmApiTag)
     }
     if ($BhmIdentityImage -match ':(?<tag>[^:@]+)$') {
         $bhmIdentityTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-identity\s+newTag:\s+)[^\r\n]+', ('$1' + $bhmIdentityTag)
+        $kustomizationContent = $kustomizationContent -replace '(localhost/bhm-identity\s+newTag:)\s+\S+', ('$1 ' + $bhmIdentityTag)
     }
     if ($MosquittoImage -match ':(?<tag>[^:@]+)$') {
         $mosquittoTag = $Matches['tag']
-        $kustomizationContent = $kustomizationContent -replace '(name:\s+localhost/bhm-mosquitto\s+newTag:\s+)[^\r\n]+', ('$1' + $mosquittoTag)
+        $kustomizationContent = $kustomizationContent -replace '(localhost/bhm-mosquitto\s+newTag:)\s+\S+', ('$1 ' + $mosquittoTag)
     }
     Set-Content -Path $kustomizationPath -Value $kustomizationContent -Encoding ASCII
 

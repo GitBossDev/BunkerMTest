@@ -398,6 +398,7 @@ class ClientMQTTEvent(Base):
     payload_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retained: Mapped[bool | None] = mapped_column(nullable=True)
     disconnect_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class BhmUser(Base):

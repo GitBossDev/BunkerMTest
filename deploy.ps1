@@ -21,7 +21,7 @@ param(
     [string]$Component = 'all',
 
     [Parameter(Mandatory=$false)]
-    [string]$ImageTag = 'latest',
+    [string]$ImageTag = '2.0.0',
 
     [Parameter(Mandatory=$false)]
     [ValidateSet('kind')]
@@ -75,7 +75,7 @@ $ErrorActionPreference = "Stop"
 $script:CE = "docker"    # Container Engine: docker o podman
 $script:KindExecutable = $null
 $script:KubectlExecutable = $null
-$script:ImageTag = 'latest'
+$script:ImageTag = '2.0.0'
 $script:BhmFrontendImageName = 'bhm-frontend'
 $script:BhmApiImageName = 'bhm-api'
 $script:BhmIdentityImageName = 'bhm-identity'
@@ -1053,12 +1053,12 @@ function Wait-KubernetesRuntimeReady {
     # Per-workload overall budget in minutes. Sized to cover the pod's own
     # startupProbe window plus a generous margin for slow/CI environments.
     $workloadBudgets = @{
-        'statefulset/postgres'          = 15
-        'statefulset/mosquitto'         = 12
-        'deployment/bhm-identity'       = 12
-        'deployment/bhm-frontend'       = 15
-        'deployment/bhm-api'            = 15
-        'deployment/bhm-alert-delivery' = 12
+        'statefulset/postgres'          = 5
+        'statefulset/mosquitto'         = 5
+        'deployment/bhm-identity'       = 5
+        'deployment/bhm-frontend'       = 5
+        'deployment/bhm-api'            = 5
+        'deployment/bhm-alert-delivery' = 5
     }
 
     # Each kubectl rollout status call is given this window before we check again.

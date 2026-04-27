@@ -16,6 +16,7 @@ import tempfile
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # Clave fija para tests — debe estar antes de cualquier import del modulo core.auth
@@ -34,6 +35,16 @@ test_engine = create_async_engine(
 TestSessionLocal = async_sessionmaker(
     test_engine, class_=AsyncSession, expire_on_commit=False
 )
+
+
+# ---------------------------------------------------------------------------
+# SQLite schema compatibility — adjunta :memory: como schema "identity" para que
+# los modelos con __table_args__ = {"schema": "identity"} puedan crearse en SQLite.
+# ---------------------------------------------------------------------------
+@event.listens_for(test_engine.sync_engine, "connect")
+def _attach_identity_schema(dbapi_connection, connection_record):
+    """Adjunta una base de datos SQLite en memoria como schema 'identity'."""
+    dbapi_connection.execute('ATTACH DATABASE ":memory:" AS "identity"')
 
 
 # ---------------------------------------------------------------------------

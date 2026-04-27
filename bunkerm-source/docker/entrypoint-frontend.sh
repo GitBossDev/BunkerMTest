@@ -17,8 +17,12 @@ set -e
 BACKEND_URL="${BACKEND_URL:-http://bhm-api:9001}"
 API_KEY="${API_KEY:-replace_in_production}"
 
-# Sustituir unicamente las variables conocidas para no expandir variables de nginx
-envsubst '${BACKEND_URL} ${API_KEY}' \
+# Escapar caracteres especiales en API_KEY para uso seguro en sed
+ESCAPED_API_KEY=$(printf '%s\n' "$API_KEY" | sed -e 's/[\/&]/\\&/g')
+
+# Sustituir las variables en el archivo de configuración
+sed -e "s|\${BACKEND_URL}|$BACKEND_URL|g" \
+    -e "s|\${API_KEY}|$ESCAPED_API_KEY|g" \
     < /etc/nginx/conf.d/default.conf.template \
     > /etc/nginx/conf.d/default.conf
 

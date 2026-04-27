@@ -645,22 +645,27 @@ async def remove_mosquitto_listener(
         
 def validate_listeners(current_listeners: List[Dict[str, Any]], new_listeners: List[Dict[str, Any]]) -> tuple[bool, str]:
     """
-    Validate that there are no duplicate listener ports
+    Validate that there are no duplicate listener ports within new listeners.
+    Ignores duplicates if they already exist in current configuration (merge scenario).
     Returns (is_valid, error_message)
     """
-    # Get all port numbers from the new listeners
-    port_counts = {}
+    # Get current ports that already exist
+    current_ports = set()
+    for listener in current_listeners:
+        port = listener.get('port')
+        if port is not None:
+            current_ports.add(port)
+    
+    # Get new listener ports and check for duplicates only within new config
+    seen_ports = set()
     for listener in new_listeners:
         port = listener.get('port')
-        if port in port_counts:
-            port_counts[port] += 1
-        else:
-            port_counts[port] = 1
-    
-    # Check for duplicates within the new configuration
-    for port, count in port_counts.items():
-        if count > 1:
-            return False, f"Duplicate listener port {port} found in configuration"
+        if port is None:
+            continue
+        # Only fail if duplicated within new_listeners (not if it already exists in current)
+        if port in seen_ports:
+            return False, f"Duplicate listener port {port} found in new configuration"
+        seen_ports.add(port)
     
     return True, ""
 

@@ -105,7 +105,6 @@ class MQTTEvent(BaseModel):
     payload_bytes: Optional[int] = None
     retained: Optional[bool] = None
     disconnect_kind: Optional[str] = None
-    reason_code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +151,6 @@ def persist_mqtt_event(event: MQTTEvent) -> None:
                 payload_bytes=event.payload_bytes,
                 retained=event.retained,
                 disconnect_kind=event.disconnect_kind,
-                reason_code=event.reason_code,
             )
             session.add(db_event)
             session.commit()
@@ -355,7 +353,6 @@ class MQTTMonitor:
             ip_address=ip,
             port=port,
             disconnect_kind="auth_failure",
-            reason_code="not_authorised",
         )
 
     def parse_subscription_log(self, log_line: str) -> Optional[MQTTEvent]:
