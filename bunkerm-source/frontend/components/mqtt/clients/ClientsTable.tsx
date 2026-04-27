@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { Search, Plus, Trash2, Shield, Users, RefreshCw, ChevronLeft, ChevronRight, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -67,6 +68,10 @@ export function ClientsTable({
   onSearchChange,
   onPageChange,
 }: ClientsTableProps) {
+  const { data: session } = useSession()
+  const userRole = (session?.user as { role?: string })?.role ?? 'admin'
+  const isAdmin = userRole === 'admin'
+
   const ADMIN_USERNAME = 'admin'
   const [createOpen, setCreateOpen] = useState(false)
   const [rolesDialogClient, setRolesDialogClient] = useState<MqttClient | null>(null)
@@ -239,21 +244,23 @@ export function ClientsTable({
                           <TooltipContent>Manage groups</TooltipContent>
                         </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setDeleteTarget(client)}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              aria-label={`Delete ${client.username}`}
-                              disabled={client.username === ADMIN_USERNAME}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent>{client.username === ADMIN_USERNAME ? 'Admin client — protected' : 'Delete client'}</TooltipContent>
-                        </Tooltip>
+                        {isAdmin && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteTarget(client)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                aria-label={`Delete ${client.username}`}
+                                disabled={client.username === ADMIN_USERNAME}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{client.username === ADMIN_USERNAME ? 'Admin client — protected' : 'Delete client'}</TooltipContent>
+                          </Tooltip>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { Plus, Trash2, Users, Shield, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -34,6 +35,10 @@ interface GroupsTableProps {
 }
 
 export function GroupsTable({ groups, onRefresh }: GroupsTableProps) {
+  const { data: session } = useSession()
+  const userRole = (session?.user as { role?: string })?.role ?? 'admin'
+  const isAdmin = userRole === 'admin'
+
   const [createOpen, setCreateOpen] = useState(false)
   const [membersGroup, setMembersGroup] = useState<Group | null>(null)
   const [rolesGroup, setRolesGroup] = useState<Group | null>(null)
@@ -136,20 +141,22 @@ export function GroupsTable({ groups, onRefresh }: GroupsTableProps) {
                           <TooltipContent>Manage roles</TooltipContent>
                         </Tooltip>
 
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setDeleteTarget(group)}
-                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                              aria-label={`Delete ${group.groupname}`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TooltipTrigger>
+                        {isAdmin && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setDeleteTarget(group)}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                aria-label={`Delete ${group.groupname}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
                           <TooltipContent>Delete group</TooltipContent>
                         </Tooltip>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

@@ -52,6 +52,11 @@ class DefaultACLConfig(BaseModel):
     unsubscribe: bool
 
 
+class TestACLRequest(BaseModel):
+    aclType: str
+    topic: str
+
+
 _DEFAULT_ACL_TYPES = ["publishClientSend", "publishClientReceive", "subscribe", "unsubscribe"]
 
 
@@ -128,6 +133,39 @@ def _normalize_group_entries(raw_groups: List[Any]) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Helper
 # ---------------------------------------------------------------------------
+
+
+def _mqtt_topic_matches(pattern: str, topic: str) -> bool:
+    """
+    Implementa el algoritmo de matching de topics de Mosquitto DynSec.
+
+    Reglas:
+    - '+' coincide exactamente con un nivel de topic.
+    - '#' coincide con cero o más niveles finales.
+    - '#' NO coincide con topics que empiecen por '$' (estándar MQTT §4.7.3).
+    - '$SYS/...' solo puede ser accedido con patrones que comiencen por '$'.
+    """
+    # Prevenir que '#' o '+/...' coincidan con topics $SYS
+    if topic.startswith("$") and not pattern.startswith("$"):
+        return False
+
+    pattern_parts = pattern.split("/")
+    topic_parts = topic.split("/")
+
+    def _match(pp: list[str], tp: list[str]) -> bool:
+        if not pp and not tp:
+            return True
+        if not pp:
+            return False
+        if pp[0] == "#":
+            return True  # coincide con el resto (incluido vacío)
+        if not tp:
+            return False
+        if pp[0] == "+" or pp[0] == tp[0]:
+            return _match(pp[1:], tp[1:])
+        return False
+
+    return _match(pattern_parts, topic_parts)
 
 
 def _ensure_reconcile_success(state, detail_prefix: str) -> None:
@@ -754,6 +792,91 @@ async def remove_role_acl(role_name: str, acl_type: ACLType, topic: str,
             "status": state.reconcile_status,
             "driftDetected": state.drift_detected,
         },
+    }
+
+
+@router.post("/roles/{role_name}/acls/test")
+async def test_role_acl(
+    role_name: str,
+    payload: TestACLRequest,
+    api_key: str = Security(get_api_key),
+):
+    """
+    Evalúa si el rol tiene acceso a un topic para un tipo de ACL dado.
+
+    Implementa el algoritmo de matching de Mosquitto:
+    - Primero evalúa las ACLs del rol (prioridad descendente).
+    - Si ninguna regla del rol coincide, consulta el ACL por defecto.
+    - Retorna la primera regla que coincide o la decisión por defecto.
+
+    Nota: '#' no coincide con topics que empiecen por '$' (MQTT §4.7.3).
+    """
+    acl_type = payload.aclType
+    topic = payload.topic.strip()
+
+    if not topic:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El campo 'topic' no puede estar vacío.",
+        )
+
+    # Obtener las ACLs del rol desde el estado observado
+    role_data = desired_state_svc.get_observed_role(role_name)
+    if role_data is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Rol '{role_name}' no encontrado.",
+        )
+
+    acls: list[dict] = role_data.get("acls", [])
+
+    # Filtrar por tipo de ACL y ordenar por prioridad (mayor primero)
+    matching_type = [
+        entry for entry in acls
+        if entry.get("acltype", "").lower() == acl_type.lower()
+    ]
+    matching_type.sort(key=lambda e: e.get("priority", 0), reverse=True)
+
+    # Evaluar cada regla del rol
+    for entry in matching_type:
+        pattern = entry.get("topic", "")
+        if _mqtt_topic_matches(pattern, topic):
+            allowed = bool(entry.get("allow", False))
+            return {
+                "allowed": allowed,
+                "reason": "role_acl",
+                "matchedRule": {
+                    "topic": pattern,
+                    "aclType": entry.get("acltype", acl_type),
+                    "allow": allowed,
+                    "priority": entry.get("priority", 0),
+                },
+            }
+
+    # Sin coincidencia en el rol → consultar ACL por defecto
+    default_acl = desired_state_svc.get_observed_default_acl()
+    default_key_map = {
+        "publishClientSend":    "publishClientSend",
+        "publishclientsend":    "publishClientSend",
+        "publishClientReceive": "publishClientReceive",
+        "publishclientreceive": "publishClientReceive",
+        "subscribe":            "subscribe",
+        "subscribeliteral":     "subscribe",
+        "subscribepattern":     "subscribe",
+        "unsubscribe":          "unsubscribe",
+        "unsubscriteliteral":   "unsubscribe",
+        "unsubscribepattern":   "unsubscribe",
+    }
+    default_key = default_key_map.get(acl_type.lower())
+    default_allowed = False
+    if default_acl and default_key:
+        default_allowed = bool(default_acl.get(default_key, False))
+
+    return {
+        "allowed": default_allowed,
+        "reason": "default_acl",
+        "matchedRule": None,
+        "defaultKey": default_key,
     }
 
 
