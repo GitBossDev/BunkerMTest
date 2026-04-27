@@ -358,6 +358,22 @@ async def test_storage(api_key: str = Security(get_api_key)):
     }
 
 
+@router.get("/debug/topic-latest")
+async def debug_topic_latest(topic: str, api_key: str = Security(get_api_key)):
+    """Devuelve el último evento persistido para `topic` (diagnóstico)."""
+    topic = (topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic query param required")
+    try:
+        data = topic_history_storage.get_topic_messages(topic=topic, limit=1)
+        # get_topic_messages returns {topic, history, total}
+        latest = data.get("history", [])[:1]
+        return {"topic": topic, "latest": latest}
+    except Exception as exc:
+        logger.warning("debug_topic_latest failed for %s: %s", topic, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/health")
 async def health():
     return {"status": "healthy"}

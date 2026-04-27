@@ -450,6 +450,8 @@ class MQTTMonitor:
         # Extraer bytes
         bytes_match = re.search(r"\((\d+) bytes\)", log_line)
         size_str = bytes_match.group(1) if bytes_match else "0"
+        retained_match = re.search(r"r(\d)", log_line)
+        retained_bool = bool(int(retained_match.group(1))) if retained_match else False
         
         # Skip internal topics
         if any(topic.startswith(p) for p in _INTERNAL_TOPIC_PREFIXES):
@@ -482,6 +484,7 @@ class MQTTMonitor:
             topic=topic,
             qos=int(qos_str),
             payload_bytes=int(size_str),
+            retained=retained_bool,
         )
 
     # ── pipeline de procesamiento ─────────────────────────────────────────────
