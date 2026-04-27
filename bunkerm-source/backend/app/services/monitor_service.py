@@ -559,7 +559,6 @@ def _should_skip_mirrored_publish(topic: str, payload: bytes, qos: int, retained
         topic,
         (payload or b"")[:256].hex(),
         max(0, min(2, int(qos))),
-        bool(retained),
     )
     now = time.monotonic()
     with _mirrored_publish_lock:

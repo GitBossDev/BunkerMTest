@@ -33,6 +33,13 @@ function getApiKey(): string | null {
   } catch {
     // Archivo de clave aún no disponible (primer arranque antes de que start.sh lo genere)
   }
+  if (process.env.NODE_ENV !== 'production') {
+    const devKey = process.env.DEV_API_KEY || process.env.BUNKERM_DEV_API_KEY
+    if (devKey) {
+      console.warn('[proxy] Using DEV_API_KEY for upstream requests (development only)')
+      return devKey
+    }
+  }
   return null
 }
 
