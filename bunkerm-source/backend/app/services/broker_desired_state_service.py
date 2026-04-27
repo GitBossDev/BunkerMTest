@@ -559,6 +559,18 @@ def _group_scope(group_name: str) -> str:
     return f"{GROUP_SCOPE_PREFIX}{group_name}"
 
 
+# Bind-address values that mean "listen on all interfaces"; treated as equivalent
+# to the empty string so that conf files with explicit `0.0.0.0` and payloads
+# with `""` map to the same listener identity.
+_WILDCARD_BIND_ADDRESSES: frozenset[str] = frozenset({"", "0.0.0.0", "::", "*"})
+
+
+def _normalize_bind_address(raw: str | None) -> str:
+    """Return "" for any wildcard bind-address, preserving specific IPs as-is."""
+    val = str(raw or "").strip()
+    return "" if val in _WILDCARD_BIND_ADDRESSES else val
+
+
 def _normalize_listener_entries(raw_listeners: List[Any]) -> List[Dict[str, Any]]:
     entries: List[Dict[str, Any]] = []
     for listener in raw_listeners:
@@ -570,7 +582,7 @@ def _normalize_listener_entries(raw_listeners: List[Any]) -> List[Dict[str, Any]
         entries.append(
             {
                 "port": int(port),
-                "bind_address": str(listener.get("bind_address") or ""),
+                "bind_address": _normalize_bind_address(listener.get("bind_address")),
                 "per_listener_settings": bool(listener.get("per_listener_settings", False)),
                 "max_connections": int(listener.get("max_connections", 10000)),
                 "protocol": listener.get("protocol") or None,

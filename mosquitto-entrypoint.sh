@@ -393,6 +393,10 @@ start_mosquitto
 while true; do
     if [ -f /var/lib/mosquitto/.dynsec-reload ]; then
         rm -f /var/lib/mosquitto/.dynsec-reload
+        # A full dynsec restart rereads both the DynSec JSON and mosquitto.conf,
+        # so any pending .restart signal is redundant — clear it to avoid a
+        # second immediate restart that could corrupt DynSec state.
+        rm -f /var/lib/mosquitto/.restart
         echo "[supervisor] Recarga DynSec solicitada — SIGKILL a mosquitto (PID $MOSQUITTO_PID)..."
         kill -KILL "$MOSQUITTO_PID" 2>/dev/null
         wait "$MOSQUITTO_PID" 2>/dev/null || true

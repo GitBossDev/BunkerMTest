@@ -143,9 +143,13 @@ autosave_interval 300
 
 
 def _signal_mosquitto_reload() -> None:
-    """Write the reload trigger file so the mosquitto entrypoint sends SIGHUP."""
+    """Write the reload trigger file (idempotent: skips if already pending)."""
     try:
-        with open("/var/lib/mosquitto/.reload", "w") as _f:
+        signal_path = "/var/lib/mosquitto/.reload"
+        if os.path.exists(signal_path):
+            logger.info("Reload signal already pending, skipping duplicate")
+            return
+        with open(signal_path, "w") as _f:
             _f.write("")
         logger.info("Reload signal written for mosquitto standalone container")
     except Exception as e:
@@ -153,13 +157,32 @@ def _signal_mosquitto_reload() -> None:
 
 
 def _signal_mosquitto_restart() -> None:
-    """Write the restart trigger file so the mosquitto entrypoint fully restarts the broker."""
+    """Write the restart trigger file (idempotent: skips if already pending).
+
+    Guard against the double-restart race condition: when saving broker config
+    already queues a restart and the user also presses the Restart button, the
+    second call must not write a second .restart file.  If the supervisor has
+    not yet consumed the first signal the file is still on disk, so we skip
+    writing and one clean restart still fires.  If the supervisor already
+    consumed it (>2 s elapsed) the file is gone and a fresh restart is queued.
+    """
     try:
-        with open("/var/lib/mosquitto/.restart", "w") as _f:
+        signal_path = "/var/lib/mosquitto/.restart"
+        if os.path.exists(signal_path):
+            logger.info("Restart signal already pending, skipping duplicate to prevent double-restart")
+            return
+        with open(signal_path, "w") as _f:
             _f.write("")
         logger.info("Restart signal written for mosquitto standalone container")
     except Exception as e:
         logger.warning(f"Could not write mosquitto restart signal: {e}")
+
+
+def _normalize_bind_address(raw: str | None) -> str:
+    """Normalize bind address: map all wildcards to empty string for consistency."""
+    if not raw or raw in ("0.0.0.0", "::", "*"):
+        return ""
+    return raw.strip()
 
 
 def parse_mosquitto_conf() -> Dict[str, Any]:
@@ -191,7 +214,7 @@ def parse_mosquitto_conf() -> Dict[str, Any]:
 
                 current_listener = {
                     "port": int(parts[1]),
-                    "bind_address": parts[2] if len(parts) > 2 else "",
+                    "bind_address": _normalize_bind_address(parts[2] if len(parts) > 2 else None),
                     "per_listener_settings": False,
                     "max_connections": 10000,
                     "protocol": None,

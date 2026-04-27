@@ -994,3 +994,281 @@ def test_validate_listeners_passes_after_merge():
 
     assert is_valid is True, f"validate_listeners rechazó un payload válido: {error_msg}"
     assert error_msg == ""
+
+
+# ---------------------------------------------------------------------------
+# Hardened regression tests — bind_address "0.0.0.0" vs "" mismatch
+#
+# The production mosquitto.conf uses explicit "listener PORT 0.0.0.0" entries.
+# The frontend always sends bind_address:"". Without normalization, both
+# (PORT, "0.0.0.0") and (PORT, "") survive as separate dict keys in
+# _merge_listener_payload, producing duplicate port entries that fail
+# validate_listeners with "Duplicate listener port PORT found in new configuration".
+# ---------------------------------------------------------------------------
+
+PRODUCTION_CONF_TEMPLATE = """\
+listener 1900 0.0.0.0
+protocol mqtt
+max_connections 10000
+per_listener_settings false
+
+listener 1901 0.0.0.0
+protocol mqtt
+max_connections 1000
+
+listener 9001 0.0.0.0
+protocol websockets
+max_connections 10000
+"""
+
+
+def test_normalize_bind_address_treats_zero_zero_as_empty():
+    """'0.0.0.0' debe normalizarse a '' ya que ambos significan 'todas las interfaces'."""
+    from services.broker_desired_state_service import _normalize_bind_address
+
+    assert _normalize_bind_address("0.0.0.0") == "", "0.0.0.0 debe ser equivalente a empty"
+    assert _normalize_bind_address("") == "", "empty queda empty"
+    assert _normalize_bind_address(None) == "", "None queda empty"
+    assert _normalize_bind_address("::") == "", ":: IPV6 wildcard debe ser empty"
+    assert _normalize_bind_address("*") == "", "* wildcard debe ser empty"
+    assert _normalize_bind_address("192.168.1.1") == "192.168.1.1", "IP específica se preserva"
+    assert _normalize_bind_address("127.0.0.1") == "127.0.0.1", "loopback se preserva"
+
+
+def test_normalize_listener_entries_collapses_0000_bind():
+    """_normalize_listener_entries debe colapsar 0.0.0.0 → '' en cada listener."""
+    from services.broker_desired_state_service import _normalize_listener_entries
+
+    raw = [
+        {"port": 1900, "bind_address": "0.0.0.0", "protocol": "mqtt", "max_connections": 10000, "per_listener_settings": False},
+        {"port": 9001, "bind_address": "0.0.0.0", "protocol": "websockets", "max_connections": 10000, "per_listener_settings": False},
+    ]
+    result = _normalize_listener_entries(raw)
+    for entry in result:
+        assert entry["bind_address"] == "", \
+            f"bind_address debe ser '' después de normalizar 0.0.0.0, got {entry['bind_address']!r}"
+
+
+def test_merge_collapses_0000_and_empty_to_single_entry():
+    """Cuando current tiene bind='0.0.0.0' y requested tiene bind='', el merge
+    (vía la función de alto nivel que normaliza antes) debe producir exactamente
+    UNA entrada para ese puerto, no dos."""
+    from services.broker_desired_state_service import merge_mosquitto_config_payload
+
+    current_payload = {
+        "config": {"allow_anonymous": "false"},
+        "listeners": [{"port": 1900, "bind_address": "0.0.0.0", "protocol": "mqtt", "max_connections": 10000, "per_listener_settings": False}],
+        "max_inflight_messages": None, "max_queued_messages": None, "tls": None,
+    }
+    requested_payload = {
+        "config": {"allow_anonymous": "false"},
+        "listeners": [{"port": 1900, "bind_address": "", "protocol": None, "max_connections": 750, "per_listener_settings": False}],
+        "max_inflight_messages": None, "max_queued_messages": None, "tls": None,
+    }
+
+    merged = merge_mosquitto_config_payload(current_payload, requested_payload)
+    port_1900 = [l for l in merged["listeners"] if l["port"] == 1900]
+
+    assert len(port_1900) == 1, \
+        f"Esperado 1 entrada para puerto 1900, obtenido {len(port_1900)}: {port_1900}"
+    assert port_1900[0]["max_connections"] == 750, "El requested debe ganar"
+    assert port_1900[0]["bind_address"] == "", "bind_address debe normalizarse a ''"
+
+
+def test_merge_production_conf_three_listeners_0000():
+    """Simula el conf de producción real con listener X 0.0.0.0 y el payload del frontend
+    con bind_address:''. Todos los puertos deben aparecer exactamente una vez."""
+    from services.broker_desired_state_service import _normalize_listener_entries, _merge_listener_payload
+
+    # Estado actual del archivo de producción (parse_mosquitto_conf output)
+    current_raw = [
+        {"port": 1900, "bind_address": "0.0.0.0", "protocol": "mqtt",       "max_connections": 10000, "per_listener_settings": False},
+        {"port": 1901, "bind_address": "0.0.0.0", "protocol": "mqtt",       "max_connections": 1000,  "per_listener_settings": False},
+        {"port": 9001, "bind_address": "0.0.0.0", "protocol": "websockets", "max_connections": 10000, "per_listener_settings": False},
+    ]
+    # Payload del frontend (buildSavePayload con wsEnabled=True)
+    requested_raw = [
+        {"port": 1900, "bind_address": "", "protocol": None,          "max_connections": 750,   "per_listener_settings": False},
+        {"port": 9001, "bind_address": "", "protocol": "websockets",  "max_connections": 750,   "per_listener_settings": False},
+    ]
+
+    current   = _normalize_listener_entries(current_raw)
+    requested = _normalize_listener_entries(requested_raw)
+    merged    = _merge_listener_payload(current, requested)
+
+    ports = [l["port"] for l in merged]
+    assert len(ports) == len(set(ports)), f"Se detectaron puertos duplicados en el merge: {ports}"
+    assert set(ports) == {1900, 1901, 9001}, f"Puertos esperados {{1900, 1901, 9001}}, obtenidos {set(ports)}"
+
+    entry_1901 = next(l for l in merged if l["port"] == 1901)
+    assert entry_1901["max_connections"] == 16, "El managed listener 1901 debe tener max_connections=16"
+    assert entry_1901["bind_address"] == "", "El managed listener 1901 debe tener bind_address=''"
+
+
+async def test_save_mosquitto_config_production_conf_0000_no_duplicate(client, monkeypatch, tmp_path):
+    """Caso de fallo real de producción: conf con 'listener PORT 0.0.0.0' y
+    frontend enviando bind_address:''. El save NO debe devolver 'Duplicate listener'."""
+    conf_path = tmp_path / "mosquitto.conf"
+    backup_dir = tmp_path / "backups"
+    conf_path.write_text(PRODUCTION_CONF_TEMPLATE, encoding="utf-8")
+    backup_dir.mkdir()
+
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(desired_state_svc, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
+
+    # Exactamente el payload que buildSavePayload() del frontend genera
+    payload = {
+        "config": {"allow_anonymous": "false"},
+        "listeners": [
+            {"port": 1900, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": None},
+            {"port": 9001, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": "websockets"},
+        ],
+        "max_inflight_messages": None,
+        "max_queued_messages": None,
+        "tls": {"enabled": False, "port": 8883, "cafile": None, "certfile": None, "keyfile": None, "require_certificate": False, "tls_version": None},
+    }
+
+    resp = await client.post("/api/v1/config/mosquitto-config", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["success"] is True, f"Se esperaba success=True, obtenido: {body}"
+    assert "Duplicate" not in body.get("message", ""), \
+        f"El mensaje NO debe contener 'Duplicate': {body.get('message', '')}"
+
+
+async def test_save_mosquitto_config_second_save_after_production_conf(client, monkeypatch, tmp_path):
+    """Segunda iteración de save: después de que BHM escribe el conf (sin 0.0.0.0),
+    el siguiente save tampoco debe generar duplicados."""
+    import re as _re
+
+    conf_path = tmp_path / "mosquitto.conf"
+    backup_dir = tmp_path / "backups"
+    conf_path.write_text(PRODUCTION_CONF_TEMPLATE, encoding="utf-8")
+    backup_dir.mkdir()
+
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(desired_state_svc, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(broker_reconciler, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_BACKUP_DIR", str(backup_dir))
+    monkeypatch.setattr(mosquitto_config_module, "MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(broker_reconciler, "_signal_mosquitto_restart", lambda: None)
+
+    base_payload = {
+        "config": {"allow_anonymous": "false"},
+        "listeners": [
+            {"port": 1900, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": None},
+            {"port": 9001, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": "websockets"},
+        ],
+        "max_inflight_messages": None,
+        "max_queued_messages": None,
+        "tls": {"enabled": False, "port": 8883, "cafile": None, "certfile": None, "keyfile": None, "require_certificate": False, "tls_version": None},
+    }
+
+    # Primera iteración — conf original con 0.0.0.0
+    resp1 = await client.post("/api/v1/config/mosquitto-config", json=base_payload)
+    assert resp1.status_code == 200
+    assert resp1.json()["success"] is True, f"Primera iteración falló: {resp1.json()}"
+
+    # Segunda iteración — conf ya fue escrito por BHM (sin 0.0.0.0)
+    payload2 = {**base_payload, "listeners": [
+        {"port": 1900, "bind_address": "", "per_listener_settings": False, "max_connections": 500, "protocol": None},
+        {"port": 9001, "bind_address": "", "per_listener_settings": False, "max_connections": 500, "protocol": "websockets"},
+    ]}
+    resp2 = await client.post("/api/v1/config/mosquitto-config", json=payload2)
+    assert resp2.status_code == 200
+    body2 = resp2.json()
+    assert body2["success"] is True, f"Segunda iteración falló: {body2}"
+    assert "Duplicate" not in body2.get("message", ""), f"Duplicate en segunda iteración: {body2}"
+
+    written = conf_path.read_text(encoding="utf-8")
+    assert len(_re.findall(r"^listener 1900\b", written, _re.MULTILINE)) == 1, \
+        "listener 1900 debe aparecer exactamente 1 vez"
+    assert len(_re.findall(r"^listener 1901\b", written, _re.MULTILINE)) == 1, \
+        "listener 1901 debe aparecer exactamente 1 vez"
+    assert len(_re.findall(r"^listener 9001\b", written, _re.MULTILINE)) == 1, \
+        "listener 9001 debe aparecer exactamente 1 vez"
+    assert "0.0.0.0" not in written, \
+        "El conf generado por BHM no debe contener 0.0.0.0 (bind normalizado a '')"
+    assert "max_connections 500" in written, "El nuevo max_connections debe estar en el conf"
+
+
+def test_save_mosquitto_config_daemon_mode_observed_config_0000_no_duplicate(monkeypatch, tmp_path):
+    """En daemon mode (producción), get_observed_mosquitto_config() con el observability
+    client devolviendo listeners con bind_address='0.0.0.0' debe normalizar los listeners
+    y producir identidades únicas (sin duplicados por diferencia de bind_address)."""
+    conf_path = tmp_path / "mosquitto.conf"
+    conf_path.write_text(PRODUCTION_CONF_TEMPLATE, encoding="utf-8")
+
+    monkeypatch.setattr(desired_state_svc, "_MOSQUITTO_CONF_PATH", str(conf_path))
+    monkeypatch.setattr(desired_state_svc.settings, "broker_reconcile_mode", "daemon")
+    monkeypatch.setattr(
+        desired_state_svc.broker_observability_client,
+        "fetch_broker_mosquitto_config_sync",
+        lambda: {
+            "config": {"allow_anonymous": "false", "plugin": "/usr/lib/mosquitto_dynamic_security.so"},
+            "listeners": [
+                {"port": 1900, "bind_address": "0.0.0.0", "protocol": "mqtt",       "max_connections": 10000, "per_listener_settings": False},
+                {"port": 1901, "bind_address": "0.0.0.0", "protocol": "mqtt",       "max_connections": 1000,  "per_listener_settings": False},
+                {"port": 9001, "bind_address": "0.0.0.0", "protocol": "websockets", "max_connections": 10000, "per_listener_settings": False},
+            ],
+            "max_inflight_messages": None,
+            "max_queued_messages": None,
+            "tls": None,
+        },
+    )
+
+    observed = desired_state_svc.get_observed_mosquitto_config()
+
+    # Todos los bind_address deben estar normalizados a ''
+    for listener in observed["listeners"]:
+        assert listener["bind_address"] == "", \
+            f"En daemon mode, bind_address debe ser '' (normalizado desde 0.0.0.0): {listener}"
+
+    # No deben existir puertos duplicados
+    ports = [l["port"] for l in observed["listeners"]]
+    assert len(ports) == len(set(ports)), f"Existen puertos duplicados en observed: {ports}"
+
+    # El merge posterior no debe producir duplicados con payload frontend
+    from services.broker_desired_state_service import merge_mosquitto_config_payload
+
+    requested_payload = {
+        "config": {"allow_anonymous": "false"},
+        "listeners": [
+            {"port": 1900, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": None},
+            {"port": 9001, "bind_address": "", "per_listener_settings": False, "max_connections": 750, "protocol": "websockets"},
+        ],
+        "max_inflight_messages": None, "max_queued_messages": None, "tls": None,
+    }
+    merged = merge_mosquitto_config_payload(observed, requested_payload)
+    merged_ports = [l["port"] for l in merged["listeners"]]
+    assert len(merged_ports) == len(set(merged_ports)), \
+        f"Existen puertos duplicados en el merge daemon+frontend: {merged_ports}"
+
+
+def test_managed_1901_overrides_0000_bind_production_conf():
+    """El managed listener 1901 (bind:'') debe sobrescribir el listener 1901 de
+    producción (bind:'0.0.0.0') después de la normalización."""
+    from services.broker_desired_state_service import (
+        _merge_listener_payload, _normalize_listener_entries, _MANAGED_MOSQUITTO_INTERNAL_LISTENER,
+    )
+
+    # Estado del conf de producción
+    current_raw = [
+        {"port": 1901, "bind_address": "0.0.0.0", "protocol": "mqtt", "max_connections": 1000, "per_listener_settings": False},
+    ]
+    current = _normalize_listener_entries(current_raw)
+    result = _merge_listener_payload(current, [])
+
+    entry_1901 = next((l for l in result if l["port"] == 1901), None)
+    assert entry_1901 is not None, "El managed listener 1901 debe estar siempre presente"
+    assert entry_1901["max_connections"] == _MANAGED_MOSQUITTO_INTERNAL_LISTENER["max_connections"], \
+        "El managed listener debe imponer max_connections=16 sobre el 1000 del conf de producción"
+    assert entry_1901["bind_address"] == "", \
+        "El managed listener usa bind_address='' (no 0.0.0.0)"
+
+    port_1901_count = sum(1 for l in result if l["port"] == 1901)
+    assert port_1901_count == 1, "Solo debe haber una entrada para el puerto 1901"

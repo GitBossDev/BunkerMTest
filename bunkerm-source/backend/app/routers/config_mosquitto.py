@@ -138,6 +138,26 @@ async def save_mosquitto_config(
             logger.error("Listener validation error: %s", err_msg)
             return {"success": False, "message": err_msg}
 
+        # Validar que max_connections >= número de clientes en dynasec
+        # Solo si estamos reduciendo, para evitar cambios incompatibles
+        try:
+            dynsec_config = desired_state_svc.get_observed_dynsec_config()
+            current_clients = len(dynsec_config.get("clients", []))
+            
+            # Verificar max_connections para el listener principal (1900)
+            for listener in listeners_list:
+                if listener.get("port") == 1900:
+                    max_conn = listener.get("max_connections", 10000)
+                    if max_conn < current_clients:
+                        return {
+                            "success": False,
+                            "message": f"Cannot reduce max_connections ({max_conn}) below current number of clients ({current_clients}). Remove clients first or increase max_connections."
+                        }
+                    break
+        except Exception as e:
+            # If we can't read dynasec, log but don't fail the save
+            logger.warning("Could not validate max_connections against client count: %s", e)
+
         state = await desired_state_svc.set_mosquitto_config_desired(db, payload)
         state = await desired_state_svc.reconcile_or_wait(
             state,

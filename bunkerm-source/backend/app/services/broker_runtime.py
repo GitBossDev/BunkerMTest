@@ -12,9 +12,27 @@ from services import dynsec_service
 
 
 def _signal_dynsec_reload() -> None:
-    marker_path = os.path.join(os.path.dirname(settings.dynsec_path), ".dynsec-reload")
-    with open(marker_path, "w", encoding="utf-8") as handle:
-        handle.write("")
+    """Write the dynsec-reload trigger (idempotent) and clear any pending .restart.
+
+    A dynsec-reload is a SIGKILL + full restart that rereads both
+    dynamic-security.json AND mosquitto.conf.  Any pending .restart signal is
+    therefore redundant and must be removed to avoid a second immediate restart
+    that could corrupt the DynSec state written before the SIGKILL.
+    """
+    dynsec_dir = os.path.dirname(settings.dynsec_path)
+    marker_path = os.path.join(dynsec_dir, ".dynsec-reload")
+    restart_path = os.path.join(dynsec_dir, ".restart")
+
+    # Remove any pending regular-restart signal — dynsec-reload subsumes it.
+    try:
+        if os.path.exists(restart_path):
+            os.remove(restart_path)
+    except OSError:
+        pass
+
+    if not os.path.exists(marker_path):
+        with open(marker_path, "w", encoding="utf-8") as handle:
+            handle.write("")
 
 
 class BrokerRuntimePort(Protocol):
