@@ -1254,8 +1254,12 @@ function Invoke-StopKindRuntime {
     }
 
     Write-Info "Eliminando cluster kind '$KindClusterName'..."
-    & $script:KindExecutable delete cluster --name $KindClusterName
-    if ($LASTEXITCODE -ne 0) {
+    $savedPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $script:KindExecutable delete cluster --name $KindClusterName 2>&1 | Out-Null
+    $deleteExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($deleteExit -ne 0) {
         Write-Error 'No se pudo eliminar el cluster kind.'
         exit 1
     }
@@ -2106,8 +2110,12 @@ function Invoke-Redeploy {
     Ensure-KubernetesTooling
     if (Test-KindClusterExists) {
         Stop-KindPortForwards
-        & $script:KindExecutable delete cluster --name $KindClusterName
-        if ($LASTEXITCODE -ne 0) {
+        $savedPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & $script:KindExecutable delete cluster --name $KindClusterName 2>&1 | Out-Null
+        $deleteExit = $LASTEXITCODE
+        $ErrorActionPreference = $savedPref
+        if ($deleteExit -ne 0) {
             Write-Host "[ERROR] No se pudo eliminar el cluster kind." -ForegroundColor Red
             exit 1
         }

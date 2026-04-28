@@ -368,6 +368,9 @@ PYEOF
 
 start_mosquitto() {
     echo "[supervisor] Iniciando mosquitto..."
+    # Mark broker as starting so the API can gate config changes.
+    # Removed by wait_for_mosquitto_ready() once the port is accepting connections.
+    touch /var/lib/mosquitto/.broker-restarting
     # Redirect stdout (log_dest stdout) to the shared log file so clientlogs
     # can tail it. Shell redirect is more reliable than log_dest file after
     # container restarts. Supervisor messages still go to container stdout.
@@ -376,9 +379,44 @@ start_mosquitto() {
     echo "[supervisor] Mosquitto iniciado (PID $MOSQUITTO_PID)"
 }
 
+# Wait until mosquitto is actually accepting TCP connections on port 1900.
+#
+# Critical for DynSec JSON imports: the DynSec plugin must finish loading ALL
+# users (can take 5-15 s with thousands of entries) before the supervisor may
+# process the next signal.  Without this wait, a .restart arriving while the
+# plugin is still initialising triggers SIGTERM → graceful shutdown saves the
+# partial in-memory DynSec state back to disk → overwrites the freshly-imported
+# dynamic-security.json → corruption → nobody can authenticate.
+#
+# nc -z: TCP-connect only (no data), -w1: 1 s timeout per attempt.
+# Succeeds as soon as the listener is up regardless of auth requirements.
+wait_for_mosquitto_ready() {
+    local max_wait=30
+    local i=0
+    echo "[supervisor] Esperando a que mosquitto acepte conexiones en :1900 (max ${max_wait}s)..."
+    while [ $i -lt $max_wait ]; do
+        if ! kill -0 "$MOSQUITTO_PID" 2>/dev/null; then
+            echo "[supervisor] Mosquitto (PID $MOSQUITTO_PID) terminó durante el arranque"
+            rm -f /var/lib/mosquitto/.broker-restarting
+            return 1
+        fi
+        if nc -z -w1 127.0.0.1 1900 2>/dev/null; then
+            echo "[supervisor] Mosquitto listo en :1900 tras ${i}s"
+            rm -f /var/lib/mosquitto/.broker-restarting
+            return 0
+        fi
+        sleep 1
+        i=$((i + 1))
+    done
+    echo "[supervisor] Timeout ${max_wait}s esperando :1900 — continuando de todas formas"
+    rm -f /var/lib/mosquitto/.broker-restarting
+    return 0
+}
+
 # Reenviar SIGTERM/INT al subproceso mosquitto para shutdown limpio
 cleanup() {
     echo "[supervisor] Señal de shutdown recibida — deteniendo mosquitto (PID $MOSQUITTO_PID)..."
+    rm -f /var/lib/mosquitto/.broker-restarting
     kill "$RESOURCE_STATS_PID" 2>/dev/null || true
     kill "$MOSQUITTO_PID" 2>/dev/null
     wait "$MOSQUITTO_PID" 2>/dev/null
@@ -388,28 +426,33 @@ trap cleanup TERM INT
 
 start_resource_stats_collector
 start_mosquitto
+wait_for_mosquitto_ready
 
 # Bucle principal del supervisor
 while true; do
     if [ -f /var/lib/mosquitto/.dynsec-reload ]; then
         rm -f /var/lib/mosquitto/.dynsec-reload
-        # A full dynsec restart rereads both the DynSec JSON and mosquitto.conf,
-        # so any pending .restart signal is redundant — clear it to avoid a
-        # second immediate restart that could corrupt DynSec state.
+        # A dynsec-reload is a SIGKILL + full restart that rereads both the DynSec
+        # JSON and mosquitto.conf, so any pending .restart is redundant.  Clear it
+        # to prevent a second restart firing during DynSec plugin initialisation.
         rm -f /var/lib/mosquitto/.restart
         echo "[supervisor] Recarga DynSec solicitada — SIGKILL a mosquitto (PID $MOSQUITTO_PID)..."
         kill -KILL "$MOSQUITTO_PID" 2>/dev/null
         wait "$MOSQUITTO_PID" 2>/dev/null || true
-        sleep 1
+        # Re-sync admin credentials into the freshly-imported DynSec JSON.
+        # If the imported file lacks the admin user or has wrong credentials the
+        # broker would start but nobody could manage it.  This is best-effort.
+        sync_admin_credentials || echo "[sync-creds] WARNING: post-reload credential sync failed"
         start_mosquitto
+        wait_for_mosquitto_ready
 
     elif [ -f /var/lib/mosquitto/.restart ]; then
         rm -f /var/lib/mosquitto/.restart
         echo "[supervisor] Restart solicitado — SIGTERM a mosquitto (PID $MOSQUITTO_PID)..."
         kill -TERM "$MOSQUITTO_PID" 2>/dev/null || true
         wait "$MOSQUITTO_PID" 2>/dev/null || true
-        sleep 1
         start_mosquitto
+        wait_for_mosquitto_ready
 
     elif [ -f /var/lib/mosquitto/.reload ]; then
         rm -f /var/lib/mosquitto/.reload
@@ -419,8 +462,8 @@ while true; do
     elif ! kill -0 "$MOSQUITTO_PID" 2>/dev/null; then
         # Mosquitto termino inesperadamente — reiniciar
         echo "[supervisor] Mosquitto termino inesperadamente (PID $MOSQUITTO_PID), reiniciando..."
-        sleep 1
         start_mosquitto
+        wait_for_mosquitto_ready
     fi
 
     sleep 2

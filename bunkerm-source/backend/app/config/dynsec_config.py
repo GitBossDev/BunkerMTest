@@ -18,8 +18,51 @@ from fastapi import APIRouter, HTTPException, Depends, Security, UploadFile, Fil
 from fastapi.security.api_key import APIKeyHeader
 from pydantic import BaseModel
 
+from config.mosquitto_config import is_broker_restarting
+
 # Router setup
 router = APIRouter(tags=["dynsec_config"])
+
+# ---------------------------------------------------------------------------
+# Signal helpers
+# ---------------------------------------------------------------------------
+
+_SIGNAL_DIR = "/var/lib/mosquitto"
+
+
+def _emit_dynsec_reload_signal() -> None:
+    """Write the .dynsec-reload signal file (idempotent) and clear .restart first.
+
+    Why clear .restart:
+        .dynsec-reload causes the supervisor to SIGKILL mosquitto and restart it
+        fresh, rereading both dynamic-security.json AND mosquitto.conf.  A pending
+        .restart signal would then fire *during that startup*, sending SIGTERM while
+        the DynSec plugin is loading thousands of users.  The graceful shutdown would
+        overwrite the newly-imported dynamic-security.json with the partial in-memory
+        state → corruption → nobody can authenticate.  Removing .restart first ensures
+        exactly one clean restart happens.
+
+    Why idempotent:
+        Two back-to-back DynSec imports must not queue two restarts.
+    """
+    try:
+        restart_path = os.path.join(_SIGNAL_DIR, ".restart")
+        if os.path.exists(restart_path):
+            try:
+                os.remove(restart_path)
+            except OSError:
+                pass  # best-effort; supervisor will clear it when consuming dynsec-reload
+
+        dynsec_reload_path = os.path.join(_SIGNAL_DIR, ".dynsec-reload")
+        if not os.path.exists(dynsec_reload_path):
+            with open(dynsec_reload_path, "w") as _f:
+                _f.write("")
+            logger.info("DynSec reload signal written")
+        else:
+            logger.info("DynSec reload signal already pending, skipping duplicate write")
+    except Exception as _e:
+        logger.warning(f"Could not write dynsec reload signal: {_e}")
+
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -515,6 +558,11 @@ async def import_dynsec_json(
     Import a dynamic security JSON file
     """
     try:
+        if is_broker_restarting():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="El broker está reiniciando. Espera unos segundos e inténtalo de nuevo.",
+            )
         # Read the uploaded file
         content = await file.read()
         
@@ -560,16 +608,11 @@ async def import_dynsec_json(
             role_count = len(merged_config["roles"]) - 1    # Subtract admin role
 
             # El plugin DynSec de Mosquitto solo relee su JSON en el arranque;
-            # SIGHUP (via .reload) NO actualiza el estado en memoria de DynSec.
-            # Por eso escribimos .dynsec-reload: el signal relay enviara SIGKILL
-            # al proceso mosquitto (sin que guarde su estado antiguo en disco) y
-            # el contenedor se reinicia automaticamente gracias a restart:unless-stopped.
-            # Asi mosquitto arranca leyendo el JSON recien importado.
-            try:
-                with open("/var/lib/mosquitto/.dynsec-reload", "w") as _f:
-                    _f.write("")
-            except Exception as _e:
-                logger.warning(f"Could not write dynsec reload signal: {_e}")
+            # .dynsec-reload: supervisor sends SIGKILL (not SIGTERM) so mosquitto
+            # cannot overwrite the newly-written JSON with its old in-memory state.
+            # The helper also clears any pending .restart to prevent a second restart
+            # firing during DynSec initialisation (which would re-corrupt the JSON).
+            _emit_dynsec_reload_signal()
 
             logger.info(f"Successfully imported configuration with {user_count} users, {group_count} groups, {role_count} roles")
             return {
@@ -604,6 +647,11 @@ async def import_acl(request: Request, api_key: str = Security(get_api_key)):
     writes to disk, and restarts Mosquitto so changes take effect immediately.
     """
     try:
+        if is_broker_restarting():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="El broker está reiniciando. Espera unos segundos e inténtalo de nuevo.",
+            )
         try:
             imported_data = await request.json()
         except Exception:
@@ -628,17 +676,11 @@ async def import_acl(request: Request, api_key: str = Security(get_api_key)):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                                 detail="Failed to write ACL configuration")
 
-        # El plugin DynSec de Mosquitto solo relee su JSON en el arranque;
-        # SIGHUP (via .reload) NO actualiza el estado en memoria de DynSec.
-        # Por eso escribimos .dynsec-reload: el signal relay enviara SIGKILL
-        # al proceso mosquitto (sin que guarde su estado antiguo en disco) y
-        # el contenedor se reinicia automaticamente gracias a restart:unless-stopped.
-        # Asi mosquitto arranca leyendo el JSON recien importado.
-        try:
-            with open("/var/lib/mosquitto/.dynsec-reload", "w") as _f:
-                _f.write("")
-        except Exception as _e:
-            logger.warning(f"Could not write dynsec reload signal: {_e}")
+        # .dynsec-reload: supervisor sends SIGKILL (not SIGTERM) so mosquitto
+        # cannot overwrite the newly-written JSON with its old in-memory state.
+        # The helper also clears any pending .restart to prevent a second restart
+        # firing during DynSec initialisation (which would re-corrupt the JSON).
+        _emit_dynsec_reload_signal()
 
         user_count = len(merged_config["clients"]) - 1
         group_count = len(merged_config["groups"])
