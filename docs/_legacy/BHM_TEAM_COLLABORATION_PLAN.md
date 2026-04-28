@@ -375,10 +375,8 @@ Estado actual ya disponible para coordinación con B:
 
 - [x] Implementar o diseñar whitelist por IP.
 - [ ] Refinar el histórico de actividades de clientes.
-- [ ] Refinar o ampliar historial para dashboard.
 - [x] Refinar o ampliar historia de topics.
 - [x] Implementar alertas por correo.
-- [ ] Refinar histórico de logs de broker.
 - [ ] Refinar histórico de logs de clientes.
 - [x] Mejorar estilos y UI donde aplique.
 
