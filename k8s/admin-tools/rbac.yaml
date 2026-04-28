@@ -1,0 +1,15 @@
+# Token de larga duracion para el login manual en la UI de Headlamp.
+#
+# El Helm chart ya crea el ServiceAccount 'headlamp' y un ClusterRoleBinding
+# a cluster-admin (clusterRoleBinding.create: true en headlamp-values.yaml).
+# Este Secret reutiliza ese SA para generar un token persistente de acceso.
+# Kubernetes rellena automaticamente el valor del token al aplicar el recurso.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: headlamp-token
+  namespace: admin-tools
+  annotations:
+    kubernetes.io/service-account.name: headlamp
+type: kubernetes.io/service-account-token

@@ -26,8 +26,47 @@ Eso deja visible el gap real hacia la fase posterior:
 
 - `kind/cluster.yaml`: clúster local mínimo con `1` control-plane y `1` worker
 - `base/`: manifiestos iniciales del laboratorio, incluyendo `StatefulSet` broker-owned
+- `admin-tools/`: herramientas de administración del cluster (Headlamp)
 - `PORTABILITY_INVENTORY.md`: inventario Compose -> Kubernetes y gaps transicionales visibles
 - `IMAGE_PACKAGING.md`: lineamiento operativo para tags, build y arranque del laboratorio sin depender de `latest`
+
+## Herramientas de administración del cluster
+
+El subdirectorio `admin-tools/` contiene los manifests y Helm values para desplegar
+[Headlamp](https://headlamp.dev) como interfaz web de administración del cluster en el
+namespace `admin-tools`.
+
+### Requisitos previos
+
+- **Helm v3** instalado en el host: `winget install Helm.Helm`
+
+### Despliegue
+
+Añadir el flag `-WithAdminTools` al arranque del lab:
+
+```powershell
+.\deploy.ps1 -Action start -Runtime kind -ImageTag 2.0.0 -WithAdminTools
+```
+
+El script instala Headlamp via Helm, aplica el RBAC, abre el port-forward en el puerto
+23000 e imprime el token de acceso.
+
+| Recurso | Valor |
+|---|---|
+| URL | `http://localhost:23000` |
+| Namespace | `admin-tools` |
+| Puerto host | 23000 (personalizable con `-KindHeadlampHostPort`) |
+
+### Port-forward manual
+
+Si el cluster ya está corriendo sin `-WithAdminTools`:
+
+```powershell
+kubectl port-forward service/headlamp -n admin-tools 23000:4466 --context kind-bhm-lab
+```
+
+Consulta `k8s/admin-tools/README.md` para la operativa completa (obtener token,
+actualizar Headlamp, Kubescape scanning, Trivy Operator).
 - `RECONCILER_CONTROL_LOOP_EVOLUTION.md`: verificacion tecnica del paso sidecar -> control loop -> controlador
 - `FINAL_TOPOLOGY.md`: topologia final minima ya materializada para Fase 9, centrada en los workloads persistentes del core BHM
 - `scripts/bootstrap-kind.ps1`: crea el clúster, genera el secret desde `.env.dev`, aplica el scaffold y opcionalmente carga la imagen local

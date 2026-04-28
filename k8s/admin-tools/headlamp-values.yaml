@@ -1,0 +1,42 @@
+# Helm values para Headlamp en el laboratorio kind.
+# Instalar/actualizar con:
+#   helm upgrade --install headlamp headlamp/headlamp \
+#     -n admin-tools \
+#     -f k8s/admin-tools/headlamp-values.yaml
+#
+# Agregar el repo oficial (movido a kubernetes-sigs en 2024):
+#   helm repo add headlamp https://kubernetes-sigs.github.io/headlamp/
+#
+# Consultar la version estable actual antes del primer despliegue:
+#   helm search repo headlamp/headlamp
+
+replicaCount: 1
+
+# ClusterIP + port-forward: patron consistente con el resto del lab.
+# El Service expone el puerto 80 (default del chart) que mapea internamente
+# al puerto 4466 del contenedor Headlamp.
+service:
+  type: ClusterIP
+  port: 80
+
+# El chart crea por defecto un ClusterRoleBinding para el SA de Headlamp.
+# Necesario para que Headlamp pueda proxear la K8s API hacia el navegador.
+clusterRoleBinding:
+  create: true
+
+ingress:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+# Sin afinidad ni toleraciones especiales: el pod puede aterrizar en
+# cualquier nodo del cluster kind.
+nodeSelector: {}
+tolerations: []
+affinity: {}

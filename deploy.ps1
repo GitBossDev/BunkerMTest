@@ -61,8 +61,14 @@ param(
     [int]$KindMqttWsHostPort = 29001,
 
     [Parameter(Mandatory=$false)]
+    [int]$KindHeadlampHostPort = 23000,
+
+    [Parameter(Mandatory=$false)]
     [string]$KindPortForwardAddress = '127.0.0.1',
-    
+
+    [Parameter(Mandatory=$false)]
+    [switch]$WithAdminTools,
+
     [Parameter(Mandatory=$false)]
     [switch]$Follow
 )
@@ -93,6 +99,7 @@ $script:KindWebBaseUrl = "http://localhost:$KindWebHostPort"
 $script:KindKubectlContext = "kind-$KindClusterName"
 $script:KindPortForwardDir = Join-Path $PSScriptRoot 'tmp\kind-port-forward'
 $script:KindPortForwardStatePath = Join-Path $script:KindPortForwardDir 'processes.json'
+$script:AdminToolsMarkerPath = Join-Path $PSScriptRoot 'tmp\.admin-tools-enabled'
 
 # Colors for output
 function Write-Success { Write-Host $args -ForegroundColor Green }
@@ -792,7 +799,8 @@ function Start-KindPortForwardProcess {
         [string]$Name,
         [string]$Resource,
         [string[]]$Mappings,
-        [int[]]$LocalPorts
+        [int[]]$LocalPorts,
+        [string]$Namespace = $KindNamespace
     )
 
     New-Item -ItemType Directory -Path $script:KindPortForwardDir -Force | Out-Null
@@ -802,7 +810,7 @@ function Start-KindPortForwardProcess {
 
     $argumentList = @(
         '--context', $script:KindKubectlContext,
-        '-n', $KindNamespace,
+        '-n', $Namespace,
         'port-forward',
         $Resource
     ) + $Mappings + @('--address', $KindPortForwardAddress)
@@ -875,6 +883,11 @@ function Wait-KubernetesApiResponsive {
     return $false
 }
 
+function Test-AdminToolsEnabled {
+    # Admin tools activos si: flag de sesion o archivo marcador de instalacion previa
+    return ($WithAdminTools.IsPresent -or (Test-Path $script:AdminToolsMarkerPath))
+}
+
 function Start-KindPortForwards {
     Ensure-KubernetesTooling
 
@@ -897,6 +910,24 @@ function Start-KindPortForwards {
                 (Start-KindPortForwardProcess -Name 'frontend' -Resource 'service/bhm-frontend' -Mappings @("${KindWebHostPort}:2000") -LocalPorts @($KindWebHostPort)),
                 (Start-KindPortForwardProcess -Name 'mosquitto' -Resource 'service/mosquitto' -Mappings @("${KindMqttHostPort}:1900", "${KindMqttWsHostPort}:9001") -LocalPorts @($KindMqttHostPort, $KindMqttWsHostPort))
             )
+
+            # Anadir port-forward de Headlamp si esta habilitado (flag, marcador o namespace existente)
+            $headlampActive = Test-AdminToolsEnabled
+            if (-not $headlampActive) {
+                # Fallback: detectar si el namespace admin-tools existe (instalacion previa sin marcador)
+                $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+                & $script:KubectlExecutable --context $script:KindKubectlContext `
+                    get namespace admin-tools 2>$null | Out-Null
+                $nsExit = $LASTEXITCODE
+                $ErrorActionPreference = $savedPref
+                if ($nsExit -eq 0) {
+                    $headlampActive = $true
+                }
+            }
+
+            if ($headlampActive) {
+                $entries += @(Start-KindPortForwardProcess -Name 'headlamp' -Resource 'service/headlamp' -Namespace 'admin-tools' -Mappings @("${KindHeadlampHostPort}:80") -LocalPorts @($KindHeadlampHostPort))
+            }
 
             foreach ($entry in $entries) {
                 Wait-KindPortForwardReady -Entry $entry
@@ -1178,6 +1209,116 @@ function Set-KindWorkloadReplicas {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Admin tools — Headlamp
+# ---------------------------------------------------------------------------
+
+function Install-HeadlampAdminTools {
+    Ensure-KubernetesTooling
+
+    $helmExecutable = $null
+    $helmCommand = Get-Command helm -ErrorAction SilentlyContinue
+    if ($helmCommand) {
+        $helmExecutable = $helmCommand.Source
+    } else {
+        $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+        $whereHelm = @(where.exe helm 2>$null)
+        $ErrorActionPreference = $savedPref
+        if ($whereHelm.Count -gt 0 -and (Test-Path $whereHelm[0])) {
+            $helmExecutable = $whereHelm[0]
+        }
+    }
+    if (-not $helmExecutable) {
+        Write-Warning "[ADMIN-TOOLS] helm no encontrado en PATH. Instala Helm v3 (https://helm.sh/docs/intro/install/) y vuelve a intentarlo."
+        Write-Warning "  Puedes instalar con: winget install Helm.Helm"
+        Write-Warning "  Headlamp no se desplegara en esta ejecucion."
+        return
+    }
+
+    Write-Info "Desplegando Headlamp en namespace admin-tools..."
+    Write-Host ""
+
+    # Namespace
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        apply -f (Join-Path $PSScriptRoot 'k8s\admin-tools\namespace.yaml') 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "[ADMIN-TOOLS] No se pudo crear el namespace admin-tools. Continuando de todos modos..."
+    }
+
+    # Helm repo
+    Write-Info "  Agregando repo headlamp..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $helmExecutable repo add headlamp https://kubernetes-sigs.github.io/headlamp/ --force-update 2>&1 | Out-Null
+    & $helmExecutable repo update 2>&1 | Out-Null
+    $ErrorActionPreference = $savedPref
+
+    # Helm install/upgrade
+    Write-Info "  Instalando/actualizando chart headlamp/headlamp..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $helmExecutable upgrade --install headlamp headlamp/headlamp `
+        -n admin-tools `
+        -f (Join-Path $PSScriptRoot 'k8s\admin-tools\headlamp-values.yaml') 2>&1
+    $helmExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($helmExit -ne 0) {
+        Write-Warning "[ADMIN-TOOLS] helm upgrade --install fallo (exit $helmExit). Headlamp puede no estar disponible."
+        return
+    }
+
+    # RBAC — token Secret de larga duracion (el chart ya crea el SA y CRB)
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        apply -f (Join-Path $PSScriptRoot 'k8s\admin-tools\rbac.yaml') 2>&1 | Out-Null
+    $rbacExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($rbacExit -ne 0) {
+        Write-Warning "[ADMIN-TOOLS] No se pudo aplicar el RBAC de Headlamp."
+    }
+
+    # Esperar readiness
+    Write-Info "  Esperando que el pod de Headlamp arranque (hasta 120 s)..."
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    & $script:KubectlExecutable --context $script:KindKubectlContext `
+        rollout status deployment/headlamp -n admin-tools --timeout=120s 2>&1 | Out-Null
+    $rolloutExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($rolloutExit -ne 0) {
+        Write-Warning "[ADMIN-TOOLS] Headlamp no quedo listo en 120 s. Verifica con: kubectl get pods -n admin-tools"
+    } else {
+        Write-Success "[OK] Headlamp listo en admin-tools."
+    }
+
+    # Guardar marcador para reinstalar automaticamente en proximos redeploys
+    New-Item -ItemType Directory -Path (Split-Path $script:AdminToolsMarkerPath -Parent) -Force | Out-Null
+    Set-Content -Path $script:AdminToolsMarkerPath -Value (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') -Encoding ASCII
+
+    # Imprimir token de acceso
+    Write-Host ""
+    Write-Info "Token de acceso para Headlamp (pegar en la pantalla de login):"
+    $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+    $tokenB64 = & $script:KubectlExecutable --context $script:KindKubectlContext `
+        get secret headlamp-token -n admin-tools `
+        -o jsonpath='{.data.token}' 2>&1
+    $tokenExit = $LASTEXITCODE
+    $ErrorActionPreference = $savedPref
+    if ($tokenB64 -and $tokenExit -eq 0) {
+        try {
+            $token = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($tokenB64))
+            Write-Host ""
+            Write-Host $token -ForegroundColor Yellow
+            Write-Host ""
+        } catch {
+            Write-Warning "  No se pudo decodificar el token. Obtenerlo manualmente:"
+            Write-Host "  kubectl get secret headlamp-admin-token -n admin-tools -o jsonpath='{.data.token}' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(`$_)) }" -ForegroundColor Gray
+        }
+    } else {
+        Write-Warning "  El Secret del token aun no esta listo. Obtenerlo tras unos segundos con:"
+        Write-Host "  kubectl get secret headlamp-admin-token -n admin-tools -o jsonpath='{.data.token}' | ForEach-Object { [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(`$_)) }" -ForegroundColor Gray
+    }
+
+    Write-Host ""
+}
+
 function Invoke-StartKindRuntime {
     if (-not (Test-Path '.env.dev')) {
         Write-Error '.env.dev not found. Run setup first: .\deploy.ps1 -Action setup'
@@ -1232,6 +1373,12 @@ function Invoke-StartKindRuntime {
     }
 
     Wait-KubernetesRuntimeReady
+
+    if (Test-AdminToolsEnabled) {
+        Write-Host ''
+        Install-HeadlampAdminTools
+    }
+
     Start-KindPortForwards
 }
 
@@ -1413,6 +1560,9 @@ function Invoke-Start {
     Write-Host "  - kind Web UI:       $script:KindWebBaseUrl" -ForegroundColor Cyan
     Write-Host "  - kind MQTT:         localhost:$KindMqttHostPort" -ForegroundColor Cyan
     Write-Host "  - kind MQTT WS:      localhost:$KindMqttWsHostPort" -ForegroundColor Cyan
+    if (Test-AdminToolsEnabled) {
+        Write-Host "  - Headlamp UI:       http://localhost:$KindHeadlampHostPort" -ForegroundColor Cyan
+    }
 
     Write-Host ''
     Write-Info "Run health check: .\deploy.ps1 -Action status"
@@ -1445,6 +1595,18 @@ function Invoke-Status {
     Write-Host 'Workloads kind:' -ForegroundColor Yellow
     if (Test-KindClusterExists) {
         & $script:KubectlExecutable get pods,svc -n $KindNamespace
+
+        # Mostrar pods de herramientas de administracion si el namespace existe
+        $savedPref = $ErrorActionPreference ; $ErrorActionPreference = 'Continue'
+        $nsExists = & $script:KubectlExecutable --context $script:KindKubectlContext `
+            get namespace admin-tools -o name 2>&1
+        $ErrorActionPreference = $savedPref
+        if ($nsExists -and $LASTEXITCODE -eq 0) {
+            Write-Host ''
+            Write-Info 'Admin tools (admin-tools):'
+            & $script:KubectlExecutable --context $script:KindKubectlContext `
+                get pods,svc -n admin-tools
+        }
     } else {
         Write-Warning "El cluster kind '$KindClusterName' no existe."
     }
@@ -1488,6 +1650,12 @@ function Invoke-Clean {
         Write-Host ""
 
         Invoke-StopKindRuntime -DeleteCluster
+
+        # Eliminar marcador de admin-tools para que no se reinstale automaticamente
+        if (Test-Path $script:AdminToolsMarkerPath) {
+            Remove-Item $script:AdminToolsMarkerPath -Force -ErrorAction SilentlyContinue
+            Write-Success "[OK] Marcador de admin-tools eliminado."
+        }
 
         # Remove .env.dev
         if (Test-Path ".env.dev") {
