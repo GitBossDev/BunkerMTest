@@ -25,7 +25,7 @@ from core.config import settings
 from core.database import get_db
 
 # Importar lógica de negocio del módulo original (se mantiene intacto)
-from config.mosquitto_config import DEFAULT_CONFIG, _generate_tls_listener_block, generate_mosquitto_conf, validate_listeners
+from config.mosquitto_config import DEFAULT_CONFIG, _generate_tls_listener_block, generate_mosquitto_conf, is_broker_restarting, validate_listeners
 from models.schemas import MosquittoConfig, TLSListenerConfig
 from services import broker_observability_client
 from services import broker_desired_state_service as desired_state_svc
@@ -128,6 +128,12 @@ async def save_mosquitto_config(
 ):
     """Valida, hace backup y escribe la nueva configuración de Mosquitto."""
     try:
+        if is_broker_restarting():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="El broker está reiniciando. Espera unos segundos e inténtalo de nuevo.",
+                headers={"Retry-After": "5"},
+            )
         payload = _build_merged_mosquitto_payload(config)
         listeners_list = payload["listeners"]
 
@@ -178,6 +184,8 @@ async def save_mosquitto_config(
             },
         }
 
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Error saving Mosquitto configuration: %s", exc)
         raise HTTPException(
@@ -228,6 +236,12 @@ async def restart_mosquitto(
 ):
     """Señaliza al contenedor Mosquitto para reiniciar el broker de forma limpia."""
     try:
+        if is_broker_restarting():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="El broker ya está reiniciando. Espera a que termine antes de volver a reiniciar.",
+                headers={"Retry-After": "5"},
+            )
         state = await desired_state_svc.set_broker_reload_desired(
             db,
             {"reason": "manual-config-restart", "requestedBy": "config-router"},
@@ -249,6 +263,8 @@ async def restart_mosquitto(
                 "driftDetected": state.drift_detected,
             },
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.error("Failed to signal Mosquitto restart: %s", exc)
         raise HTTPException(status_code=500, detail=f"Failed to signal Mosquitto restart: {exc}")

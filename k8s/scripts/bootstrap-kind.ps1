@@ -752,8 +752,14 @@ try {
     Write-Host "[INFO] Creando namespace '$Namespace' si no existe..." -ForegroundColor Cyan
     $namespaceYaml = & $kubectlExecutable create namespace $Namespace --dry-run=client -o yaml
     Assert-LastExitCode "kubectl create namespace"
-    $namespaceYaml | & $kubectlExecutable apply -f - | Out-Null
-    Assert-LastExitCode "kubectl apply namespace"
+    $applyOutput = $namespaceYaml | & $kubectlExecutable apply --server-side --force-conflicts -f - 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $outputText = "$applyOutput"
+        if ($outputText -notmatch 'AlreadyExists') {
+            throw "kubectl apply namespace fallo con exit code $LASTEXITCODE. Output: $outputText"
+        }
+        Write-Host "[OK] Namespace '$Namespace' ya existia, continuando..." -ForegroundColor Green
+    }
 
     Write-Host "[INFO] Sincronizando secret bhm-env desde $EnvFile..." -ForegroundColor Cyan
     $secretYaml = & $kubectlExecutable create secret generic bhm-env --namespace $Namespace --from-env-file=$EnvFile --dry-run=client -o yaml

@@ -1039,13 +1039,29 @@ async def reconcile_mosquitto_config(session: AsyncSession) -> BrokerDesiredStat
     if desired is None:
         raise ValueError("Desired mosquitto config state payload is empty")
 
-    apply_result = get_broker_reconciler().apply_mosquitto_config(desired["content"])
-    errors = apply_result["errors"]
-    rollback_note = apply_result.get("rollbackNote")
+    desired_content = desired.get("content", "")
+
+    # Only apply (write file + signal restart) when the on-disk content actually
+    # differs from the desired content.  Calling apply_mosquitto_config()
+    # unconditionally wrote the file and queued a restart every ~1s, causing a
+    # perpetual restart loop.  The observability endpoint returns mosquitto's own
+    # runtime defaults (log_dest, max_keepalive, sys_interval, etc.) that are
+    # never stored in our conf file, so comparing against it always shows drift.
+    current_on_disk = _read_mosquitto_content()
+    errors: list[str] = []
+    rollback_note: str | None = None
+
+    if current_on_disk.strip() != desired_content.strip():
+        apply_result = get_broker_reconciler().apply_mosquitto_config(desired_content)
+        errors = apply_result["errors"]
+        rollback_note = apply_result.get("rollbackNote")
+
+    # Drift is determined by comparing the on-disk file against desired, since
+    # the file is the actual configuration mosquitto reads at startup.
+    updated_on_disk = _read_mosquitto_content()
+    drift_detected = updated_on_disk.strip() != desired_content.strip()
 
     observed = get_observed_mosquitto_config()
-    desired_content = desired.get("content", "")
-    observed_content = observed.get("content", "")
     now = _utcnow()
 
     state.observed_payload_json = _dump_json(observed)
@@ -1053,13 +1069,13 @@ async def reconcile_mosquitto_config(session: AsyncSession) -> BrokerDesiredStat
 
     if errors:
         state.reconcile_status = "error"
-        state.drift_detected = desired_content != observed_content
+        state.drift_detected = drift_detected
         state.last_error = "; ".join(errors + ([rollback_note] if rollback_note else []))
     else:
         state.applied_payload_json = _dump_json(desired)
         state.applied_at = now
-        state.drift_detected = desired_content != observed_content
-        state.reconcile_status = "drift" if state.drift_detected else "applied"
+        state.drift_detected = drift_detected
+        state.reconcile_status = "drift" if drift_detected else "applied"
         state.last_error = None
 
     return await _commit_desired_state_change(session, state)
@@ -1090,7 +1106,12 @@ async def get_mosquitto_config_status(session: AsyncSession) -> Dict[str, Any]:
 
     desired = _load_json(state.desired_payload_json)
     applied = _load_json(state.applied_payload_json)
-    drift_detected = (desired or {}).get("content", "") != observed.get("content", "")
+    # Use on-disk file as ground truth for drift, not the observability endpoint.
+    # The observability endpoint includes mosquitto's own runtime defaults that
+    # never appear in the conf file, causing perpetual false-positive drift.
+    desired_content = (desired or {}).get("content", "")
+    on_disk_content = _read_mosquitto_content()
+    drift_detected = on_disk_content.strip() != desired_content.strip()
 
     if drift_detected != state.drift_detected:
         state.drift_detected = drift_detected

@@ -157,16 +157,32 @@ def _signal_mosquitto_reload() -> None:
 
 
 def _signal_mosquitto_restart() -> None:
-    """Write the restart trigger file (idempotent: skips if already pending).
+    """Write the restart trigger file, with two idempotency guards.
 
-    Guard against the double-restart race condition: when saving broker config
-    already queues a restart and the user also presses the Restart button, the
-    second call must not write a second .restart file.  If the supervisor has
-    not yet consumed the first signal the file is still on disk, so we skip
-    writing and one clean restart still fires.  If the supervisor already
-    consumed it (>2 s elapsed) the file is gone and a fresh restart is queued.
+    Guard 1 — dynsec-reload pending:
+        A .dynsec-reload signal already implies a full SIGKILL + restart that
+        rereads both dynamic-security.json and mosquitto.conf.  Adding a .restart
+        on top of that would cause a second restart to fire while mosquitto is
+        still loading the DynSec plugin (which can take several seconds with
+        thousands of users).  A SIGTERM during DynSec initialisation triggers a
+        graceful shutdown that overwrites dynamic-security.json with the partial
+        in-memory state → corruption → nobody can authenticate.  Skip entirely.
+
+    Guard 2 — restart already pending:
+        If the supervisor has not yet consumed the previous .restart file it is
+        still on disk.  Writing it again is a no-op at the OS level but confuses
+        reasoning about "how many restarts are queued".  Skip.
     """
     try:
+        # Guard 1: dynsec-reload subsumes any regular restart.
+        dynsec_reload_path = "/var/lib/mosquitto/.dynsec-reload"
+        if os.path.exists(dynsec_reload_path):
+            logger.info(
+                "DynSec reload already pending (full restart implied) — "
+                "skipping .restart to prevent double-restart during DynSec load"
+            )
+            return
+        # Guard 2: regular restart already queued.
         signal_path = "/var/lib/mosquitto/.restart"
         if os.path.exists(signal_path):
             logger.info("Restart signal already pending, skipping duplicate to prevent double-restart")
@@ -176,6 +192,22 @@ def _signal_mosquitto_restart() -> None:
         logger.info("Restart signal written for mosquitto standalone container")
     except Exception as e:
         logger.warning(f"Could not write mosquitto restart signal: {e}")
+
+
+_BROKER_RESTARTING_MARKER = "/var/lib/mosquitto/.broker-restarting"
+
+
+def is_broker_restarting() -> bool:
+    """Return True while the broker is in a startup/restart phase.
+
+    mosquitto-entrypoint.sh writes this marker inside start_mosquitto() and
+    removes it when wait_for_mosquitto_ready() returns (success, timeout, or
+    unexpected crash).  During this window the DynSec plugin may not be fully
+    initialised.  Sending a new restart signal (SIGTERM) while DynSec is still
+    loading its users would cause a graceful shutdown that overwrites
+    dynamic-security.json with a partial in-memory state → corruption.
+    """
+    return os.path.exists(_BROKER_RESTARTING_MARKER)
 
 
 def _normalize_bind_address(raw: str | None) -> str:
