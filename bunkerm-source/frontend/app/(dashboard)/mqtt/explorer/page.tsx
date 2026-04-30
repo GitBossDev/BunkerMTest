@@ -417,8 +417,54 @@ export default function MqttExplorerPage() {
   const fetchTopics = useCallback(async (showLoading = false) => {
     if (showLoading) setIsLoading(true)
     try {
-      const data = await monitorApi.getTopics('db')
-      setTopics(data.topics ?? [])
+      const data = await monitorApi.getTopics()
+      const fetched: MqttTopic[] = data.topics ?? []
+      // Merge pinned topics from Topic Setter so pinned topics remain visible
+      try {
+        const raw = localStorage.getItem('bunker_topic_setter_entries_v1')
+        if (raw) {
+          const entries = JSON.parse(raw) as Array<{ topic: string; children: string[]; expiresAt: number }>
+          const now = Date.now()
+          const pinned: string[] = []
+          for (const e of entries) {
+            if (e.expiresAt > now) {
+              // always include the root topic as pinned
+              pinned.push(e.topic)
+              for (const c of e.children) pinned.push(c)
+            }
+          }
+          for (const p of Array.from(new Set(pinned))) {
+            if (!fetched.find((t) => t.topic === p)) {
+              fetched.push({ topic: p, value: '', timestamp: new Date().toISOString(), count: 0, retained: false, qos: 0 })
+            }
+          }
+        }
+      } catch {}
+      setTopics(fetched)
+      // Update Topic Setter histories when pinned topics receive new messages
+      try {
+        const raw = localStorage.getItem('bunker_topic_setter_entries_v1')
+        const rawH = localStorage.getItem('bunker_topic_setter_histories_v1')
+        const entries = raw ? (JSON.parse(raw) as Array<{ id: string; topic: string; expiresAt: number }>) : []
+        const histories = rawH ? (JSON.parse(rawH) as Record<string, any[]>) : {}
+        const now = Date.now()
+        for (const e of entries) {
+          if (e.expiresAt <= now) continue
+          const fetchedTopic = fetched.find((t) => t.topic === e.topic)
+          if (!fetchedTopic) continue
+          const histForEntry = histories[e.id]
+          const latestHist = histForEntry && histForEntry.length ? histForEntry[histForEntry.length - 1].timestamp : undefined
+          if (!latestHist || latestHist !== fetchedTopic.timestamp) {
+            try {
+              const data = await monitorApi.getTopicHistory(e.topic, TOPIC_HISTORY_LIMIT)
+              const arr = (data.history ?? [])
+              arr.sort((a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+              const nextH = { ...histories, [e.id]: arr }
+              try { localStorage.setItem('bunker_topic_setter_histories_v1', JSON.stringify(nextH)) } catch {}
+            } catch {}
+          }
+        }
+      } catch {}
     } catch {
       toast.error('Failed to fetch MQTT topics')
     } finally {
@@ -518,7 +564,7 @@ export default function MqttExplorerPage() {
         </Badge>
       </div>
 
-      {/* Topic tree usando React*/}
+      {/* Topic tree */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium">Topic Tree</CardTitle>
@@ -603,6 +649,7 @@ export default function MqttExplorerPage() {
                           <span className="text-muted-foreground">{formatRelativeTime(entry.timestamp)}</span>
                           <Badge variant="secondary">QoS {entry.qos}</Badge>
                           <Badge variant="outline">{detectPayloadType(entry.value)}</Badge>
+                          <Badge variant="outline">{entry.payload_bytes} B</Badge>
                           {entry.retained && (
                             <Badge variant="outline" className="border-orange-400 text-orange-500">
                               retained

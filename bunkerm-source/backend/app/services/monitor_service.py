@@ -512,6 +512,9 @@ class TopicStore:
     def __init__(self):
         self._lock = threading.Lock()
         self._topics: Dict[str, dict] = {}
+        self._history: Dict[str, deque] = {}
+        self._history_limit = 120
+        self._next_id = 1
 
     def update(
         self,
@@ -536,22 +539,49 @@ class TopicStore:
                 "retained": effective_retained,
                 "qos": qos,
             }
-        try:
-            topic_history_storage.record_publish(
-                topic,
-                payload_bytes=len(payload or b""),
-                payload_value=value,
-                qos=qos,
-                retained=effective_retained,
-                event_ts=event_ts,
-            )
-        except Exception as exc:
-            # Never block live MQTT topic rendering if history persistence fails.
-            logger.warning("Topic history persistence failed for topic %s: %s", topic, exc)
+            dq = self._history.get(topic)
+            if dq is None:
+                dq = deque(maxlen=self._history_limit)
+                self._history[topic] = dq
+            entry = {
+                "id": self._next_id,
+                "topic": topic,
+                "value": value or "",
+                "timestamp": event_ts.isoformat().replace("+00:00", "Z"),
+                "payload_bytes": len(payload or b""),
+                "qos": int(qos or 0),
+                "retained": bool(effective_retained),
+                "kind": "message",
+            }
+            self._next_id += 1
+            dq.appendleft(entry)
+# Cubrimos el registro histórico de publicaciones.
+#        try:
+#            topic_history_storage.record_publish(
+#                topic,
+#                payload_bytes=len(payload or b""),
+#                payload_value=value,
+#                qos=qos,
+#                retained=effective_retained,
+#                event_ts=event_ts,
+#            )
+#        except Exception as exc:
+#            logger.warning("Topic history persistence failed for topic %s: %s", topic, exc)
 
     def get_all(self) -> list:
         with self._lock:
             return sorted(self._topics.values(), key=lambda x: x["topic"])
+
+    def get_topic_messages(self, topic: str, limit: int = 120) -> Dict[str, Any]:
+        topic = (topic or "").strip()
+        if not topic:
+            return {"topic": "", "history": [], "total": 0}
+        clamped = max(1, min(limit, 500))
+        with self._lock:
+            dq = self._history.get(topic) or deque()
+            history = list(dq)[:clamped]
+            total = len(dq)
+        return {"topic": topic, "history": history, "total": total}
 
 
 def _should_skip_mirrored_publish(topic: str, payload: bytes, qos: int, retained: bool, source: str) -> bool:

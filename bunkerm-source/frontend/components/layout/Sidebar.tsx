@@ -55,7 +55,9 @@ const BASE_NAV_GROUPS: NavGroup[] = [
     items: [
       { label: 'Connected Clients', href: '/mqtt/connected-clients', icon: Wifi },
       { label: 'MQTT Explorer', href: '/mqtt/explorer', icon: Radio },
-      { label: 'Broker Logs', href: '/mqtt/broker-logs', icon: FileText },
+          { label: 'Topic Setter', href: '/mqtt/explorer/topic-setter', icon: Radio },
+
+          { label: 'Broker Logs', href: '/mqtt/broker-logs', icon: FileText },
       { label: 'Client Logs', href: '/mqtt/client-logs', icon: Activity },
     ],
   },

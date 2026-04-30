@@ -241,16 +241,14 @@ async def get_qos_stats(api_key: str = Security(get_api_key)):
 
 @router.get("/topics")
 async def get_topics(source: str = "auto", api_key: str = Security(get_api_key)):
-    # source=db fuerza la lectura desde PostgreSQL para no depender de memoria.
-    try:
-        topics = topic_history_storage.get_latest_topics(limit=5000)
-        if source == "db":
+    # Prefer in-memory topic store by default. Only read persisted DB when
+    # explicitly requested with `source=db`.
+    if source == "db":
+        try:
+            topics = topic_history_storage.get_latest_topics(limit=5000)
             return {"topics": topics}
-        if topics:
-            return {"topics": topics}
-    except Exception as exc:
-        logger.warning("No se pudo leer topic_registry/topic_message_events: %s", exc)
-        if source == "db":
+        except Exception as exc:
+            logger.warning("No se pudo leer topic_registry/topic_message_events: %s", exc)
             return {"topics": []}
     return {"topics": topic_store.get_all()}
 
@@ -260,7 +258,11 @@ async def get_topic_history(topic_path: str, limit: int = 120, api_key: str = Se
     topic = (topic_path or "").strip()
     if not topic:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Topic is required")
-    return topic_history_storage.get_topic_messages(topic=topic, limit=limit)
+    try:
+        return topic_store.get_topic_messages(topic=topic, limit=limit)
+    except Exception:
+        # Fallback to persisted history if in-memory retrieval fails
+        return topic_history_storage.get_topic_messages(topic=topic, limit=limit)
 
 
 # ---------------------------------------------------------------------------
