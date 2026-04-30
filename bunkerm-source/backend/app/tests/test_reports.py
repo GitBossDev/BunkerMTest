@@ -137,25 +137,22 @@ async def test_reports_retention_endpoints_and_client_export_remain_available(cl
         MQTTEvent(
             id="ret-1",
             timestamp=_ts(days_ago=0).isoformat(),
-            event_type="Publish",
+            event_type="Client Connection",
             client_id="sensor-10-cid",
-            details="Published",
-            status="info",
+            details="Connected",
+            status="success",
             username="sensor-10",
-            topic="plant/sensor-10/status",
-            qos=1,
-            payload_bytes=64,
             **_event_kwargs(),
         )
     )
     with sqlite3.connect(db_path.as_posix()) as conn:
         conn.execute(
             """
-            INSERT INTO client_topic_events (
-                username, client_id, event_ts, event_type, topic, qos, payload_bytes, retained
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO client_mqtt_events (
+                event_id, event_ts, event_type, client_id, username, status, details, topic, qos, payload_bytes, retained, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("sensor-10", "sensor-10-cid", _ts(days_ago=40).isoformat(), "publish", "plant/sensor-10/old", 0, 32, 0),
+            ("ret-old-1", _ts(days_ago=40).isoformat(), "Publish", "sensor-10-cid", "sensor-10", "info", "Old publish", "plant/sensor-10/old", 0, 32, 0, _ts(days_ago=40).isoformat()),
         )
         conn.commit()
 
@@ -170,7 +167,7 @@ async def test_reports_retention_endpoints_and_client_export_remain_available(cl
     )
 
     assert retention_resp.status_code == 200
-    assert retention_resp.json()["rows_past_retention"]["client_topic_events"] >= 1
+    assert retention_resp.json()["rows_past_retention"]["client_mqtt_events"] >= 1
 
     assert purge_resp.status_code == 200
     purge_payload = purge_resp.json()

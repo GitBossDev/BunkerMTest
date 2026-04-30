@@ -84,8 +84,10 @@ def test_client_activity_storage_records_registry_events_and_summary(tmp_path):
 
     assert activity["client"] is not None
     assert len(activity["session_events"]) == 2
-    assert len(activity["topic_events"]) == 2
+    assert len(activity["topic_events"]) == 1  # only Subscribe; Publish goes to publish_state
     assert len(activity["subscriptions"]) == 1
+    assert len(activity["publish_state"]) == 1  # one topic for Publish
+    assert activity["publish_state"][0]["topic"] == "plant/line1/temp"
     assert len(activity["daily_summary"]) == 1
     summary = activity["daily_summary"][0]
     assert summary["connects"] == 1

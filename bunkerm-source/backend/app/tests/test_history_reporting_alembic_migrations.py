@@ -27,7 +27,7 @@ def test_history_reporting_alembic_upgrade_creates_expected_tables(tmp_path):
     assert "broker_daily_summary" in table_names
     assert "topic_registry" in table_names
     assert "client_registry" in table_names
-    assert "client_session_events" in table_names
+    assert "client_mqtt_events" in table_names
 
 
 def test_history_reporting_alembic_config_accepts_percent_encoded_password():
@@ -59,4 +59,4 @@ def test_history_reporting_alembic_upgrade_accepts_partially_bootstrapped_schema
             text(f"SELECT version_num FROM {HISTORY_REPORTING_VERSION_TABLE}")
         ).scalar_one()
 
-    assert stamped_revision == "001_history_reporting_initial"
+    assert stamped_revision == "003_add_client_publish_state"

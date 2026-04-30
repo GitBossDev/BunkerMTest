@@ -158,19 +158,36 @@ def _build_client_capability_map() -> Dict[str, Dict[str, bool]]:
         return {}
 
 
+@router.get("/clients")
+async def get_clients_list(
+    page: int = 1,
+    limit: int = 50,
+    search: str = "",
+    exact: bool = False,
+    api_key: str = Security(get_api_key),
+):
+    """Devuelve lista paginada de clientes con su último evento registrado."""
+    try:
+        index = desired_state_svc.get_cached_observed_dynsec_index()
+        client_activity_storage.reconcile_dynsec_clients_throttled(index.get("client_lookup", {}).values())
+    except Exception:
+        pass
+    return client_activity_storage.get_clients_list(page=page, limit=limit, search=search, exact=exact)
+
+
 @router.get("/events")
 async def get_mqtt_events(limit: int = 1000, api_key: str = Security(get_api_key)):
     """Devuelve los eventos MQTT más recientes desde la base de datos (conexión, desconexión, auth failure, etc.)."""
     try:
         # Try to read from database first
-        db_url = settings.resolved_control_plane_database_url
+        db_url = settings.resolved_history_database_url
         engine = create_sync_engine_for_url(db_url)
         session_factory = sessionmaker(bind=engine)
         
         with session_factory() as session:
             rows = session.execute(
                 select(ClientMQTTEvent)
-                .order_by(desc(ClientMQTTEvent.timestamp))
+                .order_by(desc(ClientMQTTEvent.event_ts))
                 .limit(limit)
             ).scalars().all()
             
@@ -178,7 +195,7 @@ async def get_mqtt_events(limit: int = 1000, api_key: str = Security(get_api_key
             for row in rows:
                 event = MQTTEvent(
                     id=row.event_id,
-                    timestamp=row.timestamp.isoformat().replace('+00:00', 'Z') if row.timestamp else '',
+                    timestamp=row.event_ts.isoformat().replace('+00:00', 'Z') if row.event_ts else '',
                     event_type=row.event_type,
                     client_id=row.client_id,
                     details=row.details,

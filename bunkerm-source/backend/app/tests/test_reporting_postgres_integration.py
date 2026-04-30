@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 
 from clientlogs.sqlalchemy_activity_storage import SQLAlchemyClientActivityStorage
 from core.sync_database import create_sync_engine_for_url
-from models.orm import BrokerDailySummary, BrokerMetricTick, ClientDailyDistinctTopic, ClientDailySummary, ClientRegistry, ClientSessionEvent, ClientTopicEvent, TopicPublishBucket, TopicSubscribeBucket
+from models.orm import BrokerDailySummary, BrokerMetricTick, ClientDailyDistinctTopic, ClientDailySummary, ClientMQTTEvent, ClientRegistry, TopicPublishBucket, TopicSubscribeBucket
 from monitor.sqlalchemy_storage import BrokerTickSnapshot, SQLAlchemyMonitorHistoryStorage
 from reporting.sqlalchemy_reporting import SQLAlchemyReportingStorage
 from services.clientlogs_service import MQTTEvent
@@ -102,15 +102,14 @@ def test_reporting_storage_queries_real_postgres_data():
         assert {item["event_type"] for item in timeline["timeline"]} >= {"Client Connection", "Publish", "Subscribe"}
         incident_types = {item["incident_type"] for item in incidents["incidents"]}
         assert {"ungraceful_disconnect", "auth_failure", "reconnect_loop"}.issubset(incident_types)
-        assert status["rows_past_retention"]["client_topic_events"] >= 1
+        assert status["rows_past_retention"]["client_mqtt_events"] >= 1
         assert purge["status"] == "purged"
         assert purge["before"]["total_rows_past_retention"] >= purge["after"]["total_rows_past_retention"]
     finally:
         with session_factory() as session:
             session.execute(delete(ClientDailyDistinctTopic).where(ClientDailyDistinctTopic.username.in_([username, old_username])))
             session.execute(delete(ClientDailySummary).where(ClientDailySummary.username.in_([username, old_username])))
-            session.execute(delete(ClientTopicEvent).where(ClientTopicEvent.username.in_([username, old_username])))
-            session.execute(delete(ClientSessionEvent).where(ClientSessionEvent.username.in_([username, old_username])))
+            session.execute(delete(ClientMQTTEvent).where(ClientMQTTEvent.username.in_([username, old_username])))
             session.execute(delete(ClientRegistry).where(ClientRegistry.username.in_([username, old_username])))
             session.execute(delete(TopicPublishBucket).where(TopicPublishBucket.bucket_start.in_([value.replace(tzinfo=None) for value in tick_rows])))
             session.execute(delete(TopicSubscribeBucket).where(TopicSubscribeBucket.bucket_start.in_([value.replace(tzinfo=None) for value in tick_rows])))

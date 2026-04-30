@@ -132,14 +132,18 @@ def test_reporting_storage_builds_broker_reports_timeline_incidents_and_purge(tm
     for event in (connect1, connect2, connect3, ungraceful, auth_fail, publish, subscribe):
         client_storage.record_event(event)
 
+    # Insert an old connection event directly to test retention (bypassing prune in record_event)
     with sqlite3.connect(db_path.as_posix()) as conn:
         conn.execute(
             """
-            INSERT INTO client_topic_events (
-                username, client_id, event_ts, event_type, topic, qos, payload_bytes, retained
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR IGNORE INTO client_mqtt_events (
+                event_id, event_ts, event_type, client_id, username,
+                ip_address, port, status, details, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("pump-1", "pump-1-cid", _ts(days_ago=35).isoformat(), "publish", "plant/old", 0, 32, 0),
+            ("old-connect-1", _ts(days_ago=35).isoformat(), "Client Connection",
+             "pump-1-cid", "pump-1", "10.0.0.10", 1883, "success", "Old connect",
+             _ts().isoformat()),
         )
         conn.commit()
 
@@ -154,9 +158,10 @@ def test_reporting_storage_builds_broker_reports_timeline_incidents_and_purge(tm
     assert daily["totals"]["total_messages_received"] == 125
     assert len(weekly["items"]) >= 1
     assert timeline["client"]["username"] == "pump-1"
-    assert {item["event_type"] for item in timeline["timeline"]} >= {"Client Connection", "Publish", "Subscribe"}
+    # Publish events now go to publish_state only; timeline contains connection/sub/auth events
+    assert {item["event_type"] for item in timeline["timeline"]} >= {"Client Connection", "Subscribe"}
     incident_types = {item["incident_type"] for item in incidents["incidents"]}
     assert {"ungraceful_disconnect", "auth_failure", "reconnect_loop"}.issubset(incident_types)
-    assert status["rows_past_retention"]["client_topic_events"] >= 1
+    assert status["rows_past_retention"]["client_mqtt_events"] >= 1
     assert purge["status"] == "purged"
     assert purge["before"]["total_rows_past_retention"] >= purge["after"]["total_rows_past_retention"]

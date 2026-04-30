@@ -4,7 +4,7 @@ import threading
 from datetime import timedelta
 from typing import Any, Dict
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, nullslast, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from core.database_url import is_sqlite_url
@@ -12,10 +12,10 @@ from core.sync_database import create_sync_engine_for_url, ensure_tables, iso_ut
 from models.orm import (
     ClientDailyDistinctTopic,
     ClientDailySummary,
+    ClientMQTTEvent,
+    ClientPublishState,
     ClientRegistry,
-    ClientSessionEvent,
     ClientSubscriptionState,
-    ClientTopicEvent,
 )
 
 
@@ -31,14 +31,20 @@ class SQLAlchemyClientActivityStorage:
                 self._engine,
                 [
                     ClientRegistry.__table__,
-                    ClientSessionEvent.__table__,
-                    ClientTopicEvent.__table__,
+                    ClientMQTTEvent.__table__,
                     ClientSubscriptionState.__table__,
+                    ClientPublishState.__table__,
                     ClientDailySummary.__table__,
                     ClientDailyDistinctTopic.__table__,
                 ],
             )
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
+        # In-memory dedup for Subscribe events: (username, topic) -> epoch seconds of last recorded event.
+        # Prevents duplicate ClientMQTTEvent rows when a client reconnects rapidly (e.g. short keepalive)
+        # and resubscribes to the same topic within _SUBSCRIBE_DEDUP_SECONDS.
+        self._subscribe_dedup: dict[tuple[str, str], float] = {}
+        _SUBSCRIBE_DEDUP_SECONDS = 30
+        self._subscribe_dedup_seconds: float = _SUBSCRIBE_DEDUP_SECONDS
 
     def upsert_client(self, username: str, textname: str | None = None, disabled: bool = False) -> None:
         if not username:
@@ -124,22 +130,89 @@ class SQLAlchemyClientActivityStorage:
         with self._lock:
             with session_scope(self._session_factory) as session:
                 day = event_ts.date()
-                if event_type in ("Client Connection", "Client Disconnection", "Auth Failure"):
-                    session.add(
-                        ClientSessionEvent(
-                            username=username,
-                            client_id=client_id,
-                            event_ts=event_ts,
-                            event_type=event_type,
-                            disconnect_kind=getattr(event, "disconnect_kind", None),
-                            reason_code=getattr(event, "reason_code", None),
-                            ip_address=getattr(event, "ip_address", None),
-                            port=getattr(event, "port", None),
-                            protocol_level=getattr(event, "protocol_level", None),
-                            clean_session=getattr(event, "clean_session", None),
-                            keep_alive=getattr(event, "keep_alive", None),
+
+                # Publish events: only record the FIRST time a client publishes to a topic.
+                # This captures "publish access granted" without logging every message.
+                if event_type == "Publish":
+                    if username and getattr(event, "topic", None):
+                        is_new_topic = self._upsert_publish_state_locked(session, username, event, event_ts)
+                        if is_new_topic:
+                            # First publish on this topic for this client — record the access event.
+                            session.add(
+                                ClientMQTTEvent(
+                                    event_id=getattr(event, "id", ""),
+                                    event_ts=event_ts,
+                                    event_type="Publish",
+                                    client_id=client_id,
+                                    username=username,
+                                    ip_address=getattr(event, "ip_address", None),
+                                    port=getattr(event, "port", None),
+                                    protocol_level=getattr(event, "protocol_level", None),
+                                    clean_session=getattr(event, "clean_session", None),
+                                    keep_alive=getattr(event, "keep_alive", None),
+                                    status=getattr(event, "status", ""),
+                                    details=getattr(event, "details", ""),
+                                    topic=getattr(event, "topic", None),
+                                    qos=getattr(event, "qos", None),
+                                    payload_bytes=getattr(event, "payload_bytes", None),
+                                    retained=getattr(event, "retained", None),
+                                    disconnect_kind=None,
+                                    reason_code=None,
+                                    created_at=normalize_datetime(utc_now()),
+                                )
+                            )
+                        self._upsert_daily_summary_locked(
+                            session, username, day, event_type, None,
+                            topic=getattr(event, "topic", None),
                         )
+                    return
+
+                # Subscribe events: dedup within a short window to avoid duplicate rows
+                # when a client reconnects quickly and resubscribes to the same topic.
+                if event_type == "Subscribe":
+                    topic = getattr(event, "topic", None)
+                    if topic and username:
+                        dedup_key = (username, topic)
+                        event_epoch = event_ts.timestamp()
+                        last_recorded = self._subscribe_dedup.get(dedup_key, 0.0)
+                        if event_epoch - last_recorded < self._subscribe_dedup_seconds:
+                            # Duplicate within dedup window — update subscription state but skip event row.
+                            self._upsert_subscription_state_locked(session, username, event, event_ts)
+                            return
+                        self._subscribe_dedup[dedup_key] = event_epoch
+                        # Prune dedup dict to cap memory usage.
+                        if len(self._subscribe_dedup) > 5000:
+                            cutoff = event_epoch - self._subscribe_dedup_seconds
+                            self._subscribe_dedup = {
+                                k: v for k, v in self._subscribe_dedup.items() if v >= cutoff
+                            }
+
+                # Write to the canonical event log for all other event types
+                session.add(
+                    ClientMQTTEvent(
+                        event_id=getattr(event, "id", ""),
+                        event_ts=event_ts,
+                        event_type=event_type,
+                        client_id=client_id,
+                        username=username,
+                        ip_address=getattr(event, "ip_address", None),
+                        port=getattr(event, "port", None),
+                        protocol_level=getattr(event, "protocol_level", None),
+                        clean_session=getattr(event, "clean_session", None),
+                        keep_alive=getattr(event, "keep_alive", None),
+                        status=getattr(event, "status", ""),
+                        details=getattr(event, "details", ""),
+                        topic=getattr(event, "topic", None),
+                        qos=getattr(event, "qos", None),
+                        payload_bytes=getattr(event, "payload_bytes", None),
+                        retained=getattr(event, "retained", None),
+                        disconnect_kind=getattr(event, "disconnect_kind", None),
+                        reason_code=getattr(event, "reason_code", None),
+                        created_at=normalize_datetime(utc_now()),
                     )
+                )
+
+                if event_type in ("Client Connection", "Client Disconnection", "Auth Failure"):
                     self._upsert_daily_summary_locked(
                         session,
                         username,
@@ -148,19 +221,7 @@ class SQLAlchemyClientActivityStorage:
                         getattr(event, "disconnect_kind", None),
                     )
 
-                if event_type in ("Subscribe", "Publish") and getattr(event, "topic", None):
-                    session.add(
-                        ClientTopicEvent(
-                            username=username,
-                            client_id=client_id,
-                            event_ts=event_ts,
-                            event_type=event_type.lower(),
-                            topic=getattr(event, "topic", ""),
-                            qos=getattr(event, "qos", None),
-                            payload_bytes=getattr(event, "payload_bytes", None),
-                            retained=getattr(event, "retained", None),
-                        )
-                    )
+                if event_type == "Subscribe" and getattr(event, "topic", None):
                     if username:
                         self._upsert_subscription_state_locked(session, username, event, event_ts)
                         self._upsert_daily_summary_locked(
@@ -203,6 +264,37 @@ class SQLAlchemyClientActivityStorage:
         state.last_seen_at = event_ts
         state.is_active = True
         state.source = "clientlogs"
+
+    def _upsert_publish_state_locked(self, session: Session, username: str, event: Any, event_ts) -> bool:
+        """Upsert the publish state for (username, topic).  Returns True if this is the
+        first time this client has published to this topic (new access grant)."""
+        if getattr(event, "event_type", "") != "Publish":
+            return False
+        topic = getattr(event, "topic", None)
+        if not topic:
+            return False
+        state = session.scalar(
+            select(ClientPublishState).where(
+                ClientPublishState.username == username,
+                ClientPublishState.topic == topic,
+            )
+        )
+        if state is None:
+            session.add(
+                ClientPublishState(
+                    username=username,
+                    topic=topic,
+                    first_seen_at=event_ts,
+                    last_seen_at=event_ts,
+                    is_active=True,
+                    source="clientlogs",
+                )
+            )
+            return True  # New topic — caller should record the access event
+        state.last_seen_at = event_ts
+        state.is_active = True
+        state.source = "clientlogs"
+        return False  # Already known — no event row needed
 
     def _upsert_daily_summary_locked(
         self,
@@ -278,8 +370,7 @@ class SQLAlchemyClientActivityStorage:
     def _prune_locked(self, session: Session) -> None:
         cutoff = normalize_datetime(utc_now() - timedelta(days=self._retention_days))
         cutoff_day = (utc_now() - timedelta(days=self._retention_days)).date()
-        session.execute(delete(ClientSessionEvent).where(ClientSessionEvent.event_ts < cutoff))
-        session.execute(delete(ClientTopicEvent).where(ClientTopicEvent.event_ts < cutoff))
+        session.execute(delete(ClientMQTTEvent).where(ClientMQTTEvent.event_ts < cutoff))
         session.execute(delete(ClientDailyDistinctTopic).where(ClientDailyDistinctTopic.day < cutoff_day))
         session.execute(delete(ClientDailySummary).where(ClientDailySummary.day < cutoff_day))
 
@@ -288,24 +379,38 @@ class SQLAlchemyClientActivityStorage:
         limit = max(1, min(limit, 1000))
         cutoff = normalize_datetime(utc_now() - timedelta(days=days))
         cutoff_day = (utc_now() - timedelta(days=days)).date()
+        _SESSION_TYPES = ("Client Connection", "Client Disconnection", "Auth Failure")
         with self._session_factory() as session:
             registry = session.get(ClientRegistry, username)
             session_rows = session.scalars(
-                select(ClientSessionEvent)
-                .where(ClientSessionEvent.username == username, ClientSessionEvent.event_ts >= cutoff)
-                .order_by(ClientSessionEvent.event_ts.desc())
+                select(ClientMQTTEvent)
+                .where(
+                    ClientMQTTEvent.username == username,
+                    ClientMQTTEvent.event_ts >= cutoff,
+                    ClientMQTTEvent.event_type.in_(_SESSION_TYPES),
+                )
+                .order_by(ClientMQTTEvent.event_ts.desc())
                 .limit(limit)
             ).all()
             topic_rows = session.scalars(
-                select(ClientTopicEvent)
-                .where(ClientTopicEvent.username == username, ClientTopicEvent.event_ts >= cutoff)
-                .order_by(ClientTopicEvent.event_ts.desc())
+                select(ClientMQTTEvent)
+                .where(
+                    ClientMQTTEvent.username == username,
+                    ClientMQTTEvent.event_ts >= cutoff,
+                    ClientMQTTEvent.event_type.in_(["Subscribe", "Publish"]),
+                )
+                .order_by(ClientMQTTEvent.event_ts.desc())
                 .limit(limit)
             ).all()
             subs_rows = session.scalars(
                 select(ClientSubscriptionState)
                 .where(ClientSubscriptionState.username == username)
                 .order_by(ClientSubscriptionState.topic.asc())
+            ).all()
+            publish_state_rows = session.scalars(
+                select(ClientPublishState)
+                .where(ClientPublishState.username == username)
+                .order_by(ClientPublishState.topic.asc())
             ).all()
             summary_rows = session.scalars(
                 select(ClientDailySummary)
@@ -318,6 +423,7 @@ class SQLAlchemyClientActivityStorage:
             "session_events": [self._session_event_to_dict(row) for row in session_rows],
             "topic_events": [self._topic_event_to_dict(row) for row in topic_rows],
             "subscriptions": [self._subscription_to_dict(row) for row in subs_rows],
+            "publish_state": [self._publish_state_to_dict(row) for row in publish_state_rows],
             "daily_summary": [self._daily_summary_to_dict(row) for row in summary_rows],
         }
 
@@ -333,7 +439,7 @@ class SQLAlchemyClientActivityStorage:
         }
 
     @staticmethod
-    def _session_event_to_dict(row: ClientSessionEvent) -> Dict[str, Any]:
+    def _session_event_to_dict(row: ClientMQTTEvent) -> Dict[str, Any]:
         return {
             "id": row.id,
             "username": row.username,
@@ -350,7 +456,7 @@ class SQLAlchemyClientActivityStorage:
         }
 
     @staticmethod
-    def _topic_event_to_dict(row: ClientTopicEvent) -> Dict[str, Any]:
+    def _topic_event_to_dict(row: ClientMQTTEvent) -> Dict[str, Any]:
         return {
             "id": row.id,
             "username": row.username,
@@ -375,6 +481,16 @@ class SQLAlchemyClientActivityStorage:
         }
 
     @staticmethod
+    def _publish_state_to_dict(row: ClientPublishState) -> Dict[str, Any]:
+        return {
+            "topic": row.topic,
+            "first_seen_at": iso_utc(row.first_seen_at),
+            "last_seen_at": iso_utc(row.last_seen_at),
+            "is_active": bool(row.is_active),
+            "source": row.source,
+        }
+
+    @staticmethod
     def _daily_summary_to_dict(row: ClientDailySummary) -> Dict[str, Any]:
         return {
             "id": row.id,
@@ -388,4 +504,111 @@ class SQLAlchemyClientActivityStorage:
             "subscribes": row.subscribes,
             "distinct_publish_topics": row.distinct_publish_topics,
             "distinct_subscribe_topics": row.distinct_subscribe_topics,
+        }
+
+    def get_clients_list(
+        self,
+        page: int = 1,
+        limit: int = 50,
+        search: str = "",
+        exact: bool = False,
+    ) -> Dict[str, Any]:
+        """Return a paginated list of clients with their last recorded event."""
+        limit = max(1, min(limit, 200))
+        page = max(1, page)
+        offset = (page - 1) * limit
+
+        with self._session_factory() as session:
+            # Subquery: use ROW_NUMBER to get exactly one row per username
+            # (most recent event; break timestamp ties with the highest id).
+            rn_subq = (
+                select(
+                    ClientMQTTEvent.username.label("ev_username"),
+                    ClientMQTTEvent.event_type.label("last_event_type"),
+                    ClientMQTTEvent.event_ts.label("last_event_ts"),
+                    ClientMQTTEvent.ip_address.label("last_ip_address"),
+                    ClientMQTTEvent.port.label("last_port"),
+                    ClientMQTTEvent.client_id.label("last_client_id"),
+                    func.row_number().over(
+                        partition_by=ClientMQTTEvent.username,
+                        order_by=[ClientMQTTEvent.event_ts.desc(), ClientMQTTEvent.id.desc()],
+                    ).label("rn"),
+                )
+                .where(ClientMQTTEvent.username.isnot(None))
+                .subquery("rn_subq")
+            )
+
+            latest_event_subq = (
+                select(
+                    rn_subq.c.ev_username,
+                    rn_subq.c.last_event_type,
+                    rn_subq.c.last_event_ts,
+                    rn_subq.c.last_ip_address,
+                    rn_subq.c.last_port,
+                    rn_subq.c.last_client_id,
+                )
+                .where(rn_subq.c.rn == 1)
+                .subquery("latest_event")
+            )
+
+            # Base query: clients with last event
+            base_q = (
+                select(
+                    ClientRegistry.username,
+                    ClientRegistry.textname,
+                    ClientRegistry.disabled,
+                    latest_event_subq.c.last_event_type,
+                    latest_event_subq.c.last_event_ts,
+                    latest_event_subq.c.last_ip_address,
+                    latest_event_subq.c.last_port,
+                    latest_event_subq.c.last_client_id,
+                )
+                .outerjoin(
+                    latest_event_subq,
+                    ClientRegistry.username == latest_event_subq.c.ev_username,
+                )
+                .where(ClientRegistry.deleted_at.is_(None))
+            )
+
+            if search:
+                if exact:
+                    base_q = base_q.where(ClientRegistry.username == search)
+                else:
+                    base_q = base_q.where(ClientRegistry.username.ilike(f"%{search}%"))
+
+            total = session.scalar(
+                select(func.count()).select_from(base_q.subquery("count_q"))
+            ) or 0
+
+            paged_q = (
+                base_q
+                .order_by(
+                    nullslast(latest_event_subq.c.last_event_ts.desc()),
+                    ClientRegistry.username.asc(),
+                )
+                .offset(offset)
+                .limit(limit)
+            )
+
+            rows = session.execute(paged_q).all()
+
+        clients = [
+            {
+                "username": row.username,
+                "textname": row.textname,
+                "disabled": bool(row.disabled),
+                "last_event_type": row.last_event_type,
+                "last_event_ts": iso_utc(row.last_event_ts) if row.last_event_ts else None,
+                "last_ip_address": row.last_ip_address,
+                "last_port": row.last_port,
+                "last_client_id": row.last_client_id,
+            }
+            for row in rows
+        ]
+        return {
+            "clients": clients,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": max(1, (total + limit - 1) // limit),
         }

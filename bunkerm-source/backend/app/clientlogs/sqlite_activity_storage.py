@@ -70,33 +70,30 @@ class SQLiteClientActivityStorage:
                     deleted_at TEXT,
                     last_dynsec_sync_at TEXT NOT NULL
                 );
-                CREATE TABLE IF NOT EXISTS client_session_events (
+                CREATE TABLE IF NOT EXISTS client_mqtt_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT,
-                    client_id TEXT NOT NULL,
+                    event_id TEXT NOT NULL UNIQUE,
                     event_ts TEXT NOT NULL,
                     event_type TEXT NOT NULL,
-                    disconnect_kind TEXT,
-                    reason_code TEXT,
+                    client_id TEXT NOT NULL,
+                    username TEXT,
                     ip_address TEXT,
                     port INTEGER,
                     protocol_level TEXT,
                     clean_session INTEGER,
-                    keep_alive INTEGER
-                );
-                CREATE INDEX IF NOT EXISTS idx_client_session_events_user_ts ON client_session_events(username, event_ts);
-                CREATE TABLE IF NOT EXISTS client_topic_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT,
-                    client_id TEXT NOT NULL,
-                    event_ts TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    topic TEXT NOT NULL,
+                    keep_alive INTEGER,
+                    status TEXT NOT NULL DEFAULT '',
+                    details TEXT NOT NULL DEFAULT '',
+                    topic TEXT,
                     qos INTEGER,
                     payload_bytes INTEGER,
-                    retained INTEGER
+                    retained INTEGER,
+                    disconnect_kind TEXT,
+                    reason_code TEXT,
+                    created_at TEXT NOT NULL
                 );
-                CREATE INDEX IF NOT EXISTS idx_client_topic_events_user_ts ON client_topic_events(username, event_ts);
+                CREATE INDEX IF NOT EXISTS idx_client_mqtt_events_user_ts ON client_mqtt_events(username, event_ts);
+                CREATE INDEX IF NOT EXISTS idx_client_mqtt_events_event_type ON client_mqtt_events(event_type);
                 CREATE TABLE IF NOT EXISTS client_subscription_state (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
@@ -108,6 +105,17 @@ class SQLiteClientActivityStorage:
                     source TEXT NOT NULL DEFAULT 'clientlogs',
                     UNIQUE(username, topic)
                 );
+                CREATE TABLE IF NOT EXISTS client_publish_state (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    source TEXT NOT NULL DEFAULT 'clientlogs',
+                    UNIQUE(username, topic)
+                );
+                CREATE INDEX IF NOT EXISTS idx_client_publish_state_user ON client_publish_state(username);
                 CREATE TABLE IF NOT EXISTS client_daily_summary (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     username TEXT NOT NULL,
@@ -210,50 +218,53 @@ class SQLiteClientActivityStorage:
         with self._lock:
             with self._connect() as conn:
                 day = event_ts.date().isoformat()
-                if event_type in ("Client Connection", "Client Disconnection", "Auth Failure"):
-                    disconnect_kind = getattr(event, "disconnect_kind", None)
-                    reason_code = getattr(event, "reason_code", None)
-                    conn.execute(
-                        """
-                        INSERT INTO client_session_events (
-                            username, client_id, event_ts, event_type, disconnect_kind, reason_code,
-                            ip_address, port, protocol_level, clean_session, keep_alive
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            username,
-                            client_id,
-                            _iso_utc(event_ts),
-                            event_type,
-                            disconnect_kind,
-                            reason_code,
-                            getattr(event, "ip_address", None),
-                            getattr(event, "port", None),
-                            getattr(event, "protocol_level", None),
-                            int(bool(getattr(event, "clean_session", False))) if getattr(event, "clean_session", None) is not None else None,
-                            getattr(event, "keep_alive", None),
-                        ),
-                    )
-                    self._upsert_daily_summary_locked(conn, username, day, event_type, disconnect_kind)
+                now_iso = _iso_utc(_utc_now())
+                event_id = getattr(event, "id", "") or ""
 
-                if event_type in ("Subscribe", "Publish") and getattr(event, "topic", None):
-                    conn.execute(
-                        """
-                        INSERT INTO client_topic_events (
-                            username, client_id, event_ts, event_type, topic, qos, payload_bytes, retained
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            username,
-                            client_id,
-                            _iso_utc(event_ts),
-                            event_type.lower(),
-                            getattr(event, "topic", None),
-                            getattr(event, "qos", None),
-                            getattr(event, "payload_bytes", None),
-                            int(bool(getattr(event, "retained", False))) if getattr(event, "retained", None) is not None else None,
-                        ),
-                    )
+                # Publish events: track publish state only — no event row appended
+                if event_type == "Publish":
+                    if username and getattr(event, "topic", None):
+                        self._upsert_publish_state_locked(conn, username, event)
+                        self._upsert_daily_summary_locked(conn, username, day, event_type, None, topic=getattr(event, "topic", None))
+                    conn.commit()
+                    return
+
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO client_mqtt_events (
+                        event_id, event_ts, event_type, client_id, username,
+                        ip_address, port, protocol_level, clean_session, keep_alive,
+                        status, details, topic, qos, payload_bytes, retained,
+                        disconnect_kind, reason_code, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        _iso_utc(event_ts),
+                        event_type,
+                        client_id,
+                        username,
+                        getattr(event, "ip_address", None),
+                        getattr(event, "port", None),
+                        getattr(event, "protocol_level", None),
+                        int(bool(getattr(event, "clean_session", False))) if getattr(event, "clean_session", None) is not None else None,
+                        getattr(event, "keep_alive", None),
+                        getattr(event, "status", "") or "",
+                        getattr(event, "details", "") or "",
+                        getattr(event, "topic", None),
+                        getattr(event, "qos", None),
+                        getattr(event, "payload_bytes", None),
+                        int(bool(getattr(event, "retained", False))) if getattr(event, "retained", None) is not None else None,
+                        getattr(event, "disconnect_kind", None),
+                        getattr(event, "reason_code", None),
+                        now_iso,
+                    ),
+                )
+
+                if event_type in ("Client Connection", "Client Disconnection", "Auth Failure"):
+                    self._upsert_daily_summary_locked(conn, username, day, event_type, getattr(event, "disconnect_kind", None))
+
+                if event_type == "Subscribe" and getattr(event, "topic", None):
                     if username:
                         self._upsert_subscription_state_locked(conn, username, event)
                         self._upsert_daily_summary_locked(conn, username, day, event_type, None, topic=getattr(event, "topic", None))
@@ -279,6 +290,25 @@ class SQLiteClientActivityStorage:
                 source = excluded.source
             """,
             (username, topic, getattr(event, "qos", None), ts, ts),
+        )
+
+    def _upsert_publish_state_locked(self, conn: sqlite3.Connection, username: str, event: Any) -> None:
+        if getattr(event, "event_type", "") != "Publish":
+            return
+        topic = getattr(event, "topic", None)
+        if not topic:
+            return
+        ts = getattr(event, "timestamp", None) or _iso_utc(_utc_now())
+        conn.execute(
+            """
+            INSERT INTO client_publish_state (username, topic, first_seen_at, last_seen_at, is_active, source)
+            VALUES (?, ?, ?, ?, 1, 'clientlogs')
+            ON CONFLICT(username, topic) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                is_active = 1,
+                source = excluded.source
+            """,
+            (username, topic, ts, ts),
         )
 
     def _upsert_daily_summary_locked(self, conn: sqlite3.Connection, username: str | None, day: str, event_type: str, disconnect_kind: str | None, topic: str | None = None) -> None:
@@ -334,8 +364,7 @@ class SQLiteClientActivityStorage:
     def _prune_locked(self, conn: sqlite3.Connection) -> None:
         cutoff = _iso_utc(_utc_now() - timedelta(days=self._retention_days))
         cutoff_day = (_utc_now() - timedelta(days=self._retention_days)).date().isoformat()
-        conn.execute("DELETE FROM client_session_events WHERE event_ts < ?", (cutoff,))
-        conn.execute("DELETE FROM client_topic_events WHERE event_ts < ?", (cutoff,))
+        conn.execute("DELETE FROM client_mqtt_events WHERE event_ts < ?", (cutoff,))
         conn.execute("DELETE FROM client_daily_distinct_topics WHERE day < ?", (cutoff_day,))
         conn.execute("DELETE FROM client_daily_summary WHERE day < ?", (cutoff_day,))
 
@@ -347,15 +376,19 @@ class SQLiteClientActivityStorage:
         with self._connect() as conn:
             registry = conn.execute("SELECT * FROM client_registry WHERE username = ?", (username,)).fetchone()
             session_rows = conn.execute(
-                "SELECT * FROM client_session_events WHERE username = ? AND event_ts >= ? ORDER BY event_ts DESC LIMIT ?",
+                "SELECT * FROM client_mqtt_events WHERE username = ? AND event_ts >= ? AND event_type IN ('Client Connection', 'Client Disconnection', 'Auth Failure') ORDER BY event_ts DESC LIMIT ?",
                 (username, cutoff, limit),
             ).fetchall()
             topic_rows = conn.execute(
-                "SELECT * FROM client_topic_events WHERE username = ? AND event_ts >= ? ORDER BY event_ts DESC LIMIT ?",
+                "SELECT * FROM client_mqtt_events WHERE username = ? AND event_ts >= ? AND event_type = 'Subscribe' ORDER BY event_ts DESC LIMIT ?",
                 (username, cutoff, limit),
             ).fetchall()
             subs_rows = conn.execute(
                 "SELECT topic, qos, first_seen_at, last_seen_at, is_active, source FROM client_subscription_state WHERE username = ? ORDER BY topic ASC",
+                (username,),
+            ).fetchall()
+            publish_state_rows = conn.execute(
+                "SELECT topic, first_seen_at, last_seen_at, is_active, source FROM client_publish_state WHERE username = ? ORDER BY topic ASC",
                 (username,),
             ).fetchall()
             summary_rows = conn.execute(
@@ -367,7 +400,88 @@ class SQLiteClientActivityStorage:
             "session_events": [dict(row) for row in session_rows],
             "topic_events": [dict(row) for row in topic_rows],
             "subscriptions": [dict(row) for row in subs_rows],
+            "publish_state": [dict(row) for row in publish_state_rows],
             "daily_summary": [dict(row) for row in summary_rows],
+        }
+
+    def get_clients_list(
+        self,
+        page: int = 1,
+        limit: int = 50,
+        search: str = "",
+        exact: bool = False,
+    ) -> Dict[str, Any]:
+        """Return a paginated list of clients with their last recorded event."""
+        limit = max(1, min(limit, 200))
+        page = max(1, page)
+        offset = (page - 1) * limit
+        with self._connect() as conn:
+            # Build search clause
+            if search:
+                if exact:
+                    where_clause = "WHERE cr.deleted_at IS NULL AND cr.username = ?"
+                    params_search = (search,)
+                else:
+                    where_clause = "WHERE cr.deleted_at IS NULL AND cr.username LIKE ?"
+                    params_search = (f"%{search}%",)
+            else:
+                where_clause = "WHERE cr.deleted_at IS NULL"
+                params_search = ()
+
+            count_row = conn.execute(
+                f"""
+                SELECT COUNT(*) FROM client_registry cr {where_clause}
+                """,
+                params_search,
+            ).fetchone()
+            total = count_row[0] if count_row else 0
+
+            rows = conn.execute(
+                f"""
+                SELECT
+                    cr.username, cr.textname, cr.disabled,
+                    last_ev.event_type  AS last_event_type,
+                    last_ev.event_ts    AS last_event_ts,
+                    last_ev.ip_address  AS last_ip_address,
+                    last_ev.port        AS last_port,
+                    last_ev.client_id   AS last_client_id
+                FROM client_registry cr
+                LEFT JOIN (
+                    SELECT cme.username, cme.event_type, cme.event_ts, cme.ip_address, cme.port, cme.client_id
+                    FROM client_mqtt_events cme
+                    INNER JOIN (
+                        SELECT username, MAX(event_ts) AS max_ts
+                        FROM client_mqtt_events
+                        WHERE username IS NOT NULL
+                        GROUP BY username
+                    ) latest ON cme.username = latest.username AND cme.event_ts = latest.max_ts
+                ) last_ev ON last_ev.username = cr.username
+                {where_clause}
+                ORDER BY last_ev.event_ts DESC, cr.username ASC
+                LIMIT ? OFFSET ?
+                """,
+                (*params_search, limit, offset),
+            ).fetchall()
+
+        clients = [
+            {
+                "username": row["username"],
+                "textname": row["textname"],
+                "disabled": bool(row["disabled"]),
+                "last_event_type": row["last_event_type"],
+                "last_event_ts": row["last_event_ts"],
+                "last_ip_address": row["last_ip_address"],
+                "last_port": row["last_port"],
+                "last_client_id": row["last_client_id"],
+            }
+            for row in rows
+        ]
+        return {
+            "clients": clients,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": max(1, (total + limit - 1) // limit),
         }
 
 

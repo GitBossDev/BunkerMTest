@@ -191,8 +191,10 @@ def test_sqlalchemy_client_activity_storage_records_registry_events_and_summary(
 
     assert activity["client"] is not None
     assert len(activity["session_events"]) == 2
-    assert len(activity["topic_events"]) == 2
+    assert len(activity["topic_events"]) == 1  # only Subscribe; Publish goes to publish_state
     assert len(activity["subscriptions"]) == 1
+    assert len(activity["publish_state"]) == 1  # one topic for Publish
+    assert activity["publish_state"][0]["topic"] == "plant/line1/temp"
     assert len(activity["daily_summary"]) == 1
     summary = activity["daily_summary"][0]
     assert summary["connects"] == 1
@@ -244,6 +246,8 @@ def test_sqlalchemy_reporting_storage_builds_broker_reports_timeline_incidents_a
         MQTTEvent(id="6", timestamp=ts(days_ago=1, minutes_offset=16).isoformat(), event_type="Publish", client_id="pump-1-cid", details="Published", status="info", username="pump-1", topic="plant/pump-1/status", qos=1, payload_bytes=128, **_event_kwargs()),
         MQTTEvent(id="7", timestamp=ts(days_ago=1, minutes_offset=18).isoformat(), event_type="Subscribe", client_id="pump-1-cid", details="Subscribed", status="info", username="pump-1", topic="plant/pump-1/cmd", qos=1, **_event_kwargs()),
         MQTTEvent(id="8", timestamp=ts(days_ago=35).isoformat(), event_type="Publish", client_id="pump-1-cid", details="Old publish", status="info", username="pump-1", topic="plant/old", qos=0, payload_bytes=32, **_event_kwargs()),
+        # Old connection event to trigger client_mqtt_events retention check
+        MQTTEvent(id="9", timestamp=ts(days_ago=35).isoformat(), event_type="Client Connection", client_id="pump-1-cid", details="Old connect", status="success", username="pump-1", **_event_kwargs()),
     ]
     for event in events:
         client_storage.record_event(event)
@@ -259,9 +263,10 @@ def test_sqlalchemy_reporting_storage_builds_broker_reports_timeline_incidents_a
     assert daily["totals"]["total_messages_received"] == 125
     assert len(weekly["items"]) >= 1
     assert timeline["client"]["username"] == "pump-1"
-    assert {item["event_type"] for item in timeline["timeline"]} >= {"Client Connection", "Publish", "Subscribe"}
+    # Publish events go to publish_state only; timeline shows connection/sub/auth events
+    assert {item["event_type"] for item in timeline["timeline"]} >= {"Client Connection", "Subscribe"}
     incident_types = {item["incident_type"] for item in incidents["incidents"]}
     assert {"ungraceful_disconnect", "auth_failure", "reconnect_loop"}.issubset(incident_types)
-    assert status["rows_past_retention"]["client_topic_events"] >= 1
+    assert status["rows_past_retention"]["client_mqtt_events"] >= 1
     assert purge["status"] == "purged"
     assert purge["before"]["total_rows_past_retention"] >= purge["after"]["total_rows_past_retention"]

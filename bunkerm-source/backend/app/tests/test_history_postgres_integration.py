@@ -15,10 +15,9 @@ from models.orm import (
     BrokerRuntimeState,
     ClientDailyDistinctTopic,
     ClientDailySummary,
+    ClientMQTTEvent,
     ClientRegistry,
-    ClientSessionEvent,
     ClientSubscriptionState,
-    ClientTopicEvent,
     TopicPublishBucket,
     TopicMessageEvent,
     TopicRegistry,
@@ -210,11 +209,17 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
             assert client_row is not None
             assert client_row.deleted_at is None
 
-            session_events = session.scalars(
-                select(ClientSessionEvent).where(ClientSessionEvent.username == username)
+            mqtt_session_events = session.scalars(
+                select(ClientMQTTEvent).where(
+                    ClientMQTTEvent.username == username,
+                    ClientMQTTEvent.event_type.in_(["Client Connection", "Client Disconnection", "Auth Failure"]),
+                )
             ).all()
-            topic_events = session.scalars(
-                select(ClientTopicEvent).where(ClientTopicEvent.username == username)
+            mqtt_topic_events = session.scalars(
+                select(ClientMQTTEvent).where(
+                    ClientMQTTEvent.username == username,
+                    ClientMQTTEvent.event_type.in_(["Subscribe", "Publish"]),
+                )
             ).all()
             subscription_state = session.scalar(
                 select(ClientSubscriptionState).where(ClientSubscriptionState.username == username)
@@ -229,8 +234,8 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
                 select(ClientDailyDistinctTopic).where(ClientDailyDistinctTopic.username == username)
             ).all()
 
-            assert len(session_events) == 2
-            assert len(topic_events) == 2
+            assert len(mqtt_session_events) == 2
+            assert len(mqtt_topic_events) == 2
             assert subscription_state is not None
             assert subscription_state.topic == topic_a
             assert daily_summary is not None
@@ -243,11 +248,10 @@ def test_phase4_cut2_storages_persist_real_postgres_data():
             assert len(distinct_topics) == 2
     finally:
         with session_factory() as session:
+            session.execute(delete(ClientMQTTEvent).where(ClientMQTTEvent.username == username))
             session.execute(delete(ClientDailyDistinctTopic).where(ClientDailyDistinctTopic.username == username))
             session.execute(delete(ClientDailySummary).where(ClientDailySummary.username == username))
             session.execute(delete(ClientSubscriptionState).where(ClientSubscriptionState.username == username))
-            session.execute(delete(ClientTopicEvent).where(ClientTopicEvent.username == username))
-            session.execute(delete(ClientSessionEvent).where(ClientSessionEvent.username == username))
             session.execute(delete(ClientRegistry).where(ClientRegistry.username == username))
 
             topic_ids = session.scalars(select(TopicRegistry.id).where(TopicRegistry.topic.in_([topic_a, topic_b]))).all()

@@ -16,13 +16,10 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from pydantic import BaseModel
-from sqlalchemy.orm import sessionmaker
 
 from clientlogs.activity_storage import client_activity_storage
 from core.config import settings
-from core.sync_database import create_sync_engine_for_url, session_scope
 from monitor.topic_history_storage import topic_history_storage
-from models.orm import ClientMQTTEvent
 from services import broker_observability_client
 
 
@@ -105,57 +102,16 @@ class MQTTEvent(BaseModel):
     payload_bytes: Optional[int] = None
     retained: Optional[bool] = None
     disconnect_kind: Optional[str] = None
+    reason_code: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
 # Persistencia de eventos en BD
 # ---------------------------------------------------------------------------
 
-_db_engine = None
-_db_session_factory = None
-_db_lock = threading.Lock()
-
-
-def _get_db_session_factory():
-    """Lazy initialization del session factory."""
-    global _db_engine, _db_session_factory
-    if _db_session_factory is None:
-        with _db_lock:
-            if _db_session_factory is None:
-                db_url = settings.resolved_control_plane_database_url
-                _db_engine = create_sync_engine_for_url(db_url)
-                _db_session_factory = sessionmaker(bind=_db_engine, expire_on_commit=False)
-    return _db_session_factory
-
-
 def persist_mqtt_event(event: MQTTEvent) -> None:
-    """Guarda un evento MQTT en la base de datos (async-safe)."""
-    try:
-        session_factory = _get_db_session_factory()
-        with session_scope(session_factory) as session:
-            db_event = ClientMQTTEvent(
-                event_id=event.id,
-                timestamp=datetime.fromisoformat(event.timestamp.replace('Z', '+00:00')) if isinstance(event.timestamp, str) else event.timestamp,
-                event_type=event.event_type,
-                client_id=event.client_id,
-                username=event.username,
-                ip_address=event.ip_address,
-                port=event.port,
-                protocol_level=event.protocol_level,
-                clean_session=event.clean_session,
-                keep_alive=event.keep_alive,
-                status=event.status,
-                details=event.details,
-                topic=event.topic,
-                qos=event.qos,
-                payload_bytes=event.payload_bytes,
-                retained=event.retained,
-                disconnect_kind=event.disconnect_kind,
-            )
-            session.add(db_event)
-            session.commit()
-    except Exception as exc:
-        logger.warning("Failed to persist MQTT event to database: %s", exc)
+    """Deprecated: event persistence is handled by client_activity_storage.record_event()."""
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +259,16 @@ class MQTTMonitor:
         if not m:
             return None
         ts, client_id = m.groups()
+        # Eagerly clear activity trackers when a disconnect is observed, even if
+        # the client was never tracked in connected_clients (e.g. missed CONNECT
+        # event on startup replay).  This prevents the _last_seen fallback in
+        # get_connected_clients() from showing the client as active for up to
+        # 10 minutes after it disconnected.
+        self._last_seen.pop(client_id, None)
+        username_hint = self._client_usernames.get(client_id, "")
+        act_key = self._activity_client_key(client_id, username_hint)
+        self._subscriber_clients_seen.pop(act_key, None)
+        self._publisher_clients_seen.pop(act_key, None)
         if client_id not in self.connected_clients:
             return None
         conn = self.connected_clients[client_id]
@@ -323,7 +289,6 @@ class MQTTMonitor:
             disconnect_kind=disconnect_kind,
         )
         del self.connected_clients[client_id]
-        self._last_seen.pop(client_id, None)
         return event
 
     def parse_auth_failure_log(self, log_line: str) -> Optional[MQTTEvent]:
@@ -519,18 +484,14 @@ class MQTTMonitor:
                         logger.warning("Topic subscribe history persistence failed for topic %s: %s", event.topic, exc)
                 if not replay:
                     client_activity_storage.record_event(event)
-                if not replay:
                     self.events.append(event)
-                    persist_mqtt_event(event)
                 return
 
         event = self.parse_publish_log(line)
         if event is not None:
             if not replay:
                 client_activity_storage.record_event(event)
-            if not replay:
                 self.events.append(event)
-                persist_mqtt_event(event)
             return
 
 
@@ -685,6 +646,13 @@ def monitor_mosquitto_logs() -> None:
                         lastError=None,
                     )
             log_offset = payload.get("next_offset", log_offset)
+            # Skip the full poll interval when there are more batches waiting.
+            # This prevents building a large backlog during high-throughput periods
+            # (e.g. bulk connect/disconnect of 1000+ clients simultaneously).
+            if payload.get("has_more"):
+                time.sleep(0.05)
+            else:
+                time.sleep(poll_interval)
         except broker_observability_client.BrokerObservabilityUnavailable as exc:
             _update_source_status(
                 "logTail",
@@ -693,7 +661,7 @@ def monitor_mosquitto_logs() -> None:
                 lastError=str(exc),
             )
             print(f"Monitoreo de logs vía broker observability no disponible: {exc}")
-        time.sleep(poll_interval)
+            time.sleep(poll_interval)
 
 
 def monitor_mqtt_publishes() -> None:

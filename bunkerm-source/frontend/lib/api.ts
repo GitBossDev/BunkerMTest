@@ -443,6 +443,17 @@ export const clientlogsApi = {
     request(buildUrl(CLIENTLOGS_API_URL, `/enable/${encodeURIComponent(username)}`), { method: 'POST' }),
   disableClient: (username: string) =>
     request(buildUrl(CLIENTLOGS_API_URL, `/disable/${encodeURIComponent(username)}`), { method: 'POST' }),
+  getClients: (params?: { page?: number; limit?: number; search?: string; exact?: boolean }) => {
+    const p = new URLSearchParams()
+    if (params?.page !== undefined) p.set('page', String(params.page))
+    if (params?.limit !== undefined) p.set('limit', String(params.limit))
+    if (params?.search) p.set('search', params.search)
+    if (params?.exact) p.set('exact', 'true')
+    const qs = p.toString()
+    return request<import('@/types').ClientListLogResponse>(buildUrl(CLIENTLOGS_API_URL, qs ? `/clients?${qs}` : '/clients'))
+  },
+  getActivity: (username: string) =>
+    request<import('@/types').ClientActivityResponse>(buildUrl(CLIENTLOGS_API_URL, `/activity/${encodeURIComponent(username)}`)),
 }
 
 export const reportsApi = {

@@ -17,9 +17,8 @@ from models.orm import (
     BrokerMetricTick,
     ClientDailyDistinctTopic,
     ClientDailySummary,
+    ClientMQTTEvent,
     ClientRegistry,
-    ClientSessionEvent,
-    ClientTopicEvent,
     TopicPublishBucket,
     TopicSubscribeBucket,
 )
@@ -48,8 +47,7 @@ class SQLAlchemyReportingStorage:
                     BrokerMetricTick.__table__,
                     BrokerDailySummary.__table__,
                     ClientRegistry.__table__,
-                    ClientSessionEvent.__table__,
-                    ClientTopicEvent.__table__,
+                    ClientMQTTEvent.__table__,
                     ClientDailySummary.__table__,
                     ClientDailyDistinctTopic.__table__,
                     TopicPublishBucket.__table__,
@@ -213,20 +211,14 @@ class SQLAlchemyReportingStorage:
         normalized = {value.strip().lower() for value in (event_types or []) if value and value.strip()}
         with self._session_factory() as session:
             registry = session.get(ClientRegistry, username)
-            session_rows = session.scalars(
-                select(ClientSessionEvent)
-                .where(ClientSessionEvent.username == username, ClientSessionEvent.event_ts >= cutoff)
-                .order_by(ClientSessionEvent.event_ts.desc())
-                .limit(limit)
-            ).all()
-            topic_rows = session.scalars(
-                select(ClientTopicEvent)
-                .where(ClientTopicEvent.username == username, ClientTopicEvent.event_ts >= cutoff)
-                .order_by(ClientTopicEvent.event_ts.desc())
+            all_rows = session.scalars(
+                select(ClientMQTTEvent)
+                .where(ClientMQTTEvent.username == username, ClientMQTTEvent.event_ts >= cutoff)
+                .order_by(ClientMQTTEvent.event_ts.desc())
                 .limit(limit)
             ).all()
 
-        events = [self._session_event_to_timeline(row) for row in session_rows] + [self._topic_event_to_timeline(row) for row in topic_rows]
+        events = [self._mqtt_event_to_timeline(row) for row in all_rows]
         if normalized:
             events = [event for event in events if str(event["event_type"]).lower() in normalized]
         events.sort(key=lambda item: item["event_ts"], reverse=True)
@@ -254,13 +246,20 @@ class SQLAlchemyReportingStorage:
             normalized = {"ungraceful_disconnect", "auth_failure", "reconnect_loop"}
         cutoff = normalize_datetime(utc_now() - timedelta(days=days))
         with self._session_factory() as session:
-            query = select(ClientSessionEvent).where(ClientSessionEvent.event_ts >= cutoff).order_by(ClientSessionEvent.username.asc(), ClientSessionEvent.event_ts.asc())
+            query = (
+                select(ClientMQTTEvent)
+                .where(
+                    ClientMQTTEvent.event_ts >= cutoff,
+                    ClientMQTTEvent.event_type.in_(["Client Connection", "Client Disconnection", "Auth Failure"]),
+                )
+                .order_by(ClientMQTTEvent.username.asc(), ClientMQTTEvent.event_ts.asc())
+            )
             if username:
-                query = query.where(ClientSessionEvent.username == username)
+                query = query.where(ClientMQTTEvent.username == username)
             session_rows = session.scalars(query).all()
 
         incidents: list[dict[str, Any]] = []
-        connects_by_user: dict[str, list[ClientSessionEvent]] = defaultdict(list)
+        connects_by_user: dict[str, list[ClientMQTTEvent]] = defaultdict(list)
         for row in session_rows:
             row_user = row.username or "(unknown)"
             if row.event_type == "Client Connection":
@@ -298,7 +297,7 @@ class SQLAlchemyReportingStorage:
         if "reconnect_loop" in normalized:
             reconnect_window = timedelta(minutes=reconnect_window_minutes)
             for row_user, rows in connects_by_user.items():
-                cluster: list[ClientSessionEvent] = []
+                cluster: list[ClientMQTTEvent] = []
                 for row in rows:
                     if not cluster:
                         cluster = [row]
@@ -327,7 +326,7 @@ class SQLAlchemyReportingStorage:
             "total": len(incidents),
         }
 
-    def _build_reconnect_incident(self, username: str, rows: Sequence[ClientSessionEvent]) -> dict[str, Any]:
+    def _build_reconnect_incident(self, username: str, rows: Sequence[ClientMQTTEvent]) -> dict[str, Any]:
         return {
             "incident_type": "reconnect_loop",
             "username": username,
@@ -350,8 +349,7 @@ class SQLAlchemyReportingStorage:
         counts = {
             "broker_metric_ticks": self._count_older_than(BrokerMetricTick.__tablename__, BrokerMetricTick, BrokerMetricTick.ts, broker_raw_cutoff),
             "broker_daily_summary": self._count_older_than(BrokerDailySummary.__tablename__, BrokerDailySummary, BrokerDailySummary.day, broker_daily_cutoff),
-            "client_session_events": self._count_older_than(ClientSessionEvent.__tablename__, ClientSessionEvent, ClientSessionEvent.event_ts, client_cutoff),
-            "client_topic_events": self._count_older_than(ClientTopicEvent.__tablename__, ClientTopicEvent, ClientTopicEvent.event_ts, client_cutoff),
+            "client_mqtt_events": self._count_older_than(ClientMQTTEvent.__tablename__, ClientMQTTEvent, ClientMQTTEvent.event_ts, client_cutoff),
             "client_daily_summary": self._count_older_than(ClientDailySummary.__tablename__, ClientDailySummary, ClientDailySummary.day, client_day_cutoff),
             "client_daily_distinct_topics": self._count_older_than(ClientDailyDistinctTopic.__tablename__, ClientDailyDistinctTopic, ClientDailyDistinctTopic.day, client_day_cutoff),
             "topic_publish_buckets": self._count_older_than(TopicPublishBucket.__tablename__, TopicPublishBucket, TopicPublishBucket.bucket_start, topic_cutoff),
@@ -379,8 +377,7 @@ class SQLAlchemyReportingStorage:
         with session_scope(self._session_factory) as session:
             self._delete_older_than(session, BrokerMetricTick.__tablename__, BrokerMetricTick, BrokerMetricTick.ts, broker_raw_cutoff)
             self._delete_older_than(session, BrokerDailySummary.__tablename__, BrokerDailySummary, BrokerDailySummary.day, broker_daily_cutoff)
-            self._delete_older_than(session, ClientSessionEvent.__tablename__, ClientSessionEvent, ClientSessionEvent.event_ts, client_cutoff)
-            self._delete_older_than(session, ClientTopicEvent.__tablename__, ClientTopicEvent, ClientTopicEvent.event_ts, client_cutoff)
+            self._delete_older_than(session, ClientMQTTEvent.__tablename__, ClientMQTTEvent, ClientMQTTEvent.event_ts, client_cutoff)
             self._delete_older_than(session, ClientDailySummary.__tablename__, ClientDailySummary, ClientDailySummary.day, client_day_cutoff)
             self._delete_older_than(session, ClientDailyDistinctTopic.__tablename__, ClientDailyDistinctTopic, ClientDailyDistinctTopic.day, client_day_cutoff)
             self._delete_older_than(session, TopicPublishBucket.__tablename__, TopicPublishBucket, TopicPublishBucket.bucket_start, topic_cutoff)
@@ -426,7 +423,7 @@ class SQLAlchemyReportingStorage:
         }
 
     @staticmethod
-    def _session_event_to_timeline(row: ClientSessionEvent) -> dict[str, Any]:
+    def _mqtt_event_to_timeline(row: ClientMQTTEvent) -> dict[str, Any]:
         return {
             "event_ts": iso_utc(row.event_ts),
             "event_type": row.event_type,
@@ -438,25 +435,6 @@ class SQLAlchemyReportingStorage:
             "keep_alive": row.keep_alive,
             "disconnect_kind": row.disconnect_kind,
             "reason_code": row.reason_code,
-            "topic": None,
-            "qos": None,
-            "payload_bytes": None,
-            "retained": None,
-        }
-
-    @staticmethod
-    def _topic_event_to_timeline(row: ClientTopicEvent) -> dict[str, Any]:
-        return {
-            "event_ts": iso_utc(row.event_ts),
-            "event_type": "Publish" if row.event_type == "publish" else "Subscribe",
-            "client_id": row.client_id,
-            "ip_address": None,
-            "port": None,
-            "protocol_level": None,
-            "clean_session": None,
-            "keep_alive": None,
-            "disconnect_kind": None,
-            "reason_code": None,
             "topic": row.topic,
             "qos": row.qos,
             "payload_bytes": row.payload_bytes,
