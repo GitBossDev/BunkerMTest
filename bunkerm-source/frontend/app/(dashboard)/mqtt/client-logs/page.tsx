@@ -1,21 +1,37 @@
 'use client'
 
+// ── REDESIGNED CLIENT LOGS PAGE ───────────────────────────────────────────────
+// Shows a paginated client list (50/page) with last interaction per client.
+// Clicking a row opens a detail modal (session events, subscriptions, publish topics).
+// Export button lives inside the modal, not on the main page.
+
 import React, { useCallback, useEffect, useState } from 'react'
-import { ChevronDown, Radio, RefreshCw, Send, ShieldAlert, Wifi, WifiOff } from 'lucide-react'
+import {
+  Ban, ChevronDown, ChevronLeft, ChevronRight, FileText, MoreHorizontal,
+  Radio, RefreshCw, Search, Send, ShieldAlert, Wifi, WifiOff,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { clientlogsApi } from '@/lib/api'
 import { exportLogs, type ExportFormat } from '@/lib/export-logs'
 import { formatAbsoluteTime } from '@/lib/timeUtils'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Table,
   TableBody,
@@ -24,10 +40,29 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { MQTTEvent } from '@/types'
+import type {
+  ClientActivityResponse,
+  ClientListLogResponse,
+  ClientLogRow,
+} from '@/types'
 
-function EventBadge({ event }: { event: MQTTEvent }) {
-  switch (event.event_type) {
+const PAGE_SIZE = 50
+
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function buildPageNumbers(current: number, total: number): (number | '...')[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const pages: (number | '...')[] = [1]
+  if (current > 3) pages.push('...')
+  for (let p = Math.max(2, current - 1); p <= Math.min(total - 1, current + 1); p++) pages.push(p)
+  if (current < total - 2) pages.push('...')
+  pages.push(total)
+  return pages
+}
+
+function EventTypeBadge({ type }: { type: string | null }) {
+  if (!type) return <span className="text-muted-foreground">—</span>
+  switch (type) {
     case 'Client Connection':
       return (
         <div className="flex items-center gap-1.5">
@@ -64,212 +99,449 @@ function EventBadge({ event }: { event: MQTTEvent }) {
         </div>
       )
     default:
-      return <Badge variant="secondary" className="text-xs">{event.event_type}</Badge>
+      return <Badge variant="secondary" className="text-xs">{type}</Badge>
   }
 }
 
-const EVENT_TYPES = [
-  'Client Connection',
-  'Client Disconnection',
-  'Auth Failure',
-  'Subscribe',
-  'Publish',
-] as const
+// ── Client Detail Modal ───────────────────────────────────────────────────────
+
+interface ClientDetailModalProps {
+  username: string | null
+  open: boolean
+  onOpenChange: (v: boolean) => void
+}
+
+function ClientDetailModal({ username, open, onOpenChange }: ClientDetailModalProps) {
+  const [activity, setActivity] = useState<ClientActivityResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || !username) {
+      setActivity(null)
+      return
+    }
+    setLoading(true)
+    clientlogsApi.getActivity(username)
+      .then(setActivity)
+      .catch(() => toast.error(`Failed to load activity for "${username}"`))
+      .finally(() => setLoading(false))
+  }, [open, username])
+
+  const exportActivity = (format: ExportFormat) => {
+    if (!activity) return
+    const rows = [
+      ...activity.session_events.map(e => ({
+        event_ts: e.event_ts,
+        event_type: e.event_type,
+        client_id: e.client_id,
+        ip_address: e.ip_address ?? '',
+        port: String(e.port ?? ''),
+        detail: e.disconnect_kind ?? e.reason_code ?? '',
+        topic: '',
+      })),
+      ...activity.topic_events.map(e => ({
+        event_ts: e.event_ts,
+        event_type: e.event_type,
+        client_id: e.client_id,
+        ip_address: '',
+        port: '',
+        detail: '',
+        topic: e.topic ?? '',
+      })),
+    ].sort((a, b) => b.event_ts.localeCompare(a.event_ts))
+
+    exportLogs(
+      rows,
+      format,
+      [
+        { header: 'Timestamp', value: r => r.event_ts },
+        { header: 'Event', value: r => r.event_type },
+        { header: 'Client ID', value: r => r.client_id },
+        { header: 'IP Address', value: r => r.port ? `${r.ip_address}:${r.port}` : r.ip_address },
+        { header: 'Topic', value: r => r.topic },
+        { header: 'Detail', value: r => r.detail },
+      ],
+      `client-activity-${username}`
+    )
+  }
+
+  const client = activity?.client
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[760px] max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle>
+            Activity
+            {username && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                — {username}
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <RefreshCw className="h-5 w-5 animate-spin mr-2" />
+            Loading...
+          </div>
+        ) : activity ? (
+          <ScrollArea className="flex-1 overflow-auto pr-1">
+            <div className="space-y-5 pb-2">
+              {/* Client info */}
+              {client && (client.disabled || client.textname) && (
+                <div className="flex flex-wrap gap-2 items-center">
+                  {client.disabled && (
+                    <Badge variant="destructive" className="gap-1">
+                      <Ban className="h-3 w-3" />
+                      Disabled
+                    </Badge>
+                  )}
+                  {client.textname && (
+                    <span className="text-sm text-muted-foreground">
+                      Display name: <span className="text-foreground">{client.textname}</span>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Session events */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Session Events
+                  <span className="ml-1.5 text-muted-foreground font-normal">
+                    ({activity.session_events.length})
+                  </span>
+                </Label>
+                {activity.session_events.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No session events recorded.</p>
+                ) : (
+                  <div className="rounded-md border text-sm">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="h-8 text-xs">Timestamp</TableHead>
+                          <TableHead className="h-8 text-xs">Event</TableHead>
+                          <TableHead className="h-8 text-xs">Client ID</TableHead>
+                          <TableHead className="h-8 text-xs">IP Address</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {activity.session_events.map((ev) => (
+                          <TableRow key={ev.id}>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap py-1.5">
+                              {formatAbsoluteTime(ev.event_ts)}
+                            </TableCell>
+                            <TableCell className="py-1.5">
+                              <EventTypeBadge type={ev.event_type} />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs py-1.5">{ev.client_id}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground py-1.5">
+                              {ev.ip_address ? `${ev.ip_address}:${ev.port}` : '—'}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+
+              {/* Topic events (subscribe + publish unified) */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Topic Events
+                  <span className="ml-1.5 text-muted-foreground font-normal">
+                    ({activity.topic_events.length})
+                  </span>
+                </Label>
+                {activity.topic_events.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No topic events recorded.</p>
+                ) : (
+                  <div className="rounded-md border text-sm">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="h-8 text-xs">Timestamp</TableHead>
+                          <TableHead className="h-8 text-xs">Type</TableHead>
+                          <TableHead className="h-8 text-xs">Topic</TableHead>
+                          <TableHead className="h-8 text-xs">QoS</TableHead>
+                          <TableHead className="h-8 text-xs">Bytes</TableHead>
+                          <TableHead className="h-8 text-xs">Retained</TableHead>
+                          <TableHead className="h-8 text-xs">Client ID</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {activity.topic_events.map((ev) => (
+                          <TableRow key={ev.id}>
+                            <TableCell className="text-xs text-muted-foreground whitespace-nowrap py-1.5">
+                              {formatAbsoluteTime(ev.event_ts)}
+                            </TableCell>
+                            <TableCell className="py-1.5">
+                              <EventTypeBadge type={ev.event_type} />
+                            </TableCell>
+                            <TableCell className="font-mono text-xs py-1.5 max-w-[180px] truncate" title={ev.topic ?? undefined}>
+                              {ev.topic ?? '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground py-1.5">
+                              {ev.qos != null ? `QoS${ev.qos}` : '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground py-1.5">
+                              {ev.payload_bytes != null ? `${ev.payload_bytes} B` : '—'}
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground py-1.5">
+                              {ev.retained != null ? (ev.retained ? 'Yes' : 'No') : '—'}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground py-1.5">{ev.client_id}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </ScrollArea>
+        ) : null}
+
+        <DialogFooter className="gap-2 pt-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!activity || (activity.session_events.length === 0 && activity.topic_events.length === 0)}
+              >
+                Export
+                <ChevronDown className="h-3 w-3 ml-1" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => exportActivity('csv')}>CSV</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => exportActivity('txt')}>TXT</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ClientLogsPage() {
-  const [events, setEvents] = useState<MQTTEvent[]>([])
+  const [data, setData] = useState<ClientListLogResponse | null>(null)
   const [search, setSearch] = useState('')
-  const [activeTypes, setActiveTypes] = useState<Set<string>>(new Set(EVENT_TYPES))
+  const [exactSearch, setExactSearch] = useState(false)
+  const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(false)
 
-  const fetchEvents = useCallback(async () => {
+  const [selectedUsername, setSelectedUsername] = useState<string | null>(null)
+  const [modalOpen, setModalOpen] = useState(false)
+
+  const fetchClients = useCallback(async (currentPage: number, currentSearch: string, currentExact: boolean) => {
     setIsLoading(true)
     try {
-      const data = await clientlogsApi.getEvents()
-      setEvents((data.events ?? []) as MQTTEvent[])
+      const res = await clientlogsApi.getClients({
+        page: currentPage,
+        limit: PAGE_SIZE,
+        search: currentSearch || undefined,
+        exact: currentExact || undefined,
+      })
+      setData(res)
     } catch {
-      toast.error('Failed to fetch client events')
+      toast.error('Failed to fetch client list')
     } finally {
       setIsLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchEvents()
-    const interval = setInterval(fetchEvents, 10_000)
-    return () => clearInterval(interval)
-  }, [fetchEvents])
+    fetchClients(page, search, exactSearch)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, search, exactSearch])
 
-  function toggleType(type: string) {
-    setActiveTypes((prev) => {
-      const next = new Set(prev)
-      if (next.has(type)) {
-        // Keep at least one active
-        if (next.size > 1) next.delete(type)
-      } else {
-        next.add(type)
-      }
-      return next
-    })
+  const handleSearch = (value: string) => {
+    setSearch(value)
+    setPage(1)
   }
 
-  const downloadEvents = (format: ExportFormat) => {
-    exportLogs(
-      filtered,
-      format,
-      [
-        { header: 'Timestamp',  value: e => e.timestamp },
-        { header: 'Event',      value: e => e.event_type },
-        { header: 'Username',   value: e => e.username },
-        { header: 'Client ID',  value: e => e.client_id },
-        { header: 'Topic',      value: e => e.topic ?? '' },
-        { header: 'IP Address', value: e => `${e.ip_address}:${e.port}` },
-        { header: 'Protocol',   value: e => e.protocol_level },
-        { header: 'Details',    value: e => e.details ?? '' },
-      ],
-      'client-logs'
-    )
+  const handleExactToggle = (checked: boolean) => {
+    setExactSearch(checked)
+    setPage(1)
   }
 
-  const filtered = events.filter((e) => {
-    if (!activeTypes.has(e.event_type)) return false
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      e.username?.toLowerCase().includes(q) ||
-      e.client_id?.toLowerCase().includes(q) ||
-      e.event_type?.toLowerCase().includes(q) ||
-      e.ip_address?.toLowerCase().includes(q) ||
-      e.topic?.toLowerCase().includes(q)
-    )
-  })
+  const handleRowClick = (username: string) => {
+    setSelectedUsername(username)
+    setModalOpen(true)
+  }
+
+  const clients = data?.clients ?? []
+  const total = data?.total ?? 0
+  const totalPages = data?.pages ?? 1
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Client Logs</h1>
-          <p className="text-muted-foreground text-sm">MQTT client events: connections, subscriptions, publishes and auth failures</p>
+          <p className="text-muted-foreground text-sm">
+            MQTT clients — use the View Logs button to inspect activity per client
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={filtered.length === 0}>
-                Export
-                <ChevronDown className="h-3 w-3 ml-1" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => downloadEvents('csv')}>CSV</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => downloadEvents('txt')}>TXT</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={fetchEvents} disabled={isLoading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => fetchClients(page, search, exactSearch)}
+          disabled={isLoading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <Input
-          placeholder="Filter by username, client ID, IP, topic..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-        <Badge variant="secondary">{filtered.length} event{filtered.length !== 1 ? 's' : ''}</Badge>
+      {/* Search + exact toggle */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Search clients..."
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            className="pl-9 w-64"
+          />
+        </div>
+        <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={exactSearch}
+            onChange={(e) => handleExactToggle(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-muted accent-primary"
+          />
+          Exact
+        </label>
+        <Badge variant="secondary">{total} client{total !== 1 ? 's' : ''}</Badge>
       </div>
 
-      {/* Event type filter chips */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground mr-1">Filter:</span>
-        {EVENT_TYPES.map((type) => {
-          const active = activeTypes.has(type)
-          const chipMeta: Record<string, { icon: React.ReactNode; color: string }> = {
-            'Client Connection':    { icon: <Wifi className="h-3 w-3" />,        color: 'text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30' },
-            'Client Disconnection': { icon: <WifiOff className="h-3 w-3" />,     color: 'text-red-600 border-red-300 bg-red-50 dark:bg-red-950/30' },
-            'Auth Failure':         { icon: <ShieldAlert className="h-3 w-3" />, color: 'text-red-700 border-red-400 bg-red-100 dark:bg-red-950/40' },
-            'Subscribe':            { icon: <Radio className="h-3 w-3" />,       color: 'text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/30' },
-            'Publish':              { icon: <Send className="h-3 w-3" />,        color: 'text-orange-600 border-orange-300 bg-orange-50 dark:bg-orange-950/30' },
-          }
-          const meta = chipMeta[type]
-          return (
-            <button
-              key={type}
-              onClick={() => toggleType(type)}
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                active
-                  ? meta.color
-                  : 'text-muted-foreground border-border bg-background opacity-40 hover:opacity-70'
-              }`}
+      {/* Table */}
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Username</TableHead>
+              <TableHead>Last Activity</TableHead>
+              <TableHead>Timestamp</TableHead>
+              <TableHead>IP Address</TableHead>
+              <TableHead>Client ID</TableHead>
+              <TableHead className="w-[120px]"></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {clients.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                  {isLoading ? 'Loading...' : search ? 'No clients match your search.' : 'No clients found.'}
+                </TableCell>
+              </TableRow>
+            ) : (
+              clients.map((row: ClientLogRow) => (
+                <TableRow key={row.username} className="hover:bg-muted/50">
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {row.username}
+                      {row.disabled && (
+                        <Badge variant="destructive" className="text-xs gap-1">
+                          <Ban className="h-2.5 w-2.5" />
+                          Disabled
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <EventTypeBadge type={row.last_event_type} />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {row.last_event_ts ? formatAbsoluteTime(row.last_event_ts) : '—'}
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {row.last_ip_address
+                      ? `${row.last_ip_address}${row.last_port ? `:${row.last_port}` : ''}`
+                      : '—'}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {row.last_client_id ?? '—'}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs gap-1.5"
+                      onClick={() => handleRowClick(row.username)}
+                    >
+                      <FileText className="h-3.5 w-3.5" />
+                      View Logs
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>
+          {clients.length > 0
+            ? `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`
+            : `${total} client${total !== 1 ? 's' : ''}`}
+        </span>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost" size="sm" className="h-7 px-2"
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page <= 1}
             >
-              {meta.icon}
-              {type}
-            </button>
-          )
-        })}
-        {activeTypes.size < EVENT_TYPES.length && (
-          <button
-            onClick={() => setActiveTypes(new Set(EVENT_TYPES))}
-            className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
-          >
-            Show all
-          </button>
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </Button>
+            {buildPageNumbers(page, totalPages).map((p, i) =>
+              p === '...' ? (
+                <span key={`ellipsis-${i}`} className="flex items-center justify-center h-7 w-7 text-muted-foreground">
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </span>
+              ) : (
+                <Button
+                  key={p}
+                  variant={p === page ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-7 w-7 p-0 text-xs"
+                  onClick={() => setPage(p as number)}
+                >
+                  {p}
+                </Button>
+              )
+            )}
+            <Button
+              variant="ghost" size="sm" className="h-7 px-2"
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         )}
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium">MQTT Events</CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="rounded-md border-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Timestamp</TableHead>
-                  <TableHead>Event</TableHead>
-                  <TableHead>Username</TableHead>
-                  <TableHead>Client ID</TableHead>
-                  <TableHead>Topic</TableHead>
-                  <TableHead>IP Address</TableHead>
-                  <TableHead>Protocol</TableHead>
-                  <TableHead>Details</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                      {isLoading ? 'Loading events...' : 'No events found.'}
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filtered.map((event) => (
-                    <TableRow key={event.id}>
-                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatAbsoluteTime(event.timestamp)}
-                      </TableCell>
-                      <TableCell>
-                        <EventBadge event={event} />
-                      </TableCell>
-                      <TableCell className="font-medium">{event.username || '—'}</TableCell>
-                      <TableCell className="font-mono text-xs">{event.client_id || '—'}</TableCell>
-                      <TableCell className="font-mono text-xs text-muted-foreground">
-                        {event.topic ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-xs">{event.ip_address}:{event.port}</TableCell>
-                      <TableCell className="text-xs">{event.protocol_level}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{event.details}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+      <ClientDetailModal
+        username={selectedUsername}
+        open={modalOpen}
+        onOpenChange={setModalOpen}
+      />
     </div>
   )
 }

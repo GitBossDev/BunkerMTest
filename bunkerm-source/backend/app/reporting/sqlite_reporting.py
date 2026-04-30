@@ -219,26 +219,12 @@ class SQLiteReportingStorage:
         normalized = {value.strip().lower() for value in (event_types or []) if value and value.strip()}
         with self._connect() as conn:
             registry = conn.execute("SELECT * FROM client_registry WHERE username = ?", (username,)).fetchone()
-            session_rows = conn.execute(
+            all_rows = conn.execute(
                 """
                 SELECT event_ts, event_type, client_id, ip_address, port, protocol_level,
                        clean_session, keep_alive, disconnect_kind, reason_code,
-                       NULL AS topic, NULL AS qos, NULL AS payload_bytes, NULL AS retained
-                FROM client_session_events
-                WHERE username = ? AND event_ts >= ?
-                ORDER BY event_ts DESC
-                LIMIT ?
-                """,
-                (username, cutoff, limit),
-            ).fetchall()
-            topic_rows = conn.execute(
-                """
-                SELECT event_ts,
-                       CASE event_type WHEN 'publish' THEN 'Publish' ELSE 'Subscribe' END AS event_type,
-                       client_id, NULL AS ip_address, NULL AS port, NULL AS protocol_level,
-                       NULL AS clean_session, NULL AS keep_alive, NULL AS disconnect_kind, NULL AS reason_code,
                        topic, qos, payload_bytes, retained
-                FROM client_topic_events
+                FROM client_mqtt_events
                 WHERE username = ? AND event_ts >= ?
                 ORDER BY event_ts DESC
                 LIMIT ?
@@ -246,7 +232,7 @@ class SQLiteReportingStorage:
                 (username, cutoff, limit),
             ).fetchall()
 
-        events = [dict(row) for row in session_rows] + [dict(row) for row in topic_rows]
+        events = [dict(row) for row in all_rows]
         if normalized:
             events = [event for event in events if str(event["event_type"]).lower() in normalized]
         events.sort(key=lambda item: item["event_ts"], reverse=True)
@@ -280,8 +266,9 @@ class SQLiteReportingStorage:
                 f"""
                 SELECT username, client_id, event_ts, event_type, disconnect_kind, reason_code,
                        ip_address, port
-                FROM client_session_events
+                FROM client_mqtt_events
                 WHERE {where_sql}
+                  AND event_type IN ('Client Connection', 'Client Disconnection', 'Auth Failure')
                 ORDER BY username ASC, event_ts ASC
                 """,
                 tuple(params),
@@ -385,8 +372,7 @@ class SQLiteReportingStorage:
             counts = {
                 "broker_metric_ticks": self._count_older_than(conn, "broker_metric_ticks", "ts", broker_raw_cutoff),
                 "broker_daily_summary": self._count_older_than(conn, "broker_daily_summary", "day", broker_daily_cutoff),
-                "client_session_events": self._count_older_than(conn, "client_session_events", "event_ts", client_cutoff),
-                "client_topic_events": self._count_older_than(conn, "client_topic_events", "event_ts", client_cutoff),
+                "client_mqtt_events": self._count_older_than(conn, "client_mqtt_events", "event_ts", client_cutoff),
                 "client_daily_summary": self._count_older_than(conn, "client_daily_summary", "day", client_day_cutoff),
                 "client_daily_distinct_topics": self._count_older_than(conn, "client_daily_distinct_topics", "day", client_day_cutoff),
                 "topic_publish_buckets": self._count_older_than(conn, "topic_publish_buckets", "bucket_start", topic_cutoff),
@@ -414,8 +400,7 @@ class SQLiteReportingStorage:
         with self._connect() as conn:
             self._delete_older_than(conn, "broker_metric_ticks", "ts", broker_raw_cutoff)
             self._delete_older_than(conn, "broker_daily_summary", "day", broker_daily_cutoff)
-            self._delete_older_than(conn, "client_session_events", "event_ts", client_cutoff)
-            self._delete_older_than(conn, "client_topic_events", "event_ts", client_cutoff)
+            self._delete_older_than(conn, "client_mqtt_events", "event_ts", client_cutoff)
             self._delete_older_than(conn, "client_daily_summary", "day", client_day_cutoff)
             self._delete_older_than(conn, "client_daily_distinct_topics", "day", client_day_cutoff)
             self._delete_older_than(conn, "topic_publish_buckets", "bucket_start", topic_cutoff)

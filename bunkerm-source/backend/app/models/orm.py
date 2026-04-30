@@ -13,24 +13,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from core.database import Base
 
 
-class HistoricalTick(Base):
-    """
-    Tick de 60 segundos para métricas de bytes y mensajes del broker.
-    Reemplaza la estructura JSON en data/historical_data.txt.
-    """
-    __tablename__ = "historical_ticks"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    # Timestamp UTC del tick
-    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
-    # Bytes acumulados desde el inicio del broker (valores absolutos del $SYS)
-    bytes_received: Mapped[int] = mapped_column(Integer, default=0)
-    bytes_sent: Mapped[int] = mapped_column(Integer, default=0)
-    # Delta de mensajes en este intervalo de 60 s
-    messages_received_delta: Mapped[int] = mapped_column(Integer, default=0)
-    messages_sent_delta: Mapped[int] = mapped_column(Integer, default=0)
-
-
 class AlertConfigEntry(Base):
     """
     Par clave-valor para almacenar la configuración de alertas del monitor.
@@ -300,6 +282,22 @@ class ClientSubscriptionState(Base):
     source: Mapped[str] = mapped_column(String(64), default="clientlogs")
 
 
+class ClientPublishState(Base):
+    """Observed publish topic state by client and topic (one record per username/topic)."""
+    __tablename__ = "client_publish_state"
+    __table_args__ = (
+        UniqueConstraint("username", "topic", name="uq_client_publish_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    topic: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    source: Mapped[str] = mapped_column(String(64), default="clientlogs")
+
+
 class ClientDailySummary(Base):
     """Daily audit summary by username for quick reporting."""
     __tablename__ = "client_daily_summary"
@@ -382,7 +380,7 @@ class ClientMQTTEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     event_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    event_ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     client_id: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
     username: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
@@ -398,6 +396,7 @@ class ClientMQTTEvent(Base):
     payload_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     retained: Mapped[bool | None] = mapped_column(nullable=True)
     disconnect_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
 

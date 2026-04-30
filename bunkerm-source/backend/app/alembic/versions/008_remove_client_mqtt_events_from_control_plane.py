@@ -1,19 +1,23 @@
-"""Add client MQTT events table for persistent event logging.
+"""Remove client_mqtt_events from control-plane DB.
 
-Revision ID: 005_client_mqtt_events
-Revises: 004_broker_reconcile_secret
-Create Date: 2026-04-22
+The table moves to the history/reporting database as the canonical event
+store.  Data in the control-plane copy is abandoned (acceptable: the table
+was written only by the backend process and the history DB already contains
+the authoritative event log after migration 002_consolidate_client_events).
+
+Revision ID: 008_rm_client_mqtt_events
+Revises: 007_client_mqtt_events
+Create Date: 2026-04-29
 """
 
 from __future__ import annotations
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy import inspect
 
-
-revision = "005_client_mqtt_events"
-down_revision = "004_broker_reconcile_secret"
+revision = "008_rm_client_mqtt_events"
+down_revision = "007_client_mqtt_events"
 branch_labels = None
 depends_on = None
 
@@ -21,9 +25,21 @@ depends_on = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
-    if "client_mqtt_events" in set(inspector.get_table_names()):
+    if "client_mqtt_events" not in set(inspector.get_table_names()):
         return
+    # Drop indexes before table (some backends require this)
+    for idx in ("ix_client_mqtt_events_topic", "ix_client_mqtt_events_username",
+                "ix_client_mqtt_events_client_id", "ix_client_mqtt_events_event_type",
+                "ix_client_mqtt_events_timestamp", "ix_client_mqtt_events_event_id"):
+        try:
+            op.drop_index(idx, table_name="client_mqtt_events")
+        except Exception:
+            pass
+    op.drop_table("client_mqtt_events")
 
+
+def downgrade() -> None:
+    """Recreate the table in control-plane DB (empty, without migrated data)."""
     op.create_table(
         "client_mqtt_events",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -55,13 +71,3 @@ def upgrade() -> None:
     op.create_index("ix_client_mqtt_events_client_id", "client_mqtt_events", ["client_id"], unique=False)
     op.create_index("ix_client_mqtt_events_username", "client_mqtt_events", ["username"], unique=False)
     op.create_index("ix_client_mqtt_events_topic", "client_mqtt_events", ["topic"], unique=False)
-
-
-def downgrade() -> None:
-    op.drop_index("ix_client_mqtt_events_topic", table_name="client_mqtt_events")
-    op.drop_index("ix_client_mqtt_events_username", table_name="client_mqtt_events")
-    op.drop_index("ix_client_mqtt_events_client_id", table_name="client_mqtt_events")
-    op.drop_index("ix_client_mqtt_events_event_type", table_name="client_mqtt_events")
-    op.drop_index("ix_client_mqtt_events_timestamp", table_name="client_mqtt_events")
-    op.drop_index("ix_client_mqtt_events_event_id", table_name="client_mqtt_events")
-    op.drop_table("client_mqtt_events")

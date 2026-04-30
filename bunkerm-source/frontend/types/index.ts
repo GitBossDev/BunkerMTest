@@ -275,8 +275,89 @@ export interface MQTTEvent {
   username: string
   ip_address: string
   port: number
-  topic?: string   // Subscribe and Publish events
-  qos?: number     // Subscribe and Publish events
+  topic?: string   // Subscribe events
+  qos?: number     // Subscribe events
+}
+
+// Client Logs — paginated client list (one row per client, last event summary)
+export interface ClientLogRow {
+  username: string
+  textname: string | null
+  disabled: boolean
+  last_event_type: string | null
+  last_event_ts: string | null
+  last_ip_address: string | null
+  last_port: number | null
+  last_client_id: string | null
+}
+
+export interface ClientListLogResponse {
+  clients: ClientLogRow[]
+  total: number
+  page: number
+  limit: number
+  pages: number
+}
+
+// Client activity detail (used inside the modal)
+export interface ClientSessionEvent {
+  id: number
+  username: string
+  client_id: string
+  event_ts: string
+  event_type: string
+  disconnect_kind: string | null
+  reason_code: string | null
+  ip_address: string | null
+  port: number | null
+  protocol_level: string | null
+  clean_session: boolean | null
+  keep_alive: number | null
+}
+
+export interface ClientTopicEvent {
+  id: number
+  username: string
+  client_id: string
+  event_ts: string
+  event_type: string
+  topic: string | null
+  qos: number | null
+  payload_bytes: number | null
+  retained: boolean | null
+}
+
+export interface ClientSubscriptionState {
+  topic: string
+  qos: number | null
+  first_seen_at: string
+  last_seen_at: string
+  is_active: boolean
+  source: string
+}
+
+export interface ClientPublishState {
+  topic: string
+  first_seen_at: string
+  last_seen_at: string
+  is_active: boolean
+  source: string
+}
+
+export interface ClientActivityResponse {
+  client: {
+    username: string
+    textname: string | null
+    disabled: boolean
+    created_at: string
+    deleted_at: string | null
+    last_dynsec_sync_at: string
+  } | null
+  session_events: ClientSessionEvent[]
+  topic_events: ClientTopicEvent[]
+  subscriptions: ClientSubscriptionState[]
+  publish_state: ClientPublishState[]
+  daily_summary: unknown[]
 }
 
 export interface BrokerDailyReportItem {

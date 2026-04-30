@@ -344,7 +344,7 @@ class Programa
             ClientId = $"greenhouse-publisher-{id_cliente}",
             Username = useSharedCredentials ? user : id_cliente.ToString(),
             Password = useSharedCredentials ? pass : clientPassword,
-            KeepAliveSeconds = 3,
+            KeepAliveSeconds = 60,
         };
 
         // Crear helper MQTT y conectar al broker

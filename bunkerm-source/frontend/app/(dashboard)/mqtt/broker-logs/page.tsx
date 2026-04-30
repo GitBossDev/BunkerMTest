@@ -47,23 +47,34 @@ export default function BrokerLogsPage() {
   const [logs, setLogs] = useState<LogLine[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  const fetchLogs = useCallback(async () => {
-    setIsLoading(true)
+  const fetchLogs = useCallback(async (silent = false) => {
+    if (!silent) setIsLoading(true)
     try {
       const data = await monitorApi.getBrokerLogs()
       const lines = (data.logs || []).map(parseLine)
       setLogs(lines)
-    } catch {
-      toast.error('Failed to fetch broker logs')
+      setFetchError(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setFetchError(msg)
+      if (!silent) toast.error('Failed to fetch broker logs')
     } finally {
-      setIsLoading(false)
+      if (!silent) setIsLoading(false)
     }
   }, [])
 
+  // Initial load
   useEffect(() => {
     fetchLogs()
+  }, [fetchLogs])
+
+  // Auto-refresh every 30 seconds — retries silently even after an error
+  useEffect(() => {
+    const id = setInterval(() => fetchLogs(true), 30_000)
+    return () => clearInterval(id)
   }, [fetchLogs])
 
   useEffect(() => {
@@ -116,12 +127,25 @@ export default function BrokerLogsPage() {
               <DropdownMenuItem onClick={() => downloadLogs('txt')}>TXT</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={fetchLogs} disabled={isLoading}>
+          <Button variant="outline" size="sm" onClick={() => fetchLogs()} disabled={isLoading}>
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
         </div>
       </div>
+
+      {fetchError && (
+        <div className="flex items-center gap-3 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <RefreshCw className="h-4 w-4 shrink-0" />
+          <span className="flex-1">
+            Could not reach the broker observability service. Retrying automatically every 30 s.
+            <span className="ml-1 opacity-70">({fetchError})</span>
+          </span>
+          <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => fetchLogs()}>
+            Retry now
+          </Button>
+        </div>
+      )}
 
       <Card>
         <CardHeader className="pb-2">
